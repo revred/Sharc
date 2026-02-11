@@ -1,0 +1,108 @@
+namespace Sharc.Core;
+
+/// <summary>
+/// Decodes SQLite record format into typed column values.
+/// </summary>
+public interface IRecordDecoder
+{
+    /// <summary>
+    /// Decodes a record payload into a sequence of column values.
+    /// </summary>
+    /// <param name="payload">The raw record bytes (header + body).</param>
+    /// <returns>Decoded column values.</returns>
+    ColumnValue[] DecodeRecord(ReadOnlySpan<byte> payload);
+
+    /// <summary>
+    /// Gets the number of columns in the record without fully decoding it.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <returns>Number of columns.</returns>
+    int GetColumnCount(ReadOnlySpan<byte> payload);
+
+    /// <summary>
+    /// Decodes a single column from a record without decoding the entire record.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="columnIndex">0-based column index.</param>
+    /// <returns>The decoded column value.</returns>
+    ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex);
+}
+
+/// <summary>
+/// Represents a decoded SQLite column value with its storage class.
+/// Designed for minimal allocation: integers and floats stored inline.
+/// </summary>
+public readonly struct ColumnValue
+{
+    /// <summary>The SQLite serial type that encoded this value.</summary>
+    public long SerialType { get; }
+
+    /// <summary>The storage class of this value.</summary>
+    public ColumnStorageClass StorageClass { get; }
+
+    // Inline storage for non-heap types
+    private readonly long _intValue;
+    private readonly double _floatValue;
+    private readonly ReadOnlyMemory<byte> _blobValue;
+
+    private ColumnValue(long serialType, ColumnStorageClass storageClass,
+        long intValue = 0, double floatValue = 0, ReadOnlyMemory<byte> blobValue = default)
+    {
+        SerialType = serialType;
+        StorageClass = storageClass;
+        _intValue = intValue;
+        _floatValue = floatValue;
+        _blobValue = blobValue;
+    }
+
+    /// <summary>Creates a NULL column value.</summary>
+    public static ColumnValue Null() => new(0, ColumnStorageClass.Null);
+
+    /// <summary>Creates an integer column value.</summary>
+    public static ColumnValue Integer(long serialType, long value) =>
+        new(serialType, ColumnStorageClass.Integer, intValue: value);
+
+    /// <summary>Creates a float column value.</summary>
+    public static ColumnValue Float(double value) =>
+        new(7, ColumnStorageClass.Float, floatValue: value);
+
+    /// <summary>Creates a text column value.</summary>
+    public static ColumnValue Text(long serialType, ReadOnlyMemory<byte> utf8Bytes) =>
+        new(serialType, ColumnStorageClass.Text, blobValue: utf8Bytes);
+
+    /// <summary>Creates a blob column value.</summary>
+    public static ColumnValue Blob(long serialType, ReadOnlyMemory<byte> data) =>
+        new(serialType, ColumnStorageClass.Blob, blobValue: data);
+
+    /// <summary>Gets the integer value. Only valid when StorageClass is Integer.</summary>
+    public long AsInt64() => _intValue;
+
+    /// <summary>Gets the float value. Only valid when StorageClass is Float.</summary>
+    public double AsDouble() => _floatValue;
+
+    /// <summary>Gets the raw bytes. Valid for Text and Blob storage classes.</summary>
+    public ReadOnlyMemory<byte> AsBytes() => _blobValue;
+
+    /// <summary>Gets the text value as a string. Only valid when StorageClass is Text.</summary>
+    public string AsString() => System.Text.Encoding.UTF8.GetString(_blobValue.Span);
+
+    /// <summary>Returns true if this is a NULL value.</summary>
+    public bool IsNull => StorageClass == ColumnStorageClass.Null;
+}
+
+/// <summary>
+/// SQLite storage classes.
+/// </summary>
+public enum ColumnStorageClass
+{
+    /// <summary>NULL value.</summary>
+    Null = 0,
+    /// <summary>Signed integer (1, 2, 3, 4, 6, or 8 bytes).</summary>
+    Integer = 1,
+    /// <summary>IEEE 754 64-bit float.</summary>
+    Float = 2,
+    /// <summary>UTF-8 text string.</summary>
+    Text = 3,
+    /// <summary>Binary large object.</summary>
+    Blob = 4
+}
