@@ -4,7 +4,9 @@ obj/
 *.suo
 .vs/
 *.DotSettings.user
+artifacts/
 BenchmarkDotNet.Artifacts/
 TestResults/
 nul
 .claude/
+secrets/

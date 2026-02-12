@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 
@@ -139,7 +139,7 @@ internal static class CreateTableParser
         // Check remaining for constraints
         string remaining = pos < definition.Length ? definition[pos..] : "";
 
-        bool isPrimaryKey = IsIntegerPrimaryKey(definition, name, declaredType);
+        bool isPrimaryKey = definition.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase);
         bool isNotNull = remaining.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase);
 
         return new ColumnInfo
@@ -150,13 +150,6 @@ internal static class CreateTableParser
             IsPrimaryKey = isPrimaryKey,
             IsNotNull = isNotNull || isPrimaryKey // PK is implicitly NOT NULL
         };
-    }
-
-    private static bool IsIntegerPrimaryKey(string fullDef, string name, string declaredType)
-    {
-        // INTEGER PRIMARY KEY is the rowid alias pattern
-        return declaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase) &&
-               fullDef.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadIdentifier(string s, ref int pos)

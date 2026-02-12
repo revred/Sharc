@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -50,6 +50,9 @@ public sealed class SharcDataReader : IDisposable
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
 
+    // Row-level filter support
+    private readonly ResolvedFilter[]? _filters;
+
     // Lazy decode support for projection path — avoids decoding TEXT/BLOB
     // body data until the caller actually requests the value.
     private readonly long[]? _serialTypes;
@@ -59,7 +62,8 @@ public sealed class SharcDataReader : IDisposable
 
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
         IReadOnlyList<ColumnInfo> columns, int[]? projection,
-        IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null)
+        IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null,
+        ResolvedFilter[]? filters = null)
     {
         _cursor = cursor;
         _recordDecoder = recordDecoder;
@@ -67,6 +71,7 @@ public sealed class SharcDataReader : IDisposable
         _projection = projection;
         _bTreeReader = bTreeReader;
         _tableIndexes = tableIndexes;
+        _filters = filters;
 
         // Pre-allocate a reusable buffer for decoding â€” avoids per-row ColumnValue[] allocation
         _reusableBuffer = new ColumnValue[columns.Count];
@@ -237,15 +242,38 @@ public sealed class SharcDataReader : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_cursor.MoveNext())
+        while (_cursor.MoveNext())
         {
-            _currentRow = null;
-            _lazyMode = false;
-            return false;
+            DecodeCurrentRow();
+
+            if (_filters is null || EvaluateFilters())
+                return true;
         }
 
-        DecodeCurrentRow();
-        return true;
+        _currentRow = null;
+        _lazyMode = false;
+        return false;
+    }
+
+    private bool EvaluateFilters()
+    {
+        // Filters require full column values. When in lazy mode (projection),
+        // force a full decode so filter columns are available.
+        if (_lazyMode)
+        {
+            _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            _lazyMode = false;
+        }
+
+        // Resolve INTEGER PRIMARY KEY alias — the record stores NULL,
+        // but the real value is the b-tree rowid.
+        if (_rowidAliasOrdinal >= 0 && _reusableBuffer![_rowidAliasOrdinal].IsNull)
+        {
+            _reusableBuffer[_rowidAliasOrdinal] =
+                ColumnValue.FromInt64(4, _cursor.RowId);
+        }
+
+        return FilterEvaluator.MatchesAll(_filters!, _reusableBuffer!);
     }
 
     private void DecodeCurrentRow()

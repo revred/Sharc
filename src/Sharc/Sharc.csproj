@@ -9,5 +9,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\Sharc.Crypto\Sharc.Crypto.csproj" />
   </ItemGroup>
 </Project>
