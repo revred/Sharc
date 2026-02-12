@@ -49,7 +49,8 @@ public sealed class SharcDataReader : IDisposable
     // Lazy decode support for projection path — avoids decoding TEXT/BLOB
     // body data until the caller actually requests the value.
     private readonly long[]? _serialTypes;
-    private readonly bool[]? _decodedFlags;
+    private readonly int[]? _decodedGenerations;
+    private int _decodedGeneration;
     private bool _lazyMode;
 
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
@@ -67,7 +68,7 @@ public sealed class SharcDataReader : IDisposable
         if (projection != null)
         {
             _serialTypes = new long[columns.Count];
-            _decodedFlags = new bool[columns.Count];
+            _decodedGenerations = new int[columns.Count];
         }
 
         // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
@@ -95,6 +96,33 @@ public sealed class SharcDataReader : IDisposable
     public long RowId => _cursor.RowId;
 
     /// <summary>
+    /// Seeks directly to the row with the specified rowid using B-tree binary search.
+    /// This is dramatically faster than sequential scan for point lookups.
+    /// After a successful seek, use typed accessors (GetInt64, GetString, etc.) to read values.
+    /// After Seek, you can call Read() to continue sequential iteration from the seek position.
+    /// </summary>
+    /// <param name="rowId">The rowid to seek to.</param>
+    /// <returns>True if an exact match was found; false otherwise.</returns>
+    public bool Seek(long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        bool found = _cursor.Seek(rowId);
+
+        if (found)
+        {
+            DecodeCurrentRow();
+        }
+        else
+        {
+            _currentRow = null;
+            _lazyMode = false;
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// Advances the reader to the next row.
     /// </summary>
     /// <returns>True if there is another row; false if the end has been reached.</returns>
@@ -109,12 +137,19 @@ public sealed class SharcDataReader : IDisposable
             return false;
         }
 
+        DecodeCurrentRow();
+        return true;
+    }
+
+    private void DecodeCurrentRow()
+    {
         if (_projection != null)
         {
             // Lazy decode: only read serial types (varint parsing, no body decode).
             // Actual column values are decoded on first access via GetColumnValue().
             _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!);
-            Array.Clear(_decodedFlags!);
+            // Increment generation instead of Array.Clear — O(1) vs O(N)
+            _decodedGeneration++;
             _lazyMode = true;
         }
         else
@@ -125,7 +160,6 @@ public sealed class SharcDataReader : IDisposable
         }
 
         _currentRow = _reusableBuffer;
-        return true;
     }
 
     /// <summary>
@@ -256,10 +290,10 @@ public sealed class SharcDataReader : IDisposable
                 "Column ordinal is out of range.");
 
         // Lazy decode: decode this column on first access (projection path only)
-        if (_lazyMode && !_decodedFlags![actualOrdinal])
+        if (_lazyMode && _decodedGenerations![actualOrdinal] != _decodedGeneration)
         {
             _reusableBuffer![actualOrdinal] = _recordDecoder.DecodeColumn(_cursor.Payload, actualOrdinal);
-            _decodedFlags[actualOrdinal] = true;
+            _decodedGenerations[actualOrdinal] = _decodedGeneration;
         }
 
         var value = _currentRow[actualOrdinal];

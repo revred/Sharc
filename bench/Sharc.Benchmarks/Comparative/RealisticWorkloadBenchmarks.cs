@@ -63,7 +63,7 @@ public class RealisticWorkloadBenchmarks
         _conn?.Dispose();
     }
 
-    // --- 8.1: "Load user profile" — single user lookup + decode all fields ---
+    // --- 8.1: "Load user profile" — single user lookup via B-tree Seek ---
 
     [Benchmark]
     [BenchmarkCategory("LoadProfile")]
@@ -71,16 +71,13 @@ public class RealisticWorkloadBenchmarks
     {
         using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
         using var reader = db.CreateReader("users");
-        // Scan to find user with id=5000 (Sharc has no point lookup yet, uses scan)
-        while (reader.Read())
+        // B-tree Seek: binary search descent to rowid 5000
+        if (reader.Seek(5000))
         {
-            if (reader.GetInt64(0) == 5000)
-            {
-                _ = reader.GetString(1); // username
-                _ = reader.GetString(2); // email
-                if (!reader.IsNull(3)) _ = reader.GetString(3); // bio
-                return reader.GetInt64(4); // age
-            }
+            _ = reader.GetString(1); // username
+            _ = reader.GetString(2); // email
+            if (!reader.IsNull(3)) _ = reader.GetString(3); // bio
+            return reader.GetInt64(4); // age
         }
         return -1;
     }
@@ -192,7 +189,7 @@ public class RealisticWorkloadBenchmarks
         return totalColumns;
     }
 
-    // --- 8.7: "Batch lookup" — 500 user scans (simulates batch lookups without index seek) ---
+    // --- 8.7: "Batch read" — first 500 users with column projection ---
 
     [Benchmark]
     [BenchmarkCategory("BatchLookup")]
@@ -200,14 +197,13 @@ public class RealisticWorkloadBenchmarks
     {
         using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
         long sum = 0;
-        // Read first 500 rows
-        using var reader = db.CreateReader("users");
+        using var reader = db.CreateReader("users", "id", "username", "age");
         int count = 0;
         while (reader.Read() && count < 500)
         {
             sum += reader.GetInt64(0);
             _ = reader.GetString(1);
-            sum += reader.GetInt64(4);
+            sum += reader.GetInt64(2);
             count++;
         }
         return sum;
