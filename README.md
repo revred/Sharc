@@ -1,17 +1,10 @@
 # Sharc
 
+[![CI](https://github.com/user/sharc/actions/workflows/ci.yml/badge.svg)](https://github.com/user/sharc/actions/workflows/ci.yml)
+
 **Read SQLite files at memory speed. Pure C#. Zero native dependencies. Zero GC pressure.**
 
 Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blobs — without a single native library. No `sqlite3.dll`. No P/Invoke. No connection strings. Just bytes in, typed values out.
-
-## The Pitch
-
-```text
-Sharc header parse:     8.5 ns    0 B allocated
-SQLite PRAGMA query:  61,746 ns   2,048 B allocated
-                      ─────────
-                      7,254x faster. ∞ allocation ratio.
-```
 
 ## Quick Start
 
@@ -23,7 +16,7 @@ using var db = SharcDatabase.Open("mydata.db");
 
 // List tables
 foreach (var table in db.Schema.Tables)
-    Console.WriteLine(table.Name);
+    Console.WriteLine($"{table.Name}: {table.Columns.Count} columns");
 
 // Read rows
 using var reader = db.CreateReader("users");
@@ -42,92 +35,134 @@ using var db = SharcDatabase.OpenMemory(dbBytes);
 ```
 
 ```csharp
-// Encrypted — AES-256-GCM + Argon2id, page-level
-using var db = SharcDatabase.Open("encrypted.sharc", new SharcOpenOptions
+// Column projection — decode only the columns you need
+using var reader = db.CreateReader("users", "id", "username");
+while (reader.Read())
 {
-    Encryption = new SharcEncryptionOptions { Password = "my-secret" }
-});
+    long id = reader.GetInt64(0);
+    string name = reader.GetString(1);
+}
 ```
+
+## Sharc vs Microsoft.Data.Sqlite
+
+| Capability | Sharc | Microsoft.Data.Sqlite |
+| --- | :---: | :---: |
+| **Read SQLite format 3** | Yes | Yes |
+| **SQL queries / joins / aggregates** | No | Yes |
+| **Write / INSERT / UPDATE / DELETE** | No | Yes |
+| **Native dependencies** | **None** | Requires `e_sqlite3` native binary |
+| **Sequential table scan** | **2x-6x faster** | Baseline |
+| **Schema introspection** | **1.4x-7.8x faster** | Baseline |
+| **Config / metadata reads** | **14.5x faster** | Baseline |
+| **Concurrent parallel readers** | **Thread-safe** (12 tests, up to 16 threads) | Thread-safe |
+| **In-memory buffer (ReadOnlyMemory)** | **Native** | Requires connection string hack |
+| **Column projection** | Yes | Yes (via SELECT) |
+| **Integer PRIMARY KEY (rowid alias)** | Yes | Yes |
+| **Overflow page assembly** | Yes | Yes |
+| **WITHOUT ROWID tables** | No (throws UnsupportedFeatureException) | Yes |
+| **WAL mode** | No (throws UnsupportedFeatureException) | Yes |
+| **Virtual tables (FTS, R-Tree)** | No | Yes |
+| **UTF-16 text encoding** | No | Yes |
+| **Indexed point lookups** | No (sequential scan only) | Yes |
+| **Page I/O backends** | Memory, File, MemoryMapped, Cached | Internal |
+| **Encryption** | Planned (AES-256-GCM) | Via SQLCipher |
+| **GC pressure (primitive ops)** | **0 B allocated** | Allocates per call |
+| **Target framework** | .NET 10.0+ | .NET Standard 2.0+ |
+| **Package size** | ~50 KB (managed only) | ~2 MB (with native binaries) |
 
 ## Benchmarks: Sharc vs Native SQLite
 
-.NET 10.0, BenchmarkDotNet v0.15.8, Windows 11, i7-11800H. SQLite uses `Microsoft.Data.Sqlite` v9.0.4 with pre-opened connections and pre-prepared commands — the fairest possible setup for SQLite.
+Benchmarks use the canonical database from [BenchmarkSpec.md](PRC/BenchmarkSpec.md): config (100 rows), users (10K rows), events (100K rows), reports (1K rows with 22 columns). SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared commands — the fairest possible setup.
 
-> Alloc Ratio = SQLite alloc / Sharc alloc. **∞** means Sharc allocated nothing.
+> Run benchmarks yourself: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`
 
-### Metadata Retrieval
+<!-- BENCHMARK_RESULTS_START -->
 
-Sharc reads the 100-byte header struct directly. SQLite parses SQL, crosses the interop boundary, and boxes result objects.
+> **Environment:** Windows 11, Intel i7-11800H (8C/16T), .NET 10.0.2, BenchmarkDotNet ShortRun.
+> SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
 
-| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc | Alloc Ratio |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Get page size | 7.6 ns | 716 ns | **94x** | 0 B | 408 B | **∞** |
-| Get all metadata | 8.4 ns | 61,746 ns | **7,254x** | 0 B | 2,048 B | **∞** |
-| Batch 100 header reads | 756 ns | 76,143 ns | **101x** | 0 B | 40,800 B | **∞** |
-| Validate magic bytes | 0.3 ns | — | — | 0 B | — | — |
+### Category 2: Schema & Metadata
 
-Every metadata operation: zero bytes allocated, every time. The header is a `readonly struct` parsed from a span — nothing touches the managed heap.
+Sharc reads the 100-byte header struct and walks the sqlite_schema b-tree directly. No SQL parsing, no interop boundary.
 
-### Database Open
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| List all table names | 16.9 μs | 32.5 μs | **1.9x** | 40 KB | 872 B |
+| Get column info (1 table) | 16.4 μs | 30.0 μs | **1.8x** | 40 KB | 696 B |
+| Get column info (all tables) | 14.3 μs | 131.7 μs | **9.2x** | 40 KB | 4.0 KB |
+| Batch 100 schema reads | 1,484 μs | 2,930 μs | **2.0x** | 3.9 MB | 85 KB |
 
-Three modes: in-memory (pre-loaded bytes), memory-mapped (OS lazy-pages), file-backed (RandomAccess on-demand). SQLite's 156 ns open is connection pooling — cached native handles, not a real file open.
+### Category 4: Sequential Scan
 
-| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc | Alloc Ratio |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Open from memory | 8.5 ns | 156 ns | **18x** | 0 B | 368 B | **∞** |
-| Open memory-mapped | 101 us | 156 ns | 0.002x | 488 B | 368 B | 0.75x |
-| Open file (RandomAccess) | 86 us | 156 ns | 0.002x | 4,248 B | 376 B | 0.09x |
-| Batch 50 opens (memory) | 379 ns | 7,602 ns | **20x** | 0 B | 18,400 B | **∞** |
+Full table scans — ETL, exports, analytics. Buffer reuse + projection-aware decoding = massive throughput gains.
 
-File-backed opens pay ~86-101 us of OS kernel cost — that's `CreateFileW` / `mmap`, not .NET overhead. SQLite sidesteps this entirely via pooling. Sharc wins it back quickly: at 5 ns/page (mmap) vs SQLite's 19,751 ns/row, the open cost amortizes after a handful of reads. Where Sharc opens from memory, there's no contest — 18x faster, zero allocation.
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Scan 100 rows (config) | 25.3 μs | 60.0 μs | **2.4x** | 66 KB | 16 KB |
+| Scan 10K rows, all types (users) | 7.4 ms | 28.2 ms | **3.8x** | 34.1 MB | 18.0 MB |
+| Scan 10K rows, 2 columns (projection) | 1.2 ms | 2.9 ms | **2.5x** | 1.1 MB | 454 KB |
+| Scan 100K rows (events) | 9.9 ms | 56.9 ms | **5.7x** | 253 KB | 688 B |
+| Scan 100K rows, integers only | 6.3 ms | 31.0 ms | **4.9x** | 253 KB | 704 B |
+| Scan 1K rows, 22 columns (reports) | 569 μs | 3,389 μs | **6.0x** | 808 KB | 495 KB |
 
-### Page & Row Reading
+### Category 6: Data Type Decoding
 
-This is the core of what Sharc is built for. Span slices into raw page data vs SQL round-trips through a query engine.
+Isolates decode cost per type. `ReadOnlySpan<byte>` + struct returns + buffer reuse vs boxed objects and string allocation.
 
-| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc | Alloc Ratio |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Parse 1 page (memory) | 3.8 ns | 19,751 ns | **5,198x** | 0 B | 408 B | **∞** |
-| Parse 1 page (mmap) | 5.2 ns | 19,751 ns | **3,798x** | 0 B | 408 B | **∞** |
-| Parse 1 page (file) | 1,226 ns | 19,751 ns | **16x** | 0 B | 408 B | **∞** |
-| Scan all pages (memory) | 1,539 ns | 6,074,498 ns | **3,948x** | 0 B | 1.2 MB | **∞** |
-| Scan all pages (mmap) | 2,781 ns | 6,074,498 ns | **2,184x** | 0 B | 1.2 MB | **∞** |
-| Scan all pages (file) | 433,875 ns | 6,074,498 ns | **14x** | 0 B | 1.2 MB | **∞** |
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Decode 100K integers | 3.6 ms | 16.3 ms | **4.5x** | 253 KB | 384 B |
+| Decode 10K doubles | 884 μs | 12.5 ms | **14.1x** | 278 KB | 696 B |
+| Decode 10K short strings | 1.0 ms | 1.9 ms | **1.9x** | 1.1 MB | 454 KB |
+| Decode 10K medium strings | 1.8 ms | 13.5 ms | **7.4x** | 6.1 MB | 3.8 MB |
+| Decode 10K NULL checks | 1.2 ms | 11.9 ms | **9.9x** | 2.3 MB | 384 B |
+| Decode mixed row (all 9 cols) | 7.3 ms | 27.4 ms | **3.8x** | 34.1 MB | 18.0 MB |
 
-Even the slowest Sharc path (file, one syscall per page) is 14x faster than SQLite — and still allocates zero bytes for the actual page reads. The mmap and memory paths are three to four orders of magnitude faster.
+### Category 8: Realistic Workloads
 
-### The GC Scorecard
+Composite benchmarks simulating what real applications actually do.
 
-Heap bytes per operation. Where the ratio is **∞**, Sharc's hot path lives entirely on the stack — the garbage collector has nothing to do.
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Open + read 1 row + close | 15.7 μs | 27.1 μs | **1.7x** | 43 KB | 1.1 KB |
+| Export 10K users to CSV | 7.3 ms | 20.2 ms | **2.8x** | 18.9 MB | 2.9 MB |
+| Schema migration check | 15.1 μs | 155.9 μs | **10.3x** | 40 KB | 4.4 KB |
+| Batch read 500 users | 198 μs | 234 μs | **1.2x** | 986 KB | 23 KB |
+| Read 10 config values | 14.7 μs | 263.3 μs | **17.9x** | 42 KB | 11 KB |
 
-| Operation | Sharc | SQLite | Alloc Ratio |
-| --- | ---: | ---: | ---: |
-| Parse database header | 0 B | 408 B | **∞** |
-| Get all metadata (5 fields) | 0 B | 2,048 B | **∞** |
-| Open (memory) | 0 B | 368 B | **∞** |
-| Open (memory-mapped) | 488 B | 368 B | 0.75x |
-| Open (file, RandomAccess) | 4,248 B | 376 B | 0.09x |
-| Read page (mmap) | 0 B | 408 B | **∞** |
-| Read page (file) | 0 B | 408 B | **∞** |
-| Full table scan (10K rows) | 0 B | 1,200,384 B | **∞** |
-| Batch 50 opens (memory) | 0 B | 18,400 B | **∞** |
+### Category 9: GC Pressure Under Load
 
-The two rows where SQLite allocates less are file-backed opens — Sharc pays for a page-sized read buffer and OS handle structures. Once open, every subsequent read is zero-alloc. The full table scan tells the real story: Sharc scans 10,000 rows for exactly **0 bytes** of heap pressure. SQLite allocates **1.17 MB** for the same work.
+Sustained load across hundreds of thousands of rows. Buffer reuse eliminates per-row allocation pressure.
 
-> `ReadOnlySpan<byte>` + `readonly struct` + `[AggressiveInlining]` — the GC never wakes up. Memory-mapped access adds 488 B for the OS mapping handle. FilePageSource allocates one page buffer on open and reuses it for the lifetime of the source.
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sustained scan 300K rows (events x3) | 31.2 ms | 77.7 ms | **2.5x** | 760 KB | 2.1 KB |
+| Sustained string scan 50K rows (users x5) | 8.3 ms | 71.6 ms | **8.6x** | 10.8 MB | 5.3 MB |
+| Scan all 4 tables | 14.8 ms | 28.7 ms | **1.9x** | 16.5 MB | 3.9 KB |
+| Sustained int scan 1M rows (events x10) | 73.1 ms | 334.5 ms | **4.6x** | 2.5 MB | 7.0 KB |
 
-### When to Use Which
+### Primitive Operations (Sharc-only, no SQLite equivalent)
 
-| Use Case | Winner |
-| --- | --- |
-| SQL queries, joins, aggregates | Microsoft.Data.Sqlite |
-| Write operations | Microsoft.Data.Sqlite |
-| High-throughput metadata extraction | **Sharc** — 7,254x faster |
-| Bulk row scanning | **Sharc** — 3,948x faster, 0 B alloc |
-| Embedded / no native deps | **Sharc** |
-| Encrypted database reading | **Sharc** |
-| In-memory buffer processing | **Sharc** |
-| GC-sensitive workloads | **Sharc** — alloc ratio: **∞** |
+These measure raw decode speed at the byte level — no interop overhead to compare against.
+
+| Operation | Time | Allocated |
+| --- | ---: | ---: |
+| Parse database header (100 bytes) | 9.4 ns | **0 B** |
+| Validate magic string | 1.0 ns | **0 B** |
+| Parse b-tree page header | 3.5 ns | **0 B** |
+| Decode 100 varints | 253 ns | **0 B** |
+| Classify 100 serial types | 122 ns | **0 B** |
+| Read 5 inline column values | 5.9 ns | **0 B** |
+
+**Notes:**
+
+- Sharc reuses `ColumnValue[]` buffers across rows (zero per-row array allocation) and uses `stackalloc` for serial type headers.
+- Column projection decodes only requested columns, skipping unwanted text/blob fields entirely.
+- Sustained integer scan: 1M rows with only 2.5 MB allocated (vs 422 MB before optimization).
+- Run locally: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`
+
+<!-- BENCHMARK_RESULTS_END -->
 
 ## Architecture
 
@@ -141,7 +176,6 @@ B-Tree              BTreeReader -> BTreeCursor -> CellParser
 Page I/O            IPageSource: Memory | Mmap | File | Cached
                     IPageTransform: Identity | Decrypting
 Primitives          VarintDecoder, SerialTypeCodec
-Crypto              Argon2id KDF, AES-256-GCM AEAD
 ```
 
 **What Sharc does NOT do:** execute SQL, write databases, or handle virtual tables. For full SQL, use `Microsoft.Data.Sqlite`. Sharc complements it for the cases where you need raw speed and zero dependencies.
@@ -152,9 +186,10 @@ Crypto              Argon2id KDF, AES-256-GCM AEAD
 src/Sharc/             -- Public API (SharcDatabase, SharcDataReader, Schema)
 src/Sharc.Core/        -- Internal: page I/O, b-tree, record decoding, primitives
 src/Sharc.Crypto/      -- Encryption: KDF, AEAD ciphers, key management
-tests/Sharc.Tests/     -- Unit tests (xUnit + FluentAssertions)
-bench/Sharc.Benchmarks/ -- BenchmarkDotNet performance suite
-ProductContext/        -- Architecture docs, specs, and decisions
+tests/Sharc.Tests/     -- Unit tests (xUnit)
+tests/Sharc.IntegrationTests/ -- End-to-end tests with real SQLite databases
+bench/Sharc.Benchmarks/ -- BenchmarkDotNet comparative suite
+PRC/                   -- Architecture docs, specs, and decisions
 ```
 
 ## Build & Test
@@ -162,41 +197,42 @@ ProductContext/        -- Architecture docs, specs, and decisions
 ```bash
 dotnet build                                  # build everything
 dotnet test                                   # run all tests
+dotnet test tests/Sharc.Tests                 # unit tests only
+dotnet test tests/Sharc.IntegrationTests      # integration tests only
 dotnet run -c Release --project bench/Sharc.Benchmarks  # run benchmarks
 ```
 
 ### Test Status
 
 ```text
-154 passed, 4 skipped, 0 failed
+447 passed, 0 skipped, 0 failed
+  - Unit tests:        393
+  - Integration tests:  54 (includes 12 concurrency/parallel tests)
 ```
 
-The 4 skipped tests are **TDD RED-phase** tests for `SharcDatabase.Open` / `OpenMemory` — the high-level API that wires together page sources, B-tree traversal, and record decoding. These tests define the expected behavior *before* the implementation exists. When Milestone 4 begins, the `Skip` attribute is removed, the tests go RED, and implementation proceeds until GREEN. See `ProductContext/TestStrategy.md` for the full test layer approach.
-
-## Development: Test-Driven, Always
-
-Sharc is built with strict TDD. Every feature follows the same cycle:
-
-1. **RED** — write tests that define the expected behavior. They fail.
-2. **GREEN** — write the minimum implementation to make them pass.
-3. **REFACTOR** — clean up, optimize, verify all tests still pass.
-
-This is non-negotiable. No implementation code exists without a corresponding test. The test suite is the specification.
+### Milestone Progress
 
 ```text
-Milestone 1 (Primitives)     ████████████████ COMPLETE — 154 tests GREEN
-Milestone 2 (B-Tree)         ░░░░░░░░░░░░░░░░ tests written, Skip until impl
-Milestone 3 (Records)        ░░░░░░░░░░░░░░░░ tests written, Skip until impl
-Milestone 4 (Public API)     ░░░░░░░░░░░░░░░░ 4 tests written, Skip until impl
+Milestone 1 (Primitives)     ████████████████ COMPLETE
+Milestone 2 (Page I/O)       ████████████████ COMPLETE
+Milestone 3 (B-Tree)         ████████████████ COMPLETE
+Milestone 4 (Records)        ████████████████ COMPLETE
+Milestone 5 (Schema)         ████████████████ COMPLETE
+Milestone 6 (Table Scans)    ████████████████ COMPLETE — MVP
+Milestone 7 (SQL Subset)     ░░░░░░░░░░░░░░░░ Future
+Milestone 8 (WAL Support)    ░░░░░░░░░░░░░░░░ Future
+Milestone 9 (Encryption)     ░░░░░░░░░░░░░░░░ Future
+Milestone 10 (Benchmarks)    ████████████████ COMPLETE
 ```
 
-**Other principles:**
+## Design Principles
 
-- **Zero-alloc hot paths** — `Span<byte>`, stackalloc, `ArrayPool`. The GC should not wake up during page reads.
+- **Zero-alloc hot paths** — `ReadOnlySpan<byte>`, `readonly struct`, `ArrayPool`. The GC should not wake up during page reads.
 - **Read-only first** — no write support until reads are benchmarked solid and correct.
-- **API-first** — public interfaces and method signatures are designed before internals.
+- **TDD** — every feature starts with tests. The test suite is the specification.
+- **Pure managed** — zero native dependencies. Runs anywhere .NET runs.
 
-See `ProductContext/ExecutionPlan.md` for the full milestone roadmap.
+See [PRC/ArchitectureOverview.md](PRC/ArchitectureOverview.md) for the full architecture reference and [PRC/BenchmarkSpec.md](PRC/BenchmarkSpec.md) for the benchmark methodology.
 
 ## Requirements
 
@@ -205,3 +241,21 @@ See `ProductContext/ExecutionPlan.md` for the full milestone roadmap.
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+
+## About the Author & AI Collaboration
+
+Sharc is crafted through a collaboration between Artificial Intelligence and human architectural
+curation by **RamKumar Revanur**. 
+
+**LinkedIn:** https://www.linkedin.com/in/revodoc/
+
+The project reflects a belief that modern software is not merely written — it is *designed to
+learn, adapt, and evolve*. Architecture, context, and intent increasingly define outcomes before
+the first line of code is executed.
+
+If you are exploring how to transform an existing codebase into an **AI-aware, agentic, and
+continuously adaptable system**, or want to discuss the broader shift toward intelligence-guided
+engineering, feel free to connect:
+
+Quiet conversations often begin with a single repository.

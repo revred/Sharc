@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Core.IO;
 using Sharc.Exceptions;
 using Xunit;
@@ -38,8 +54,8 @@ public class MemoryPageSourceTests
         var data = CreateMinimalDatabase(pageSize: 4096, pageCount: 3);
         using var source = new MemoryPageSource(data);
 
-        source.PageSize.Should().Be(4096);
-        source.PageCount.Should().Be(3);
+        Assert.Equal(4096, source.PageSize);
+        Assert.Equal(3, source.PageCount);
     }
 
     [Fact]
@@ -47,9 +63,7 @@ public class MemoryPageSourceTests
     {
         var data = new byte[4096]; // all zeros — no valid magic
 
-        Action act = () => _ = new MemoryPageSource(data);
-
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => _ = new MemoryPageSource(data));
     }
 
     [Fact]
@@ -62,8 +76,8 @@ public class MemoryPageSourceTests
         using var source = new MemoryPageSource(data);
         var page = source.GetPage(1);
 
-        page.Length.Should().Be(4096);
-        page[100].Should().Be(0xAB);
+        Assert.Equal(4096, page.Length);
+        Assert.Equal(0xAB, page[100]);
     }
 
     [Fact]
@@ -76,8 +90,8 @@ public class MemoryPageSourceTests
         using var source = new MemoryPageSource(data);
         var page = source.GetPage(2);
 
-        page.Length.Should().Be(4096);
-        page[0].Should().Be(0xCD);
+        Assert.Equal(4096, page.Length);
+        Assert.Equal(0xCD, page[0]);
     }
 
     [Fact]
@@ -90,7 +104,7 @@ public class MemoryPageSourceTests
         var page1Again = source.GetPage(1);
 
         // Both spans should reflect the same underlying data
-        page1[0].Should().Be(page1Again[0]);
+        Assert.Equal(page1[0], page1Again[0]);
     }
 
     [Fact]
@@ -99,9 +113,7 @@ public class MemoryPageSourceTests
         var data = CreateMinimalDatabase();
         using var source = new MemoryPageSource(data);
 
-        Action act = () => { _ = source.GetPage(0); };
-
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(0); });
     }
 
     [Fact]
@@ -110,9 +122,7 @@ public class MemoryPageSourceTests
         var data = CreateMinimalDatabase(pageCount: 3);
         using var source = new MemoryPageSource(data);
 
-        Action act = () => { _ = source.GetPage(4); };
-
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(4); });
     }
 
     [Fact]
@@ -125,8 +135,8 @@ public class MemoryPageSourceTests
         var buffer = new byte[4096];
         var bytesRead = source.ReadPage(1, buffer);
 
-        bytesRead.Should().Be(4096);
-        buffer[100].Should().Be(0xEF);
+        Assert.Equal(4096, bytesRead);
+        Assert.Equal(0xEF, buffer[100]);
     }
 
     [Fact]
@@ -136,7 +146,7 @@ public class MemoryPageSourceTests
         using var source = new MemoryPageSource(data);
         var buffer = new byte[1024];
 
-        source.ReadPage(1, buffer).Should().Be(1024);
+        Assert.Equal(1024, source.ReadPage(1, buffer));
     }
 
     [Fact]

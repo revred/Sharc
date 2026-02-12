@@ -2,7 +2,7 @@
 
 ## 1. Language & Framework
 
-- **C# 12** with .NET 8.0 SDK
+- **C# 13** with .NET 10.0 SDK
 - **Nullable reference types**: enabled in all projects
 - **Implicit usings**: enabled
 - **Unsafe code**: allowed in Sharc.Core and Sharc.Crypto only, with justification
@@ -214,8 +214,8 @@ public void Read_SingleByteZero_ReturnsZeroAndConsumesOneByte()
     var consumed = VarintDecoder.Read(data, out var value);
 
     // Assert
-    value.Should().Be(0);
-    consumed.Should().Be(1);
+    Assert.Equal(0L, value);
+    Assert.Equal(1, consumed);
 }
 ```
 
@@ -228,11 +228,11 @@ public void Read_SingleByteZero_ReturnsZeroAndConsumesOneByte()
 
 ### Assertion Library
 
-Use **FluentAssertions** for all assertions:
+Use **plain xUnit Assert** for all assertions (ADR-012/013):
 ```csharp
-value.Should().Be(42);
-act.Should().Throw<InvalidDatabaseException>();
-header.PageSize.Should().Be(4096);
+Assert.Equal(42L, value);
+Assert.Throws<InvalidDatabaseException>(() => Parse(bad));
+Assert.Equal(4096, header.PageSize);
 ```
 
 ## 8. Project Configuration

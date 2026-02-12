@@ -2,18 +2,18 @@
 
 ## Milestone Overview
 
-| # | Milestone | Key Deliverable | Gate Criteria |
-|---|-----------|----------------|---------------|
-| 1 | Primitives + Spans | Varint, serial types, header parsing | All unit tests green, zero allocations in hot paths |
-| 2 | Page I/O + Cache | IPageSource (file + memory), LRU cache | Read any page from real .db file |
-| 3 | B-Tree Reader | Table b-tree traversal, overflow pages | Enumerate all cells in a table |
-| 4 | Record Decoder | Full record → typed column values | Decode all SQLite serial types correctly |
-| 5 | Schema Reader | Parse sqlite_schema, expose table list | List all tables/indexes from real DB |
-| 6 | Table Scans | SharcDatabase + SharcDataReader API | Read all rows from any table in real DB |
-| 7 | SQL Subset (Optional) | Simple WHERE filtering | Basic equality/comparison filtering |
-| 8 | WAL Read Support | Read WAL-mode databases | Correctly merge WAL frames with main DB |
-| 9 | Encryption | AES-256-GCM page-level crypto | Open and read encrypted DB |
-| 10 | Benchmarks | BenchmarkDotNet suite, allocation audit | Within 3× of Microsoft.Data.Sqlite reads |
+| # | Milestone | Key Deliverable | Gate Criteria | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Primitives + Spans | Varint, serial types, header parsing | All unit tests green, zero allocations in hot paths | **COMPLETE** |
+| 2 | Page I/O + Cache | IPageSource (file + memory + mmap), LRU cache | Read any page from real .db file | **COMPLETE** |
+| 3 | B-Tree Reader | Table b-tree traversal, overflow pages | Enumerate all cells in a table | **COMPLETE** |
+| 4 | Record Decoder | Full record to typed column values | Decode all SQLite serial types correctly | **COMPLETE** |
+| 5 | Schema Reader | Parse sqlite_schema, expose table list | List all tables/indexes from real DB | **COMPLETE** |
+| 6 | Table Scans | SharcDatabase + SharcDataReader API | Read all rows from any table in real DB | **COMPLETE (MVP)** |
+| 7 | SQL Subset (Optional) | Simple WHERE filtering | Basic equality/comparison filtering | Future |
+| 8 | WAL Read Support | Read WAL-mode databases | Correctly merge WAL frames with main DB | Future |
+| 9 | Encryption | AES-256-GCM page-level crypto | Open and read encrypted DB | Future |
+| 10 | Benchmarks | BenchmarkDotNet suite, allocation audit | Comparative suite per BenchmarkSpec.md | **COMPLETE** |
 
 ## Detailed Milestone Breakdown
 

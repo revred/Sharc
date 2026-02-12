@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message — or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License — free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Core.IO;
 using Sharc.Exceptions;
 using Xunit;
@@ -19,6 +35,7 @@ public class FilePageSourceTests : IDisposable
     {
         try { Directory.Delete(_tempDir, recursive: true); }
         catch { /* best-effort cleanup */ }
+        GC.SuppressFinalize(this);
     }
 
     private string CreateDatabaseFile(int pageSize = 4096, int pageCount = 3, byte? markerAtPage2 = null)
@@ -58,8 +75,8 @@ public class FilePageSourceTests : IDisposable
 
         using var source = new FilePageSource(path);
 
-        source.PageSize.Should().Be(4096);
-        source.PageCount.Should().Be(5);
+        Assert.Equal(4096, source.PageSize);
+        Assert.Equal(5, source.PageCount);
     }
 
     [Fact]
@@ -69,16 +86,14 @@ public class FilePageSourceTests : IDisposable
 
         using var source = new FilePageSource(path);
 
-        source.PageSize.Should().Be(1024);
-        source.PageCount.Should().Be(10);
+        Assert.Equal(1024, source.PageSize);
+        Assert.Equal(10, source.PageCount);
     }
 
     [Fact]
     public void Constructor_FileNotFound_ThrowsFileNotFoundException()
     {
-        Action act = () => _ = new FilePageSource(Path.Combine(_tempDir, "nonexistent.db"));
-
-        act.Should().Throw<FileNotFoundException>();
+        Assert.Throws<FileNotFoundException>(() => _ = new FilePageSource(Path.Combine(_tempDir, "nonexistent.db")));
     }
 
     [Fact]
@@ -87,9 +102,8 @@ public class FilePageSourceTests : IDisposable
         var path = Path.Combine(_tempDir, "empty.db");
         File.WriteAllBytes(path, []);
 
-        Action act = () => _ = new FilePageSource(path);
-
-        act.Should().Throw<ArgumentException>().WithMessage("*empty*");
+        var ex = Assert.Throws<ArgumentException>(() => _ = new FilePageSource(path));
+        Assert.Contains("empty", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -98,9 +112,7 @@ public class FilePageSourceTests : IDisposable
         var path = Path.Combine(_tempDir, "bad_magic.db");
         File.WriteAllBytes(path, new byte[4096]); // all zeros
 
-        Action act = () => _ = new FilePageSource(path);
-
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => _ = new FilePageSource(path));
     }
 
     // --- GetPage ---
@@ -113,10 +125,10 @@ public class FilePageSourceTests : IDisposable
         using var source = new FilePageSource(path);
         var page = source.GetPage(1);
 
-        page.Length.Should().Be(4096);
-        page[0].Should().Be((byte)'S');
-        page[1].Should().Be((byte)'Q');
-        page[2].Should().Be((byte)'L');
+        Assert.Equal(4096, page.Length);
+        Assert.Equal((byte)'S', page[0]);
+        Assert.Equal((byte)'Q', page[1]);
+        Assert.Equal((byte)'L', page[2]);
     }
 
     [Fact]
@@ -127,8 +139,8 @@ public class FilePageSourceTests : IDisposable
         using var source = new FilePageSource(path);
         var page = source.GetPage(2);
 
-        page.Length.Should().Be(4096);
-        page[0].Should().Be(0xBE);
+        Assert.Equal(4096, page.Length);
+        Assert.Equal(0xBE, page[0]);
     }
 
     [Fact]
@@ -139,7 +151,7 @@ public class FilePageSourceTests : IDisposable
         using var source = new FilePageSource(path);
         var page = source.GetPage(5);
 
-        page.Length.Should().Be(4096);
+        Assert.Equal(4096, page.Length);
     }
 
     [Fact]
@@ -148,9 +160,7 @@ public class FilePageSourceTests : IDisposable
         var path = CreateDatabaseFile();
         using var source = new FilePageSource(path);
 
-        Action act = () => { _ = source.GetPage(0); };
-
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(0); });
     }
 
     [Fact]
@@ -159,9 +169,7 @@ public class FilePageSourceTests : IDisposable
         var path = CreateDatabaseFile(pageCount: 3);
         using var source = new FilePageSource(path);
 
-        Action act = () => { _ = source.GetPage(4); };
-
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(4); });
     }
 
     // --- ReadPage ---
@@ -175,8 +183,8 @@ public class FilePageSourceTests : IDisposable
         var buffer = new byte[4096];
         var bytesRead = source.ReadPage(2, buffer);
 
-        bytesRead.Should().Be(4096);
-        buffer[0].Should().Be(0xFE);
+        Assert.Equal(4096, bytesRead);
+        Assert.Equal(0xFE, buffer[0]);
     }
 
     [Fact]
@@ -186,7 +194,7 @@ public class FilePageSourceTests : IDisposable
         using var source = new FilePageSource(path);
         var buffer = new byte[1024];
 
-        source.ReadPage(1, buffer).Should().Be(1024);
+        Assert.Equal(1024, source.ReadPage(1, buffer));
     }
 
     [Fact]
@@ -198,7 +206,7 @@ public class FilePageSourceTests : IDisposable
         var dest = new byte[4096];
         source.ReadPage(2, dest);
 
-        dest[0].Should().Be(0xAA);
+        Assert.Equal(0xAA, dest[0]);
     }
 
     // --- Dispose ---
@@ -210,7 +218,7 @@ public class FilePageSourceTests : IDisposable
         var source = new FilePageSource(path);
         source.Dispose();
 
-        File.Exists(path).Should().BeTrue();
+        Assert.True(File.Exists(path));
         File.Delete(path); // should not throw — handle released
     }
 
@@ -231,9 +239,7 @@ public class FilePageSourceTests : IDisposable
         var source = new FilePageSource(path);
         source.Dispose();
 
-        Action act = () => { _ = source.GetPage(1); };
-
-        act.Should().Throw<ObjectDisposedException>();
+        Assert.Throws<ObjectDisposedException>(() => { _ = source.GetPage(1); });
     }
 
     // --- Sequential page access ---
@@ -247,7 +253,7 @@ public class FilePageSourceTests : IDisposable
         for (uint p = 1; p <= 8; p++)
         {
             var page = source.GetPage(p);
-            page.Length.Should().Be(1024);
+            Assert.Equal(1024, page.Length);
         }
     }
 
@@ -267,10 +273,10 @@ public class FilePageSourceTests : IDisposable
 
         // Read page 2 — internal buffer has 0xAA at [0]
         var page2 = source.GetPage(2);
-        page2[0].Should().Be(0xAA);
+        Assert.Equal(0xAA, page2[0]);
 
         // Read page 3 — internal buffer is overwritten with 0xBB
         var page3 = source.GetPage(3);
-        page3[0].Should().Be(0xBB);
+        Assert.Equal(0xBB, page3[0]);
     }
 }

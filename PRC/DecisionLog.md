@@ -4,6 +4,67 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-013: Test Assertion Conventions
+
+**Date**: 2026-02-12
+**Status**: Accepted
+**Context**: Need consistent assertion patterns across all test files.
+
+**Decision**: Use plain xUnit `Assert` methods exclusively. No third-party assertion libraries.
+
+**Rules**:
+
+- `Assert.Equal(expected, actual)` for value equality
+- `Assert.True(condition)` / `Assert.False(condition)` for boolean checks
+- `Assert.Null(value)` / `Assert.NotNull(value)` for null checks
+- `Assert.Throws<T>(() => ...)` for expected exceptions (returns the exception for further inspection)
+- `Assert.IsType<T>(value)` for type checks
+- `Assert.Contains(item, collection)` / `Assert.Empty(collection)` for collections
+- `Assert.InRange(actual, low, high)` for numeric bounds
+- For floating-point: `Assert.Equal(expected, actual, precision)` where precision is decimal places
+
+**Rationale**:
+
+- xUnit `Assert` is included with xUnit — zero additional dependencies
+- One fewer NuGet package reduces supply chain surface and version churn
+- Plain assertions are unambiguous — no fluent chains to misread
+- Consistent with the project's minimal-dependency philosophy (ADR-003, DependencyPolicy)
+
+**Consequences**:
+
+- Remove `FluentAssertions` from `Sharc.Tests.csproj` and `Sharc.IntegrationTests.csproj`
+- Migrate all existing `.Should()` calls to `Assert.*`
+- All new tests use `Assert.*` only
+
+---
+
+## ADR-012: Drop FluentAssertions Dependency
+
+**Date**: 2026-02-12
+**Status**: Accepted — Supersedes ADR-010 (test framework selection)
+**Context**: ADR-010 selected FluentAssertions for readable assertion syntax. In practice, it adds a dependency without sufficient benefit for a library project.
+
+**Decision**: Remove `FluentAssertions` from all test projects. Use xUnit's built-in `Assert` class.
+
+**Rationale**:
+
+- FluentAssertions is a transitive dependency chain (FluentAssertions → System.Configuration.ConfigurationManager → etc.)
+- xUnit's `Assert` provides every assertion we need
+- Eliminates version pinning burden for a test-only package
+- Aligns with DependencyPolicy: "Is there a built-in alternative? → Use it"
+
+**Alternatives considered**:
+
+1. Keep FluentAssertions — rejected: unnecessary dependency
+2. Switch to Shouldly — rejected: same problem, different package
+
+**Consequences**:
+
+- All 11 existing test files need migration from `.Should().Be()` to `Assert.Equal()`
+- ADR-010 updated: xUnit remains; FluentAssertions removed
+
+---
+
 ## ADR-011: Memory-Mapped Files for File-Backed Page Access
 
 **Date**: 2026-02-11
@@ -48,21 +109,22 @@ IPageSource                 ← safe interface, consumers unaware of backing
 ## ADR-010: Test Framework Selection
 
 **Date**: v0.1 initial
-**Status**: Accepted
+**Status**: Amended by ADR-012, ADR-013
 **Context**: Need a test framework for TDD development.
 
-**Decision**: xUnit + FluentAssertions
+**Decision**: xUnit with built-in `Assert`. ~~FluentAssertions~~ removed per ADR-012.
 
 **Rationale**:
+
 - xUnit is the most widely used .NET test framework with excellent parallel execution
 - `[Theory]` + `[InlineData]` is ideal for parameterized primitive tests (varints, serial types)
-- FluentAssertions provides readable assertion syntax: `value.Should().Be(42)` reads naturally
-- Both are mature, well-maintained, and have zero impact on the library itself
+- ~~FluentAssertions provides readable assertion syntax~~ — replaced by plain `Assert` (ADR-012)
 
 **Alternatives Rejected**:
+
 - NUnit: viable but less common in modern .NET; `[TestCase]` is equivalent to `[InlineData]`
 - MSTest: too verbose for rapid TDD cycles
-- Shouldly: less feature-rich than FluentAssertions
+- Shouldly: less feature-rich, same dependency problem
 
 ---
 
