@@ -48,125 +48,35 @@
 | Overflow pages | ✅ | M3 | Following overflow chains |
 | Pointer map pages | ❌ | — | Auto-vacuum only |
 | Lock byte page | ❌ | — | Not needed for reads |
+| Lock byte page | ❌ | — | Not needed for reads |
 
 ## B-Tree Operations
 
 | Feature | Status | Milestone | Notes |
 |---------|--------|-----------|-------|
 | Table b-tree sequential scan | ✅ | M3 | Full table scan |
-| Table b-tree rowid lookup | 🔶 | M7 | Binary search on interior pages |
+| Table b-tree rowid lookup | ✅ | M7 | Binary search via `BTreeCursor.Seek` |
 | Index b-tree sequential scan | 🔶 | M7 | |
 | Index b-tree key lookup | 🔶 | M7 | |
 | Overflow page following | ✅ | M3 | Linked list traversal |
 | Cell pointer array reading | ✅ | M3 | |
 
-## Record Format
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| Varint decoding (1–9 bytes) | ✅ | M1 | |
-| Serial type 0 (NULL) | ✅ | M4 | |
-| Serial types 1–6 (integers) | ✅ | M4 | 8/16/24/32/48/64-bit |
-| Serial type 7 (float) | ✅ | M4 | IEEE 754 double |
-| Serial type 8 (constant 0) | ✅ | M4 | |
-| Serial type 9 (constant 1) | ✅ | M4 | |
-| Serial types ≥12 (BLOB) | ✅ | M4 | Even types |
-| Serial types ≥13 (TEXT) | ✅ | M4 | Odd types |
-| Serial types 10, 11 (reserved) | ⚠️ | M4 | Throws error (ADR-007) |
-| Multi-column records | ✅ | M4 | |
-| Records spanning overflow | ✅ | M4 | Via assembled payload |
-
-## Schema
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| sqlite_schema table reading | ✅ | M5 | Page 1 b-tree |
-| Table enumeration | ✅ | M5 | |
-| Index enumeration | ✅ | M5 | |
-| View enumeration | ✅ | M5 | |
-| Trigger enumeration | ⚠️ | M5 | Listed but not executable |
-| Column name extraction | ✅ | M5 | From CREATE TABLE SQL |
-| Column type extraction | ✅ | M5 | Declared type string |
-| PRIMARY KEY detection | ✅ | M5 | |
-| NOT NULL detection | ✅ | M5 | |
-| DEFAULT values | 🔶 | Post-MVP | Parsed from SQL |
-| CHECK constraints | ❌ | — | Not enforced (read-only) |
-| FOREIGN KEY info | 🔶 | Post-MVP | Parsed from SQL |
-| Auto-increment detection | 🔶 | Post-MVP | |
-
-## Journal / WAL
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| Legacy rollback journal mode | ✅ | M2 | Default; journal file ignored |
-| WAL mode detection | ✅ | M1 | Header flag read |
-| WAL file reading | 🔶 | M8 | Frame-by-frame merge |
-| WAL checkpointing | ❌ | — | Write operation |
-| WAL index (shm) reading | 🔶 | M8 | For consistent snapshots |
-| DELETE journal mode | ✅ | M2 | Journal file not read |
-| TRUNCATE journal mode | ✅ | M2 | Journal file not read |
-| PERSIST journal mode | ✅ | M2 | Journal file not read |
-| MEMORY journal mode | ✅ | M2 | No journal file exists |
-| OFF journal mode | ✅ | M2 | No journal file exists |
-
-## Table Types
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| Regular tables (rowid) | ✅ | M6 | Core functionality |
-| WITHOUT ROWID tables | 🔶 | Post-MVP | Different b-tree structure |
-| STRICT tables | ✅ | M6 | Type enforcement is SQLite's concern |
-| Virtual tables (FTS) | ❌ | — | Requires module code |
-| Virtual tables (R-Tree) | ❌ | — | Requires module code |
-| Virtual tables (JSON) | ❌ | — | Requires module code |
-| Shadow tables (for FTS etc.) | ⚠️ | M6 | Readable as regular tables |
-
-## SQL / Query
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| Full SQL parsing | ❌ | — | Out of scope |
-| SQL VM / VDBE | ❌ | — | Out of scope |
-| Query planner | ❌ | — | Out of scope |
-| Simple WHERE filtering | 🔶 | M7 | Expression evaluator on ColumnValue |
-| ORDER BY | ❌ | — | Rows returned in rowid order |
-| GROUP BY / aggregates | ❌ | — | Consumer's responsibility |
-| JOIN | ❌ | — | Consumer's responsibility |
-| Subqueries | ❌ | — | Out of scope |
-| User-defined functions | ❌ | — | Out of scope |
-| Collation sequences | ⚠️ | M6 | BINARY only; NOCASE deferred |
-
-## Encryption
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| Sharc encryption format | 🔶 | M9 | Custom format |
-| AES-256-GCM | 🔶 | M9 | Default cipher |
-| XChaCha20-Poly1305 | 🔶 | Post-M9 | Alternative cipher |
-| Argon2id KDF | 🔶 | M9 | Default KDF |
-| scrypt KDF | 🔶 | Post-M9 | Alternative KDF |
-| Page-level decryption | 🔶 | M9 | Via IPageTransform |
-| SQLCipher compatibility | ❌ | — | Different format entirely |
-| SEE compatibility | ❌ | — | Proprietary format |
-
-## Concurrency & Access
-
-| Feature | Status | Milestone | Notes |
-|---------|--------|-----------|-------|
-| File read sharing (FileShare.ReadWrite) | ✅ | M2 | Coexist with SQLite writers |
-| Multiple readers on same SharcDatabase | ✅ | M6 | Thread-safe schema + page source |
-| Snapshot isolation | 🔶 | M8 | Via change counter / WAL frames |
-| Write transactions | ❌ | — | Read-only library |
-
 ## Platform Support
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| .NET 8 (Windows x64) | ✅ | Primary target |
-| .NET 8 (Linux x64) | ✅ | Primary target |
-| .NET 8 (macOS ARM64) | ✅ | Primary target |
-| .NET 8 (Linux ARM64) | ✅ | |
-| .NET 9+ | ✅ | Forward-compatible |
-| Blazor WebAssembly | ⚠️ | Memory-backed only, no file I/O, no AES-NI |
-| .NET Framework 4.x | ❌ | Requires .NET 8+ for Span/ReadOnlySpan support |
-| .NET Standard 2.0/2.1 | ❌ | Too restrictive for span-heavy code |
+| .NET 10 (Windows/Linux/macOS) | ✅ | Current development target |
+| **Blazor WebAssembly** | ✅ | **TIER 1 SUPPORT**. Optimized binary size via Trimming. |
+| **Native AOT** | ✅ | **FULLY COMPATIBLE**. No reflection or dynamic code generation. |
+| Docker (CGroup tracking) | ✅ | Optimized for resource-constrained environments. |
+| .NET Framework 4.x | ❌ | Out of scope. |
+
+## Graph Features (Sharc.Graph)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Concept Lookup (O(log N)) | ✅ | Via `ConceptStore` |
+| Relation Retrieval (O(M)) | ✅ | Initial implementation (Table Scan) |
+| Relational Traversal (O(log M)) | 🔶 | Pending Index Reader integration |
+| Schema Adaptation | ✅ | Dynamic SQLite to Graph ontology mapping |
+| Token Budgeting | 🔶 | Context expansion for AI prompts |

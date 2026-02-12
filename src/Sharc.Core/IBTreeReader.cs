@@ -40,6 +40,13 @@ public interface IBTreeCursor : IDisposable
     /// </summary>
     /// <returns>True if a cell is available; false at end of tree.</returns>
     bool MoveNext();
+    
+    /// <summary>
+    /// Repositions the cursor to the specified rowid (or the first rowid >= key).
+    /// </summary>
+    /// <param name="rowId">The rowid to seek to.</param>
+    /// <returns>True if an exact match is found.</returns>
+    bool Seek(long rowId);
 
     /// <summary>
     /// Gets the rowid of the current cell (table b-trees only).
