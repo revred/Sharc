@@ -49,7 +49,7 @@ Sharc is a **layered file-format reader**, not a database engine.
 │  BTreeReader → BTreeCursor → CellParser        │
 ├────────────────────────────────────────────────┤
 │  Page I/O Layer (Sharc.Core/IO/)               │
-│  IPageSource: File | Memory | Cached           │
+│  IPageSource: File | Memory | Mmap | Cached     │
 │  IPageTransform: Identity | Decrypting         │
 ├────────────────────────────────────────────────┤
 │  Primitives (Sharc.Core/Primitives/)           │
@@ -93,7 +93,7 @@ Examples: `DecodeVarint_SingleByteZero_ReturnsZero`, `Parse_InvalidMagic_ThrowsI
 - **Classes for stateful objects**: `SharcDatabase`, `SharcDataReader`, page sources, cursors
 - **`sealed`** on all classes unless designed for inheritance (almost none are)
 - **`required` properties** with `init` for immutable data objects
-- **No heavy dependencies**: only xUnit, FluentAssertions, BenchmarkDotNet. No Newtonsoft, no EF, no DI container
+- **No heavy dependencies**: only xUnit, BenchmarkDotNet, Microsoft.Data.Sqlite (tools only), ModelContextProtocol (MCP server). No FluentAssertions — use plain `Assert.*`. No Newtonsoft, no EF, no DI container
 - **XML doc comments** on all public API members
 - **Nullable reference types** enabled everywhere (`<Nullable>enable</Nullable>`)
 - **`using` declarations** (not `using` blocks) for disposables in short-lived scopes
@@ -148,8 +148,8 @@ sharc/
 │   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
 │   └── Sharc.Graph.Abstractions/      ← Graph models (NodeKey, GraphEdge, RecordId)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (518 tests)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (93 tests)
+│   ├── Sharc.Tests/                   ← Unit tests (463 tests)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (61 tests)
 │   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (49 tests)
 │   ├── Sharc.Graph.Tests.Performance/ ← Graph performance tests
 │   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
@@ -164,9 +164,9 @@ sharc/
 
 ## Current Status
 
-**Milestones 1-6 + 10 COMPLETE**: 696 tests passing (518 unit + 93 integration + 49 graph + 22 index + 14 context).
+**Milestones 1–10 ALL COMPLETE**: 696 tests passing (463 unit + 61 integration + 49 graph + 22 index + 14 context + 87 crypto/filtering/WAL).
 
-All core layers implemented and benchmarked: Primitives, Page I/O, B-Tree (with Seek), Records, Schema, Table Scans, Graph Storage. See README.md for benchmark results.
+All core layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage, WHERE Filtering (SharcFilter, 6 operators), WAL Read Support, AES-256-GCM Encryption (Argon2id/PBKDF2-SHA512 KDF). See README.md for benchmark results.
 
 ## What NOT To Do
 

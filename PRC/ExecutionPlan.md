@@ -10,9 +10,9 @@
 | 4 | Record Decoder | Full record to typed column values | Decode all SQLite serial types correctly | **COMPLETE** |
 | 5 | Schema Reader | Parse sqlite_schema, expose table list | List all tables/indexes from real DB | **COMPLETE** |
 | 6 | Table Scans | SharcDatabase + SharcDataReader API | Read all rows from any table in real DB | **COMPLETE (MVP)** |
-| 7 | SQL Subset (Optional) | Simple WHERE filtering | Basic equality/comparison filtering | Future |
-| 8 | WAL Read Support | Read WAL-mode databases | Correctly merge WAL frames with main DB | Future |
-| 9 | Encryption | AES-256-GCM page-level crypto | Open and read encrypted DB | Future |
+| 7 | SQL Subset (Optional) | Simple WHERE filtering | Basic equality/comparison filtering | **COMPLETE** |
+| 8 | WAL Read Support | Read WAL-mode databases | Correctly merge WAL frames with main DB | **COMPLETE** |
+| 9 | Encryption | AES-256-GCM page-level crypto | Open and read encrypted DB | **COMPLETE** |
 | 10 | Benchmarks | BenchmarkDotNet suite, allocation audit | Comparative suite per BenchmarkSpec.md | **COMPLETE** |
 
 ## Detailed Milestone Breakdown
