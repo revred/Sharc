@@ -28,9 +28,10 @@ public class GraphScanBenchmarks
     {
         var dir = Path.Combine(Path.GetTempPath(), "sharc_graph_bench");
         Directory.CreateDirectory(dir);
-        _dbPath = Path.Combine(dir, "graph_bench.db");
+        _dbPath = Path.Combine(dir, "graph_scan_bench.db");
 
-        GraphGenerator.GenerateSQLite(_dbPath, nodeCount: 5000, edgeCount: 15000);
+        if (!File.Exists(_dbPath))
+            GraphGenerator.GenerateSQLite(_dbPath, nodeCount: 5000, edgeCount: 15000);
         _dbBytes = File.ReadAllBytes(_dbPath);
 
         _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");

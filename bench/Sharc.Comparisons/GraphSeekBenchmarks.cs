@@ -37,7 +37,7 @@ public class GraphSeekBenchmarks
     {
         var dir = Path.Combine(Path.GetTempPath(), "sharc_graph_bench");
         Directory.CreateDirectory(dir);
-        _dbPath = Path.Combine(dir, "graph_bench.db");
+        _dbPath = Path.Combine(dir, "graph_seek_bench.db");
 
         if (!File.Exists(_dbPath))
             GraphGenerator.GenerateSQLite(_dbPath, nodeCount: 5000, edgeCount: 15000);
