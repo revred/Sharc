@@ -52,19 +52,20 @@ while (reader.Read())
 | **SQL queries / joins / aggregates** | No | Yes |
 | **Write / INSERT / UPDATE / DELETE** | No | Yes |
 | **Native dependencies** | **None** | Requires `e_sqlite3` native binary |
-| **Sequential table scan** | **2x-6x faster** | Baseline |
-| **Schema introspection** | **1.4x-7.8x faster** | Baseline |
-| **Config / metadata reads** | **14.5x faster** | Baseline |
+| **Sequential table scan** | **2.4x-16.2x faster** | Baseline |
+| **B-tree point lookup (Seek)** | **37x faster** | Baseline |
+| **Schema introspection** | **1.8x-9.0x faster** | Baseline |
+| **Config / metadata reads** | **17.5x faster** | Baseline |
 | **Concurrent parallel readers** | **Thread-safe** (12 tests, up to 16 threads) | Thread-safe |
 | **In-memory buffer (ReadOnlyMemory)** | **Native** | Requires connection string hack |
 | **Column projection** | Yes | Yes (via SELECT) |
 | **Integer PRIMARY KEY (rowid alias)** | Yes | Yes |
 | **Overflow page assembly** | Yes | Yes |
+| **Graph storage layer** | **Built-in** (ConceptStore, RelationStore) | Manual |
 | **WITHOUT ROWID tables** | No (throws UnsupportedFeatureException) | Yes |
 | **WAL mode** | No (throws UnsupportedFeatureException) | Yes |
 | **Virtual tables (FTS, R-Tree)** | No | Yes |
 | **UTF-16 text encoding** | No | Yes |
-| **Indexed point lookups** | No (sequential scan only) | Yes |
 | **Page I/O backends** | Memory, File, MemoryMapped, Cached | Internal |
 | **Encryption** | Planned (AES-256-GCM) | Via SQLCipher |
 | **GC pressure (primitive ops)** | **0 B allocated** | Allocates per call |
@@ -73,75 +74,97 @@ while (reader.Read())
 
 ## Benchmarks: Sharc vs Native SQLite
 
-Benchmarks use the canonical database from [BenchmarkSpec.md](PRC/BenchmarkSpec.md): config (100 rows), users (10K rows), events (100K rows), reports (1K rows with 22 columns). SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared commands — the fairest possible setup.
+All benchmarks run on the same machine with the same data. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared commands — the fairest possible setup.
 
-> Run benchmarks yourself: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`
+> Run benchmarks yourself:
+>
+> - Standard: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`
+> - Graph: `dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *Graph*`
 
 <!-- BENCHMARK_RESULTS_START -->
 
-> **Environment:** Windows 11, Intel i7-11800H (8C/16T), .NET 10.0.2, BenchmarkDotNet ShortRun.
+> **Environment:** Windows 11, Intel i7-11800H (8C/16T), .NET 10.0.2, BenchmarkDotNet v0.15.8 ShortRun.
 > SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
 
-### Category 2: Schema & Metadata
+### Schema & Metadata
 
 Sharc reads the 100-byte header struct and walks the sqlite_schema b-tree directly. No SQL parsing, no interop boundary.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| List all table names | 16.9 μs | 32.5 μs | **1.9x** | 40 KB | 872 B |
-| Get column info (1 table) | 16.4 μs | 30.0 μs | **1.8x** | 40 KB | 696 B |
-| Get column info (all tables) | 14.3 μs | 131.7 μs | **9.2x** | 40 KB | 4.0 KB |
-| Batch 100 schema reads | 1,484 μs | 2,930 μs | **2.0x** | 3.9 MB | 85 KB |
+| List all table names | 13.2 μs | 26.9 μs | **2.0x** | 40 KB | 872 B |
+| Get column info (1 table) | 13.2 μs | 23.4 μs | **1.8x** | 40 KB | 696 B |
+| Get column info (all tables) | 14.5 μs | 130.3 μs | **9.0x** | 40 KB | 4.0 KB |
+| Batch 100 schema reads | 1,472 μs | 2,672 μs | **1.8x** | 3.9 MB | 85 KB |
 
-### Category 4: Sequential Scan
+### Sequential Scan
 
-Full table scans — ETL, exports, analytics. On-demand cell pointer reads + lazy decode + buffer reuse = massive throughput and allocation gains.
-
-| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Scan 100 rows (config) | 25.6 μs | 63.3 μs | **2.5x** | 65 KB | 16 KB |
-| Scan 10K rows, all types (users) | 7.5 ms | 27.7 ms | **3.7x** | 33.9 MB | 18.0 MB |
-| Scan 10K rows, 2 columns (projection) | 1.5 ms | 2.9 ms | **1.9x** | 885 KB | 454 KB |
-| Scan 100K rows (events) | 10.4 ms | 63.2 ms | **6.1x** | 40 KB | 688 B |
-| Scan 100K rows, integers only | 6.3 ms | 25.5 ms | **4.0x** | 41 KB | 704 B |
-| Scan 1K rows, 22 columns (reports) | 670 μs | 3,417 μs | **5.1x** | 803 KB | 495 KB |
-| Scan 10K NULL checks (bios) | 661 μs | 11,642 μs | **17.6x** | 41 KB | 744 B |
-
-### Category 6: Data Type Decoding
-
-Isolates decode cost per type. `ReadOnlySpan<byte>` + struct returns + buffer reuse vs boxed objects and string allocation. Lazy decode skips body parsing entirely for null checks.
+Full table scans — ETL, exports, analytics. On-demand cell pointer reads + lazy decode + buffer reuse = massive throughput gains.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Decode 100K integers | 4.0 ms | 17.1 ms | **4.3x** | 41 KB | 384 B |
-| Decode 10K doubles | 879 μs | 13.1 ms | **14.9x** | 41 KB | 696 B |
-| Decode 10K short strings | 1.1 ms | 1.9 ms | **1.7x** | 885 KB | 454 KB |
-| Decode 10K medium strings | 1.8 ms | 14.2 ms | **8.1x** | 5.9 MB | 3.8 MB |
-| Decode 10K NULL checks | 627 μs | 12.6 ms | **20.1x** | 41 KB | 384 B |
-| Decode mixed row (all 9 cols) | 7.5 ms | 28.3 ms | **3.8x** | 33.9 MB | 18.0 MB |
+| Scan 100 rows (config) | 29.0 μs | 69.1 μs | **2.4x** | 65 KB | 16 KB |
+| Scan 10K rows, all types (users) | 8.8 ms | 28.4 ms | **3.2x** | 33.9 MB | 18.0 MB |
+| Scan 10K rows, 2 columns (projection) | 1.7 ms | 2.9 ms | **1.7x** | 885 KB | 454 KB |
+| Scan 100K rows, all columns (events) | 11.7 ms | 57.8 ms | **4.9x** | 40 KB | 688 B |
+| Scan 100K rows, integers only | 7.0 ms | 29.1 ms | **4.2x** | 41 KB | 704 B |
+| Scan 1K rows, 22 columns (reports) | 734 μs | 3,564 μs | **4.9x** | 803 KB | 495 KB |
+| Scan 10K NULL checks (bios) | 692 μs | 11,213 μs | **16.2x** | 41 KB | 744 B |
 
-### Category 8: Realistic Workloads
+### Data Type Decoding
+
+Isolates decode cost per type. `ReadOnlySpan<byte>` + struct returns + buffer reuse vs boxed objects and string allocation.
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Decode 100K integers | 4.3 ms | 19.0 ms | **4.4x** | 41 KB | 384 B |
+| Decode 10K doubles | 898 μs | 13.4 ms | **14.9x** | 41 KB | 696 B |
+| Decode 10K short strings | 1.2 ms | 2.0 ms | **1.6x** | 885 KB | 454 KB |
+| Decode 10K medium strings | 2.3 ms | 14.9 ms | **6.5x** | 5.9 MB | 3.8 MB |
+| Decode 10K NULL checks | 682 μs | 13.1 ms | **19.2x** | 41 KB | 384 B |
+| Decode mixed row (all 9 cols) | 7.9 ms | 28.7 ms | **3.6x** | 33.9 MB | 18.0 MB |
+
+### Realistic Workloads
 
 Composite benchmarks simulating what real applications actually do.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Open + read 1 row + close | 15.7 μs | 27.1 μs | **1.7x** | 43 KB | 1.1 KB |
-| Export 10K users to CSV | 7.3 ms | 20.2 ms | **2.8x** | 18.9 MB | 2.9 MB |
-| Schema migration check | 15.1 μs | 155.9 μs | **10.3x** | 40 KB | 4.4 KB |
-| Batch read 500 users | 198 μs | 234 μs | **1.2x** | 986 KB | 23 KB |
-| Read 10 config values | 14.7 μs | 263.3 μs | **17.9x** | 42 KB | 11 KB |
+| Open + read 1 row + close | 13.7 μs | 25.4 μs | **1.9x** | 43 KB | 1.1 KB |
+| Export 10K users to CSV | 7.6 ms | 20.5 ms | **2.7x** | 18.7 MB | 2.9 MB |
+| Schema migration check | 13.2 μs | 146.7 μs | **11.1x** | 40 KB | 4.4 KB |
+| Batch read 500 users | 217 μs | 240 μs | **1.1x** | 972 KB | 23 KB |
+| Read 10 config values | 15.0 μs | 262.6 μs | **17.5x** | 42 KB | 11 KB |
 
-### Category 9: GC Pressure Under Load
+### GC Pressure Under Load
 
 Sustained load across hundreds of thousands of rows. Buffer reuse eliminates per-row allocation pressure.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Sustained scan 300K rows (events x3) | 31.2 ms | 77.7 ms | **2.5x** | 760 KB | 2.1 KB |
-| Sustained string scan 50K rows (users x5) | 8.3 ms | 71.6 ms | **8.6x** | 10.8 MB | 5.3 MB |
-| Scan all 4 tables | 14.8 ms | 28.7 ms | **1.9x** | 16.5 MB | 3.9 KB |
-| Sustained int scan 1M rows (events x10) | 73.1 ms | 334.5 ms | **4.6x** | 2.5 MB | 7.0 KB |
+| Sustained scan 300K rows (events x3) | 29.5 ms | 79.8 ms | **2.7x** | 121 KB | 2.1 KB |
+| Sustained string scan 50K rows (users x5) | 9.9 ms | 76.4 ms | **7.7x** | 9.7 MB | 5.3 MB |
+| Scan all 4 tables | 15.4 ms | 27.2 ms | **1.8x** | 16.1 MB | 3.9 KB |
+| Sustained int scan 1M rows (events x10) | 112.9 ms | 355.4 ms | **3.1x** | 407 KB | 7.0 KB |
+
+### Graph Storage: Scans (5K Nodes, 15K Edges)
+
+Graph-shaped data stored in SQLite format: `_concepts` (nodes) and `_relations` (edges). Benchmarks use `Sharc.Graph` layer vs raw SQLite queries.
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Scan 5K nodes (all columns) | 1,005 μs | 2,639 μs | **2.6x** | 1.5 MB | 937 KB |
+| Scan 15K edges (all columns) | 2,143 μs | 6,967 μs | **3.3x** | 2.8 MB | 1.4 MB |
+| Scan 5K nodes (id + type_id only) | 489 μs | 1,507 μs | **3.1x** | 798 KB | 470 KB |
+
+### Graph Storage: B-Tree Seeks (Point Lookups)
+
+Direct B-tree binary search via `cursor.Seek(rowid)` — bypasses schema and sequential scan entirely. This is where Sharc's zero-overhead format access shines brightest.
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Single node lookup (rowid 2500) | 561 ns | 21,117 ns | **37.6x** | 1,840 B | 600 B |
+| Open + scan to row + close | 373 μs | 25.4 μs | SQLite 14.7x | 329 KB | 1.2 KB |
 
 ### Primitive Operations (Sharc-only, no SQLite equivalent)
 
@@ -149,20 +172,22 @@ These measure raw decode speed at the byte level — no interop overhead to comp
 
 | Operation | Time | Allocated |
 | --- | ---: | ---: |
-| Parse database header (100 bytes) | 9.4 ns | **0 B** |
-| Validate magic string | 1.0 ns | **0 B** |
-| Parse b-tree page header | 3.5 ns | **0 B** |
-| Decode 100 varints | 253 ns | **0 B** |
-| Classify 100 serial types | 122 ns | **0 B** |
-| Read 5 inline column values | 5.9 ns | **0 B** |
+| Parse database header (100 bytes) | 8.6 ns | **0 B** |
+| Validate magic string | 0.3 ns | **0 B** |
+| Parse b-tree page header | 3.2 ns | **0 B** |
+| Decode 100 varints | 261 ns | **0 B** |
+| Classify 100 serial types | 101 ns | **0 B** |
+| Read 5 inline column values | 5.7 ns | **0 B** |
 
 **Notes:**
 
 - Sharc reuses `ColumnValue[]` buffers across rows (zero per-row array allocation) and uses `stackalloc` for serial type headers.
 - On-demand cell pointer reads eliminate per-page `ushort[]` allocations — 100K row scans allocate only 41 KB total.
-- Lazy decode: NULL checks read only the record header (serial types), skipping body decode entirely — **20x faster** than SQLite with **57x less allocation** vs previous Sharc versions.
+- Lazy decode: NULL checks read only the record header (serial types), skipping body decode entirely — **19x faster** than SQLite.
 - Column projection decodes only requested columns, skipping unwanted text/blob fields entirely.
-- Sustained integer scan: 1M rows with only 2.5 MB allocated (vs 422 MB before optimization).
+- B-tree Seek performs binary search descent to a specific rowid in **561 ns** — 37x faster than SQLite's prepared `WHERE key = ?`.
+- Sustained integer scan: 1M rows with only 407 KB allocated.
+- The "Open + scan to row + close" benchmark is unfavorable because Sharc's public reader API does sequential scan; SQLite uses indexed `WHERE` lookup. Direct cursor Seek (37x faster) is available via the internal API.
 - Run locally: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`
 
 <!-- BENCHMARK_RESULTS_END -->
@@ -173,6 +198,7 @@ Pure managed SQLite file-format reader. No VM, no VDBE, no query planner.
 
 ```text
 Public API          SharcDatabase -> SharcDataReader
+Graph Layer         ConceptStore, RelationStore (Sharc.Graph)
 Schema              SchemaReader: parses sqlite_schema
 Records             RecordDecoder: varint + serial type -> values
 B-Tree              BTreeReader -> BTreeCursor -> CellParser
@@ -186,13 +212,17 @@ Primitives          VarintDecoder, SerialTypeCodec
 ## Project Structure
 
 ```text
-src/Sharc/             -- Public API (SharcDatabase, SharcDataReader, Schema)
-src/Sharc.Core/        -- Internal: page I/O, b-tree, record decoding, primitives
-src/Sharc.Crypto/      -- Encryption: KDF, AEAD ciphers, key management
-tests/Sharc.Tests/     -- Unit tests (xUnit)
+src/Sharc/                    -- Public API (SharcDatabase, SharcDataReader, Schema)
+src/Sharc.Core/               -- Internal: page I/O, b-tree, record decoding, primitives
+src/Sharc.Graph/              -- Graph storage layer (ConceptStore, RelationStore)
+src/Sharc.Graph.Abstractions/ -- Graph interfaces and models
+src/Sharc.Crypto/             -- Encryption: KDF, AEAD ciphers, key management (planned)
+tests/Sharc.Tests/            -- Unit tests (xUnit)
 tests/Sharc.IntegrationTests/ -- End-to-end tests with real SQLite databases
-bench/Sharc.Benchmarks/ -- BenchmarkDotNet comparative suite
-PRC/                   -- Architecture docs, specs, and decisions
+tests/Sharc.Graph.Tests.Unit/ -- Graph layer unit tests (MSTest)
+bench/Sharc.Benchmarks/       -- BenchmarkDotNet comparative suite (113 benchmarks)
+bench/Sharc.Comparisons/      -- Graph storage benchmarks (14 benchmarks)
+PRC/                          -- Architecture docs, specs, and decisions
 ```
 
 ## Build & Test
@@ -202,14 +232,16 @@ dotnet build                                  # build everything
 dotnet test                                   # run all tests
 dotnet test tests/Sharc.Tests                 # unit tests only
 dotnet test tests/Sharc.IntegrationTests      # integration tests only
-dotnet run -c Release --project bench/Sharc.Benchmarks  # run benchmarks
+dotnet run -c Release --project bench/Sharc.Benchmarks  # run standard benchmarks
+dotnet run -c Release --project bench/Sharc.Comparisons # run graph benchmarks
 ```
 
 ### Test Status
 
 ```text
-447 passed, 0 skipped, 0 failed
+489 passed, 0 skipped, 0 failed
   - Unit tests:        393
+  - Graph unit tests:   42
   - Integration tests:  54 (includes 12 concurrency/parallel tests)
 ```
 
@@ -225,7 +257,8 @@ Milestone 6 (Table Scans)    ████████████████ CO
 Milestone 7 (SQL Subset)     ░░░░░░░░░░░░░░░░ Future
 Milestone 8 (WAL Support)    ░░░░░░░░░░░░░░░░ Future
 Milestone 9 (Encryption)     ░░░░░░░░░░░░░░░░ Future
-Milestone 10 (Benchmarks)    ████████████████ COMPLETE
+Milestone 10 (Benchmarks)    ████████████████ COMPLETE (127 benchmarks)
+Graph Support                ████████████████ COMPLETE
 ```
 
 ## Design Principles
@@ -249,7 +282,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## About the Author & AI Collaboration
 
 Sharc is crafted through a collaboration between Artificial Intelligence and human architectural
-curation by **RamKumar Revanur**. 
+curation by **RamKumar Revanur**.
 
 **LinkedIn:** https://www.linkedin.com/in/revodoc/
 
