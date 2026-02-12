@@ -128,6 +128,29 @@ internal sealed class RecordDecoder : IRecordDecoder
         return DecodeValue(payload.Slice(bodyOffset, contentSize), targetSerialType);
     }
 
+    /// <inheritdoc />
+    public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes)
+    {
+        int offset = VarintDecoder.Read(payload, out long headerSize);
+        int headerEnd = (int)headerSize;
+
+        int colCount = 0;
+        while (offset < headerEnd && colCount < serialTypes.Length)
+        {
+            offset += VarintDecoder.Read(payload[offset..], out serialTypes[colCount]);
+            colCount++;
+        }
+
+        // Count remaining columns (if any beyond the destination array)
+        while (offset < headerEnd)
+        {
+            offset += VarintDecoder.Read(payload[offset..], out _);
+            colCount++;
+        }
+
+        return colCount;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ColumnValue DecodeValue(ReadOnlySpan<byte> data, long serialType)
     {

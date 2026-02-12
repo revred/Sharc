@@ -46,6 +46,12 @@ public sealed class SharcDataReader : IDisposable
     private ColumnValue[]? _reusableBuffer;
     private bool _disposed;
 
+    // Lazy decode support for projection path — avoids decoding TEXT/BLOB
+    // body data until the caller actually requests the value.
+    private readonly long[]? _serialTypes;
+    private readonly bool[]? _decodedFlags;
+    private bool _lazyMode;
+
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
         IReadOnlyList<ColumnInfo> columns, int[]? projection)
     {
@@ -56,6 +62,13 @@ public sealed class SharcDataReader : IDisposable
 
         // Pre-allocate a reusable buffer for decoding — avoids per-row ColumnValue[] allocation
         _reusableBuffer = new ColumnValue[columns.Count];
+
+        // Allocate lazy-decode buffers when using projection
+        if (projection != null)
+        {
+            _serialTypes = new long[columns.Count];
+            _decodedFlags = new bool[columns.Count];
+        }
 
         // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
         // for this column; the real value is the b-tree key (rowid).
@@ -92,20 +105,23 @@ public sealed class SharcDataReader : IDisposable
         if (!_cursor.MoveNext())
         {
             _currentRow = null;
+            _lazyMode = false;
             return false;
         }
 
         if (_projection != null)
         {
-            // Projection-aware: decode only the columns we need, skip the rest
-            var payload = _cursor.Payload;
-            for (int i = 0; i < _projection.Length; i++)
-                _reusableBuffer![_projection[i]] = _recordDecoder.DecodeColumn(payload, _projection[i]);
+            // Lazy decode: only read serial types (varint parsing, no body decode).
+            // Actual column values are decoded on first access via GetColumnValue().
+            _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!);
+            Array.Clear(_decodedFlags!);
+            _lazyMode = true;
         }
         else
         {
             // Full decode — reuse the pre-allocated buffer
             _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            _lazyMode = false;
         }
 
         _currentRow = _reusableBuffer;
@@ -117,6 +133,20 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public bool IsNull(int ordinal)
     {
+        if (_currentRow == null)
+            throw new InvalidOperationException("No current row. Call Read() first.");
+
+        int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+
+        // Fast path: in lazy mode, check serial type directly (no body decode needed)
+        if (_lazyMode)
+        {
+            // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
+            if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
+                return false;
+            return _serialTypes![actualOrdinal] == 0;
+        }
+
         return GetColumnValue(ordinal).IsNull;
     }
 
@@ -224,6 +254,13 @@ public sealed class SharcDataReader : IDisposable
         if (actualOrdinal < 0 || actualOrdinal >= _currentRow.Length)
             throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal,
                 "Column ordinal is out of range.");
+
+        // Lazy decode: decode this column on first access (projection path only)
+        if (_lazyMode && !_decodedFlags![actualOrdinal])
+        {
+            _reusableBuffer![actualOrdinal] = _recordDecoder.DecodeColumn(_cursor.Payload, actualOrdinal);
+            _decodedFlags[actualOrdinal] = true;
+        }
 
         var value = _currentRow[actualOrdinal];
 

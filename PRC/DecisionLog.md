@@ -4,6 +4,54 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-014: Benchmark Execution via MCP Service
+
+**Date**: 2026-02-12
+**Status**: Accepted
+**Context**: Benchmarks were previously run ad-hoc via direct `dotnet run` commands, leading to inconsistent parameters (missing `--memory`, wrong job type), concurrent run conflicts (BenchmarkDotNet file locks), and no structured way to retrieve or compare results. As the project grows with both Core and Graph benchmark suites, a consistent execution policy is needed.
+
+**Decision**: All benchmarks — both standard (Sharc vs SQLite) and Graph-related (Sharc.Comparisons) — must be run through the MCP Service (`tools/Sharc.McpServer`).
+
+**Execution Policy**:
+
+1. **Standard comparative benchmarks**: `RunBenchmarks(filter="*Comparative*", job="short")` — runs all Sharc vs SQLite comparisons across 6 categories (TableScan, TypeDecode, RealisticWorkload, GcPressure, SchemaMetadata, DatabaseOpen)
+2. **Graph benchmarks**: `RunBenchmarks(filter="*Graph*", job="short")` — runs graph storage and traversal benchmarks in Sharc.Comparisons
+3. **Targeted runs**: Use specific filters like `RunBenchmarks(filter="*TableScan*")` for focused analysis
+4. **Results retrieval**: `ReadBenchmarkResults(className)` or `ListBenchmarkResults()` for structured markdown output
+5. **Sequential execution only**: Never run multiple benchmark processes concurrently — BenchmarkDotNet uses shared artifact files that cause lock conflicts
+
+**MCP Tool Parameters**:
+
+| Parameter  | Default          | Purpose                                                          |
+| ---------- | ---------------- | ---------------------------------------------------------------- |
+| `filter`   | `*Comparative*`  | BDN filter pattern                                               |
+| `job`      | `short`          | `short` (3 iter, fast), `medium` (standard), `dry` (validate)    |
+| `--memory` | always           | Memory diagnoser for allocation tracking                         |
+
+**Rationale**:
+
+- **Consistency**: MCP Service always adds `--memory` flag, uses Release config, and applies correct timeout (30 min)
+- **Streaming**: Incremental output avoids the "black box" problem of long-running benchmarks
+- **Structured results**: Markdown reports in `BenchmarkDotNet.Artifacts/results/` enable automated README updates
+- **Sequential enforcement**: Single process model prevents the file-locking conflicts observed during concurrent runs
+- **Unified interface**: Same invocation pattern works for both Core benchmarks and Graph comparisons
+- **Discoverability**: `ListBenchmarkResults()` makes it trivial to find and compare past runs
+
+**Alternatives Considered**:
+
+1. Direct `dotnet run` commands — rejected: no parameter consistency, easy to forget `--memory` or use Debug config
+2. Shell scripts — rejected: platform-specific, no streaming, no structured result access
+3. CI-only benchmarks — rejected: too slow for iterative development; local runs needed for optimization work
+
+**Consequences**:
+
+- All benchmark documentation references MCP Service commands
+- Graph benchmarks (Sharc.Comparisons) to be expanded with actual BenchmarkDotNet classes
+- README benchmark tables updated from MCP `ReadBenchmarkResults()` output
+- `CLAUDE.md` updated with MCP benchmark invocation examples
+
+---
+
 ## ADR-013: Test Assertion Conventions
 
 **Date**: 2026-02-12
@@ -248,7 +296,7 @@ IPageSource                 ← safe interface, consumers unaware of backing
 
 **Decision**: Option A — Pure managed C# reader, no native SQLite, no P/Invoke.
 
-**Full rationale**: See `ProductContext/StrategyDecision.md`
+**Full rationale**: See `PRC/StrategyDecision.md`
 
 **Summary**: Zero native dependencies enables cross-platform deployment, trivial in-memory support, clean encryption integration, and full testability. Performance target of 1.5–3× native is acceptable.
 

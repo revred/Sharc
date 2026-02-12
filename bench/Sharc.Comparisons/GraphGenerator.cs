@@ -1,8 +1,4 @@
-using System;
-using System.Data;
-using System.IO;
 using Microsoft.Data.Sqlite;
-using Sharc.Graph.Model;
 
 namespace Sharc.Comparisons;
 
@@ -17,8 +13,8 @@ public static class GraphGenerator
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
+            PRAGMA journal_mode = DELETE;
+            PRAGMA page_size = 4096;
             
             CREATE TABLE _concepts (
                 id TEXT NOT NULL,
@@ -35,9 +31,8 @@ public static class GraphGenerator
                 origin INTEGER NOT NULL,
                 kind INTEGER NOT NULL,
                 target INTEGER NOT NULL,
-                data TEXT,
-                PRIMARY KEY (origin, kind, target)
-            ) WITHOUT ROWID;
+                data TEXT
+            );
 
             CREATE INDEX idx_concepts_id ON _concepts(id);
             CREATE INDEX idx_relations_target ON _relations(target);

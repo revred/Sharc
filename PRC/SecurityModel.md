@@ -175,7 +175,7 @@ This is a **safety net**, not the primary defense. Primary validation happens be
 - **Sharc.Crypto**: Only `System.Security.Cryptography` (BCL) and potentially `Konscious.Security.Cryptography` for Argon2
 - All dependencies are version-pinned
 - No native code, no P/Invoke, no dynamic loading
-- See `ProductContext/DependencyPolicy.md`
+- See `PRC/DependencyPolicy.md`
 
 ## 6. What Sharc Does NOT Protect Against
 

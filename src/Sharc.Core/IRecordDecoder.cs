@@ -51,6 +51,16 @@ public interface IRecordDecoder
     /// <param name="columnIndex">0-based column index.</param>
     /// <returns>The decoded column value.</returns>
     ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex);
+
+    /// <summary>
+    /// Reads only the serial types from a record header without decoding any body data.
+    /// Used for lightweight null-checking and lazy decode patterns.
+    /// </summary>
+    /// <param name="payload">The raw record bytes (header + body).</param>
+    /// <param name="serialTypes">Pre-allocated array to fill with serial type values.
+    /// Only the first min(columnCount, serialTypes.Length) entries are written.</param>
+    /// <returns>The number of columns found in the record.</returns>
+    int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes);
 }
 
 /// <summary>

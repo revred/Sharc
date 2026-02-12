@@ -139,44 +139,31 @@ sharc/
 ├── CLAUDE.md                          ← You are here
 ├── README.md                          ← User-facing docs
 ├── Sharc.sln                          ← Solution file
-├── PRC/                               ← Architecture docs & decisions
-│   ├── SQLiteC_Analysis.md            ← SQLite format analysis
-│   ├── StrategyDecision.md            ← Why pure managed (Option A)
-│   ├── EncryptionSpec.md              ← Encryption file format spec
-│   ├── TestStrategy.md                ← Test layers & approach
-│   ├── ExecutionPlan.md               ← Milestone roadmap
-│   ├── ArchitectureOverview.md        ← Full architecture reference
-│   ├── APIDesign.md                   ← API design rationale
-│   ├── PerformanceStrategy.md         ← Performance budget & techniques
-│   ├── CodingStandards.md            ← Detailed code conventions
-│   ├── DecisionLog.md                 ← ADR-style decision records
-│   ├── DependencyPolicy.md           ← Allowed dependencies
-│   ├── ErrorHandling.md              ← Exception hierarchy & patterns
-│   ├── FileFormatQuickRef.md         ← Condensed SQLite format reference
-│   ├── SecurityModel.md              ← Threat model & security design
-│   ├── CompatibilityMatrix.md        ← SQLite feature support matrix
-│   └── Glossary.md                    ← Domain terminology
+├── docs/                              ← Reference docs (format analysis, coding standards)
+├── PRC/                               ← Architecture docs & decisions (ADRs, specs)
 ├── src/
-│   ├── Sharc/                         ← Public API library
-│   ├── Sharc.Core/                    ← Internal engine
-│   └── Sharc.Crypto/                  ← Encryption layer
+│   ├── Sharc/                         ← Public API (SharcDatabase, SharcDataReader, Schema)
+│   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Primitives)
+│   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
+│   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
+│   └── Sharc.Graph.Abstractions/      ← Graph models (NodeKey, GraphEdge, RecordId)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests
-│   └── Sharc.IntegrationTests/        ← End-to-end tests
+│   ├── Sharc.Tests/                   ← Unit tests (393 tests)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (54 tests)
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (42 tests)
+│   └── Sharc.Graph.Tests.Performance/ ← Graph performance tests
 ├── bench/
-│   └── Sharc.Benchmarks/             ← BenchmarkDotNet suite
-└── tools/                             ← Build scripts, test DB generators
+│   ├── Sharc.Benchmarks/             ← Core BenchmarkDotNet suite (Sharc vs SQLite)
+│   └── Sharc.Comparisons/            ← Graph benchmark suite
+└── tools/
+    └── Sharc.McpServer/              ← MCP Service (benchmarks, tests, project status)
 ```
 
 ## Current Status
 
-**Milestone 1 (Primitives + Spans)**: Tests written (RED), implementation stubs in place.
+**Milestones 1-6 + 10 COMPLETE**: 489 tests passing (393 unit + 42 graph + 54 integration).
 
-All tests currently throw `NotImplementedException`. Next step is implementing:
-1. `VarintDecoder.Read()` / `.Write()` / `.GetEncodedLength()`
-2. `SerialTypeCodec.GetContentSize()` / `.GetStorageClass()`
-3. `DatabaseHeader.Parse()`
-4. `BTreePageHeader.Parse()` / `.ReadCellPointers()`
+All core layers implemented and benchmarked: Primitives, Page I/O, B-Tree (with Seek), Records, Schema, Table Scans, Graph Storage. See README.md for benchmark results.
 
 ## What NOT To Do
 

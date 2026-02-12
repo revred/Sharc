@@ -30,11 +30,11 @@ internal sealed class BTreeCursor : IBTreeCursor
 {
     private readonly IPageSource _pageSource;
     private readonly int _usablePageSize;
-    private readonly Stack<(uint page, int cellIndex, ushort[] pointers, BTreePageHeader header)> _stack = new();
+    private readonly Stack<(uint page, int cellIndex, int headerOffset, BTreePageHeader header)> _stack = new();
 
     // Current leaf page state
     private uint _currentLeafPage;
-    private ushort[] _currentPointers = [];
+    private int _currentHeaderOffset;
     private BTreePageHeader _currentHeader;
     private int _currentCellIndex;
     private bool _initialized;
@@ -47,6 +47,9 @@ internal sealed class BTreeCursor : IBTreeCursor
     private byte[]? _assembledPayload;
     private int _inlinePayloadOffset;
     private uint _inlinePayloadPage;
+
+    // Reusable overflow cycle detection set — cleared between overflow assemblies
+    private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
 
@@ -138,13 +141,12 @@ internal sealed class BTreeCursor : IBTreeCursor
             var page = _pageSource.GetPage(pageNumber);
             int headerOffset = pageNumber == 1 ? 100 : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
-            var pointers = header.ReadCellPointers(page[headerOffset..]);
 
             if (header.IsLeaf)
             {
                 _currentLeafPage = pageNumber;
+                _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
-                _currentPointers = pointers;
                 _currentCellIndex = -1; // Will be incremented by AdvanceToNextCell
                 return;
             }
@@ -153,18 +155,18 @@ internal sealed class BTreeCursor : IBTreeCursor
             if (header.CellCount == 0)
             {
                 // Interior page with no cells — go to right child
-                _stack.Push((pageNumber, 0, pointers, header));
+                _stack.Push((pageNumber, 0, headerOffset, header));
                 pageNumber = header.RightChildPage;
                 continue;
             }
 
             // Push this interior page (starting before first cell)
-            _stack.Push((pageNumber, 0, pointers, header));
+            _stack.Push((pageNumber, 0, headerOffset, header));
 
             // Descend to the left child of the first cell
-            var interiorPage = _pageSource.GetPage(pageNumber);
-            uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(
-                interiorPage[pointers[0]..]);
+            // Read the single cell pointer on-demand (no array allocation)
+            ushort cellPtr = header.GetCellPointer(page[headerOffset..], 0);
+            uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(page[cellPtr..]);
             pageNumber = leftChild;
         }
     }
@@ -176,21 +178,20 @@ internal sealed class BTreeCursor : IBTreeCursor
             var page = _pageSource.GetPage(pageNumber);
             int headerOffset = pageNumber == 1 ? 100 : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
-            var pointers = header.ReadCellPointers(page[headerOffset..]);
 
             if (header.IsLeaf)
             {
                 _currentLeafPage = pageNumber;
+                _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
-                _currentPointers = pointers;
 
-                // Binary search leaf cells
+                // Binary search leaf cells using on-demand pointer reads
                 int low = 0;
                 int high = header.CellCount - 1;
                 while (low <= high)
                 {
                     int mid = low + ((high - low) >> 1);
-                    int cellOffset = pointers[mid];
+                    int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
 
                     CellParser.ParseTableLeafCell(page[cellOffset..], out int _, out long rowId);
 
@@ -217,7 +218,7 @@ internal sealed class BTreeCursor : IBTreeCursor
             while (l <= r)
             {
                 int mid = l + ((r - l) >> 1);
-                int cellOffset = pointers[mid];
+                int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
                 CellParser.ParseTableInteriorCell(page[cellOffset..], out _, out long key);
 
                 if (key >= targetRowId)
@@ -233,8 +234,8 @@ internal sealed class BTreeCursor : IBTreeCursor
 
             if (idx != -1)
             {
-                _stack.Push((pageNumber, idx, pointers, header));
-                int cellOffset = pointers[idx];
+                _stack.Push((pageNumber, idx, headerOffset, header));
+                int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
                 CellParser.ParseTableInteriorCell(page[cellOffset..], out uint leftChild, out _);
                 pageNumber = leftChild;
             }
@@ -273,19 +274,19 @@ internal sealed class BTreeCursor : IBTreeCursor
     {
         while (_stack.Count > 0)
         {
-            var (page, cellIndex, pointers, header) = _stack.Pop();
+            var (page, cellIndex, headerOffset, header) = _stack.Pop();
 
             int nextCellIndex = cellIndex + 1;
 
             if (nextCellIndex < header.CellCount)
             {
                 // More cells in this interior page — push updated state and descend
-                _stack.Push((page, nextCellIndex, pointers, header));
+                _stack.Push((page, nextCellIndex, headerOffset, header));
 
-                // Cell pointers are page-absolute offsets
+                // Read the single cell pointer on-demand (no array allocation)
                 var interiorPage = _pageSource.GetPage(page);
-                uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(
-                    interiorPage[pointers[nextCellIndex]..]);
+                ushort cellPtr = header.GetCellPointer(interiorPage[headerOffset..], nextCellIndex);
+                uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(interiorPage[cellPtr..]);
 
                 DescendToLeftmostLeaf(leftChild);
                 return true;
@@ -305,8 +306,8 @@ internal sealed class BTreeCursor : IBTreeCursor
     private void ParseCurrentLeafCell()
     {
         var page = _pageSource.GetPage(_currentLeafPage);
-        // Cell pointers are page-absolute offsets (from start of page)
-        int cellOffset = _currentPointers[_currentCellIndex];
+        // Read cell pointer on-demand — zero allocation
+        int cellOffset = _currentHeader.GetCellPointer(page[_currentHeaderOffset..], _currentCellIndex);
 
         int cellHeaderSize = CellParser.ParseTableLeafCell(
             page[cellOffset..], out _payloadSize, out _rowId);
@@ -343,11 +344,13 @@ internal sealed class BTreeCursor : IBTreeCursor
         int destOffset = inlineSize;
         int overflowDataSize = _usablePageSize - 4;
 
-        var visited = new HashSet<uint>();
+        // Reuse the HashSet instead of allocating a new one per overflow cell
+        _visitedOverflowPages ??= new HashSet<uint>();
+        _visitedOverflowPages.Clear();
 
         while (overflowPage != 0 && remaining > 0)
         {
-            if (!visited.Add(overflowPage))
+            if (!_visitedOverflowPages.Add(overflowPage))
                 throw new CorruptPageException(overflowPage,
                     "Overflow page chain cycle detected.");
 

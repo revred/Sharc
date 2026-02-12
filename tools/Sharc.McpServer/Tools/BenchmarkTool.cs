@@ -36,6 +36,28 @@ public static class BenchmarkTool
     }
 
     [McpServerTool, Description(
+        "Run graph-related benchmarks from the Sharc.Comparisons project. " +
+        "Compares Sharc graph storage layer vs SQLite for node scans, edge scans, and seeks.")]
+    public static async Task<string> RunGraphBenchmarks(
+        [Description("BenchmarkDotNet filter pattern (e.g., '*GraphScan*', '*GraphSeek*'). Default: '*Graph*'")]
+        string filter = "*Graph*",
+        [Description("Job type: 'short' (3 iterations, fast), 'medium' (default BDN), 'dry' (no actual run)")]
+        string job = "short")
+    {
+        var args = new StringBuilder("run -c Release --project bench/Sharc.Comparisons --");
+        args.Append($" --filter {filter}");
+
+        if (job.Equals("short", StringComparison.OrdinalIgnoreCase))
+            args.Append(" --job short");
+        else if (job.Equals("dry", StringComparison.OrdinalIgnoreCase))
+            args.Append(" --job dry");
+
+        args.Append(" --memory");
+
+        return await RunDotnetCommandAsync(args.ToString());
+    }
+
+    [McpServerTool, Description(
         "Read the latest benchmark results from BenchmarkDotNet artifacts. " +
         "Returns the markdown report for the specified benchmark class.")]
     public static string ReadBenchmarkResults(
