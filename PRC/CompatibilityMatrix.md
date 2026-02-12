@@ -41,8 +41,8 @@
 |---------|--------|-----------|-------|
 | Table leaf (0x0D) | ✅ | M3 | Core functionality |
 | Table interior (0x05) | ✅ | M3 | Core functionality |
-| Index leaf (0x0A) | 🔶 | M7 | Needed for index reads |
-| Index interior (0x02) | 🔶 | M7 | Needed for index reads |
+| Index leaf (0x0A) | ✅ | M7 | Index B-tree reads |
+| Index interior (0x02) | ✅ | M7 | Index B-tree reads |
 | Freelist trunk pages | ❌ | — | Write/compact only |
 | Freelist leaf pages | ❌ | — | Write/compact only |
 | Overflow pages | ✅ | M3 | Following overflow chains |
@@ -54,9 +54,9 @@
 | Feature | Status | Milestone | Notes |
 |---------|--------|-----------|-------|
 | Table b-tree sequential scan | ✅ | M3 | Full table scan |
-| Table b-tree rowid lookup | 🔶 | M7 | Binary search on interior pages |
-| Index b-tree sequential scan | 🔶 | M7 | |
-| Index b-tree key lookup | 🔶 | M7 | |
+| Table b-tree rowid lookup | ✅ | M7 | Binary search via Seek API |
+| Index b-tree sequential scan | ✅ | M7 | Via IndexBTreeCursor |
+| Index b-tree key lookup | ✅ | M7 | Via IndexBTreeCursor |
 | Overflow page following | ✅ | M3 | Linked list traversal |
 | Cell pointer array reading | ✅ | M3 | |
 
@@ -100,9 +100,9 @@
 |---------|--------|-----------|-------|
 | Legacy rollback journal mode | ✅ | M2 | Default; journal file ignored |
 | WAL mode detection | ✅ | M1 | Header flag read |
-| WAL file reading | 🔶 | M8 | Frame-by-frame merge |
+| WAL file reading | ✅ | M8 | Frame-by-frame merge |
 | WAL checkpointing | ❌ | — | Write operation |
-| WAL index (shm) reading | 🔶 | M8 | For consistent snapshots |
+| WAL index (shm) reading | ✅ | M8 | For consistent snapshots |
 | DELETE journal mode | ✅ | M2 | Journal file not read |
 | TRUNCATE journal mode | ✅ | M2 | Journal file not read |
 | PERSIST journal mode | ✅ | M2 | Journal file not read |
@@ -114,7 +114,7 @@
 | Feature | Status | Milestone | Notes |
 |---------|--------|-----------|-------|
 | Regular tables (rowid) | ✅ | M6 | Core functionality |
-| WITHOUT ROWID tables | 🔶 | Post-MVP | Different b-tree structure |
+| WITHOUT ROWID tables | ✅ | M7+ | Via WithoutRowIdCursorAdapter wrapping IndexBTreeCursor |
 | STRICT tables | ✅ | M6 | Type enforcement is SQLite's concern |
 | Virtual tables (FTS) | ❌ | — | Requires module code |
 | Virtual tables (R-Tree) | ❌ | — | Requires module code |
@@ -128,7 +128,7 @@
 | Full SQL parsing | ❌ | — | Out of scope |
 | SQL VM / VDBE | ❌ | — | Out of scope |
 | Query planner | ❌ | — | Out of scope |
-| Simple WHERE filtering | 🔶 | M7 | Expression evaluator on ColumnValue |
+| Simple WHERE filtering | ✅ | M7+ | SharcFilter + FilterEvaluator (6 operators, all types) |
 | ORDER BY | ❌ | — | Rows returned in rowid order |
 | GROUP BY / aggregates | ❌ | — | Consumer's responsibility |
 | JOIN | ❌ | — | Consumer's responsibility |
@@ -140,12 +140,13 @@
 
 | Feature | Status | Milestone | Notes |
 |---------|--------|-----------|-------|
-| Sharc encryption format | 🔶 | M9 | Custom format |
-| AES-256-GCM | 🔶 | M9 | Default cipher |
+| Sharc encryption format | ✅ | M9 | 128-byte header, magic + KDF params + salt + verification hash |
+| AES-256-GCM | ✅ | M9 | Default cipher, deterministic HMAC nonce per page |
 | XChaCha20-Poly1305 | 🔶 | Post-M9 | Alternative cipher |
-| Argon2id KDF | 🔶 | M9 | Default KDF |
+| Argon2id KDF | ✅ | M9 | PBKDF2-SHA512 bridge, Argon2id v0.2 planned |
 | scrypt KDF | 🔶 | Post-M9 | Alternative KDF |
-| Page-level decryption | 🔶 | M9 | Via IPageTransform |
+| Page-level decryption | ✅ | M9 | Via AesGcmPageTransform + DecryptingPageSource |
+| Row-level entitlement crypto | ⚠️ | Post-M9 | HKDF-SHA256 scaffolded, wiring deferred |
 | SQLCipher compatibility | ❌ | — | Different format entirely |
 | SEE compatibility | ❌ | — | Proprietary format |
 
@@ -155,18 +156,18 @@
 |---------|--------|-----------|-------|
 | File read sharing (FileShare.ReadWrite) | ✅ | M2 | Coexist with SQLite writers |
 | Multiple readers on same SharcDatabase | ✅ | M6 | Thread-safe schema + page source |
-| Snapshot isolation | 🔶 | M8 | Via change counter / WAL frames |
+| Snapshot isolation | ✅ | M8 | Via change counter / WAL frame reads |
 | Write transactions | ❌ | — | Read-only library |
 
 ## Platform Support
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| .NET 8 (Windows x64) | ✅ | Primary target |
-| .NET 8 (Linux x64) | ✅ | Primary target |
-| .NET 8 (macOS ARM64) | ✅ | Primary target |
-| .NET 8 (Linux ARM64) | ✅ | |
-| .NET 9+ | ✅ | Forward-compatible |
+| .NET 10 (Windows x64) | ✅ | Primary target (current) |
+| .NET 10 (Linux x64) | ✅ | Primary target |
+| .NET 10 (macOS ARM64) | ✅ | Primary target |
+| .NET 10 (Linux ARM64) | ✅ | |
+| .NET 8/9 | ✅ | Backward-compatible |
 | Blazor WebAssembly | ⚠️ | Memory-backed only, no file I/O, no AES-NI |
 | .NET Framework 4.x | ❌ | Requires .NET 8+ for Span/ReadOnlySpan support |
 | .NET Standard 2.0/2.1 | ❌ | Too restrictive for span-heavy code |
