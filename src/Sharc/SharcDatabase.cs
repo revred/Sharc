@@ -119,7 +119,7 @@ public sealed class SharcDatabase : IDisposable
         }
         else
         {
-            pageSource = new FilePageSource(path);
+            pageSource = new FilePageSource(path, options.FileShareMode);
         }
 
         try

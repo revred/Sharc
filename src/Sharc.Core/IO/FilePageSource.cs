@@ -59,15 +59,16 @@ public sealed class FilePageSource : IPageSource
     /// Only reads the 100-byte header on construction.
     /// </summary>
     /// <param name="filePath">Path to the SQLite database file.</param>
+    /// <param name="fileShareMode">File sharing mode. Default is <see cref="FileShare.ReadWrite"/>.</param>
     /// <exception cref="FileNotFoundException">File does not exist.</exception>
     /// <exception cref="ArgumentException">File is empty.</exception>
     /// <exception cref="Sharc.Exceptions.InvalidDatabaseException">Database header is invalid.</exception>
-    public FilePageSource(string filePath)
+    public FilePageSource(string filePath, FileShare fileShareMode = FileShare.ReadWrite)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException("Database file not found.", filePath);
 
-        _handle = File.OpenHandle(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+        _handle = File.OpenHandle(filePath, FileMode.Open, FileAccess.Read, fileShareMode,
             FileOptions.RandomAccess);
 
         _fileLength = RandomAccess.GetLength(_handle);

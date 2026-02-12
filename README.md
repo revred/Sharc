@@ -95,29 +95,30 @@ Sharc reads the 100-byte header struct and walks the sqlite_schema b-tree direct
 
 ### Category 4: Sequential Scan
 
-Full table scans — ETL, exports, analytics. Buffer reuse + projection-aware decoding = massive throughput gains.
+Full table scans — ETL, exports, analytics. On-demand cell pointer reads + lazy decode + buffer reuse = massive throughput and allocation gains.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Scan 100 rows (config) | 25.3 μs | 60.0 μs | **2.4x** | 66 KB | 16 KB |
-| Scan 10K rows, all types (users) | 7.4 ms | 28.2 ms | **3.8x** | 34.1 MB | 18.0 MB |
-| Scan 10K rows, 2 columns (projection) | 1.2 ms | 2.9 ms | **2.5x** | 1.1 MB | 454 KB |
-| Scan 100K rows (events) | 9.9 ms | 56.9 ms | **5.7x** | 253 KB | 688 B |
-| Scan 100K rows, integers only | 6.3 ms | 31.0 ms | **4.9x** | 253 KB | 704 B |
-| Scan 1K rows, 22 columns (reports) | 569 μs | 3,389 μs | **6.0x** | 808 KB | 495 KB |
+| Scan 100 rows (config) | 25.6 μs | 63.3 μs | **2.5x** | 65 KB | 16 KB |
+| Scan 10K rows, all types (users) | 7.5 ms | 27.7 ms | **3.7x** | 33.9 MB | 18.0 MB |
+| Scan 10K rows, 2 columns (projection) | 1.5 ms | 2.9 ms | **1.9x** | 885 KB | 454 KB |
+| Scan 100K rows (events) | 10.4 ms | 63.2 ms | **6.1x** | 40 KB | 688 B |
+| Scan 100K rows, integers only | 6.3 ms | 25.5 ms | **4.0x** | 41 KB | 704 B |
+| Scan 1K rows, 22 columns (reports) | 670 μs | 3,417 μs | **5.1x** | 803 KB | 495 KB |
+| Scan 10K NULL checks (bios) | 661 μs | 11,642 μs | **17.6x** | 41 KB | 744 B |
 
 ### Category 6: Data Type Decoding
 
-Isolates decode cost per type. `ReadOnlySpan<byte>` + struct returns + buffer reuse vs boxed objects and string allocation.
+Isolates decode cost per type. `ReadOnlySpan<byte>` + struct returns + buffer reuse vs boxed objects and string allocation. Lazy decode skips body parsing entirely for null checks.
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Decode 100K integers | 3.6 ms | 16.3 ms | **4.5x** | 253 KB | 384 B |
-| Decode 10K doubles | 884 μs | 12.5 ms | **14.1x** | 278 KB | 696 B |
-| Decode 10K short strings | 1.0 ms | 1.9 ms | **1.9x** | 1.1 MB | 454 KB |
-| Decode 10K medium strings | 1.8 ms | 13.5 ms | **7.4x** | 6.1 MB | 3.8 MB |
-| Decode 10K NULL checks | 1.2 ms | 11.9 ms | **9.9x** | 2.3 MB | 384 B |
-| Decode mixed row (all 9 cols) | 7.3 ms | 27.4 ms | **3.8x** | 34.1 MB | 18.0 MB |
+| Decode 100K integers | 4.0 ms | 17.1 ms | **4.3x** | 41 KB | 384 B |
+| Decode 10K doubles | 879 μs | 13.1 ms | **14.9x** | 41 KB | 696 B |
+| Decode 10K short strings | 1.1 ms | 1.9 ms | **1.7x** | 885 KB | 454 KB |
+| Decode 10K medium strings | 1.8 ms | 14.2 ms | **8.1x** | 5.9 MB | 3.8 MB |
+| Decode 10K NULL checks | 627 μs | 12.6 ms | **20.1x** | 41 KB | 384 B |
+| Decode mixed row (all 9 cols) | 7.5 ms | 28.3 ms | **3.8x** | 33.9 MB | 18.0 MB |
 
 ### Category 8: Realistic Workloads
 
@@ -158,6 +159,8 @@ These measure raw decode speed at the byte level — no interop overhead to comp
 **Notes:**
 
 - Sharc reuses `ColumnValue[]` buffers across rows (zero per-row array allocation) and uses `stackalloc` for serial type headers.
+- On-demand cell pointer reads eliminate per-page `ushort[]` allocations — 100K row scans allocate only 41 KB total.
+- Lazy decode: NULL checks read only the record header (serial types), skipping body decode entirely — **20x faster** than SQLite with **57x less allocation** vs previous Sharc versions.
 - Column projection decodes only requested columns, skipping unwanted text/blob fields entirely.
 - Sustained integer scan: 1M rows with only 2.5 MB allocated (vs 422 MB before optimization).
 - Run locally: `dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*`

@@ -85,7 +85,7 @@ Prefer BCL types and methods:
 
 1. Open an issue titled `dep: add [package-name]`
 2. Document the evaluation against all 7 criteria
-3. Record the decision in `ProductContext/DecisionLog.md`
+3. Record the decision in `PRC/DecisionLog.md`
 4. Pin the exact version in the `.csproj` file
 5. Add a comment in the `.csproj` explaining why the dependency exists
 

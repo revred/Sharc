@@ -8,6 +8,7 @@
     <InternalsVisibleTo Include="Sharc.Tests" />
     <InternalsVisibleTo Include="Sharc.IntegrationTests" />
     <InternalsVisibleTo Include="Sharc.Benchmarks" />
+    <InternalsVisibleTo Include="Sharc.Comparisons" />
 
     <!-- Graph Extensions -->
     <InternalsVisibleTo Include="Sharc.Graph" />

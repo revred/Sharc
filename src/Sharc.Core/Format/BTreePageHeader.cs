@@ -112,6 +112,21 @@ public readonly struct BTreePageHeader
     }
 
     /// <summary>
+    /// Reads a single cell pointer by index from the cell pointer array.
+    /// Zero-allocation alternative to <see cref="ReadCellPointers"/>.
+    /// </summary>
+    /// <param name="pageData">The full page bytes (starting at b-tree header offset).</param>
+    /// <param name="cellIndex">0-based index into the cell pointer array.</param>
+    /// <returns>The cell offset within the page.</returns>
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public ushort GetCellPointer(ReadOnlySpan<byte> pageData, int cellIndex)
+    {
+        int offset = HeaderSize + cellIndex * 2;
+        return BinaryPrimitives.ReadUInt16BigEndian(pageData[offset..]);
+    }
+
+    /// <summary>
     /// Reads the cell pointer array following this header.
     /// </summary>
     /// <param name="pageData">The full page bytes (starting at b-tree header offset).</param>
