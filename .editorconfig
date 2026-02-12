@@ -1,0 +1,43 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Sharc — EditorConfig
+# Root editor configuration for code style and analyzer rules.
+# ═══════════════════════════════════════════════════════════════════════
+
+root = true
+
+# ─── All files ───
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# ─── C# source files ───
+[*.cs]
+# Naming: allow SQLite domain-specific enum members (Integer, Float)
+dotnet_diagnostic.CA1720.severity = none
+
+# ─── XML and props files ───
+[*.{xml,props,csproj,targets}]
+indent_size = 2
+
+# ─── JSON files ───
+[*.json]
+indent_size = 2
+
+# ─── Markdown ───
+[*.md]
+trim_trailing_whitespace = false
+
+# ─── Test projects ───
+[tests/**/*.cs]
+# Test methods use Method_Scenario_Expected naming convention (xUnit standard)
+dotnet_diagnostic.CA1707.severity = none
+
+# ─── Tools (MCP server, scripts) ───
+[tools/**/*.cs]
+# Dev tools use string interpolation freely — locale sensitivity is irrelevant
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1707.severity = none

@@ -1,0 +1,59 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       Sharc — Directory.Build.props
+       Centralized build settings for all projects in the solution.
+       ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Common settings for ALL projects -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Deterministic builds for reproducibility -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- ─── Source projects (src/**) ─── -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+
+    <!-- NuGet metadata -->
+    <Authors>Ram Kumar Revanur</Authors>
+    <Company>Sharc</Company>
+    <Copyright>Copyright (c) 2025-2026 Ram Kumar Revanur. All rights reserved.</Copyright>
+    <Description>High-performance pure managed SQLite file-format reader for .NET</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Assembly metadata -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!-- ─── Test projects (tests/**) ─── -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('tests'))">
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Don't treat warnings as errors in test projects — xUnit analyzers can be noisy -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- ─── Benchmark projects (bench/**) ─── -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('bench'))">
+    <IsPackable>false</IsPackable>
+    <!-- Benchmarks only build in Release -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+</Project>
