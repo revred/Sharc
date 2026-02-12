@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Core.Format;
 using Sharc.Exceptions;
 using Xunit;
@@ -49,7 +65,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateLeafTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.PageType.Should().Be(BTreePageType.LeafTable);
+        Assert.Equal(BTreePageType.LeafTable, header.PageType);
     }
 
     [Fact]
@@ -57,7 +73,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateLeafTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.IsLeaf.Should().BeTrue();
+        Assert.True(header.IsLeaf);
     }
 
     [Fact]
@@ -65,7 +81,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateLeafTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.IsTable.Should().BeTrue();
+        Assert.True(header.IsTable);
     }
 
     [Fact]
@@ -73,7 +89,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateLeafTableHeader(cellCount: 17);
         var header = BTreePageHeader.Parse(data);
-        header.CellCount.Should().Be(17);
+        Assert.Equal((ushort)17, header.CellCount);
     }
 
     [Fact]
@@ -81,7 +97,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateLeafTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.HeaderSize.Should().Be(8);
+        Assert.Equal(8, header.HeaderSize);
     }
 
     [Fact]
@@ -89,7 +105,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateInteriorTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.PageType.Should().Be(BTreePageType.InteriorTable);
+        Assert.Equal(BTreePageType.InteriorTable, header.PageType);
     }
 
     [Fact]
@@ -97,7 +113,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateInteriorTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.IsLeaf.Should().BeFalse();
+        Assert.False(header.IsLeaf);
     }
 
     [Fact]
@@ -105,7 +121,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateInteriorTableHeader();
         var header = BTreePageHeader.Parse(data);
-        header.HeaderSize.Should().Be(12);
+        Assert.Equal(12, header.HeaderSize);
     }
 
     [Fact]
@@ -113,7 +129,7 @@ public class BTreePageHeaderTests
     {
         var data = CreateInteriorTableHeader(rightChild: 99);
         var header = BTreePageHeader.Parse(data);
-        header.RightChildPage.Should().Be(99);
+        Assert.Equal(99u, header.RightChildPage);
     }
 
     [Fact]
@@ -122,9 +138,9 @@ public class BTreePageHeaderTests
         var data = CreateLeafTableHeader();
         data[0] = 0x0A; // Leaf index
         var header = BTreePageHeader.Parse(data);
-        header.PageType.Should().Be(BTreePageType.LeafIndex);
-        header.IsLeaf.Should().BeTrue();
-        header.IsTable.Should().BeFalse();
+        Assert.Equal(BTreePageType.LeafIndex, header.PageType);
+        Assert.True(header.IsLeaf);
+        Assert.False(header.IsTable);
     }
 
     [Fact]
@@ -133,9 +149,9 @@ public class BTreePageHeaderTests
         var data = CreateInteriorTableHeader();
         data[0] = 0x02; // Interior index
         var header = BTreePageHeader.Parse(data);
-        header.PageType.Should().Be(BTreePageType.InteriorIndex);
-        header.IsLeaf.Should().BeFalse();
-        header.IsTable.Should().BeFalse();
+        Assert.Equal(BTreePageType.InteriorIndex, header.PageType);
+        Assert.False(header.IsLeaf);
+        Assert.False(header.IsTable);
     }
 
     [Fact]
@@ -143,8 +159,7 @@ public class BTreePageHeaderTests
     {
         var data = new byte[12];
         data[0] = 0xFF; // Invalid page type
-        var act = () => BTreePageHeader.Parse(data);
-        act.Should().Throw<CorruptPageException>();
+        Assert.Throws<CorruptPageException>(() => BTreePageHeader.Parse(data));
     }
 
     [Fact]
@@ -153,7 +168,7 @@ public class BTreePageHeaderTests
         // Per SQLite docs, a zero cell content offset means 65536
         var data = CreateLeafTableHeader(contentOffset: 0);
         var header = BTreePageHeader.Parse(data);
-        header.CellContentOffset.Should().Be(0); // Store raw; caller interprets
+        Assert.Equal((ushort)0, header.CellContentOffset); // Store raw; caller interprets
     }
 
     [Fact]
@@ -175,9 +190,9 @@ public class BTreePageHeaderTests
         var header = BTreePageHeader.Parse(data);
         var pointers = header.ReadCellPointers(data);
 
-        pointers.Should().HaveCount(3);
-        pointers[0].Should().Be(50);
-        pointers[1].Should().Be(60);
-        pointers[2].Should().Be(70);
+        Assert.Equal(3, pointers.Length);
+        Assert.Equal((ushort)50, pointers[0]);
+        Assert.Equal((ushort)60, pointers[1]);
+        Assert.Equal((ushort)70, pointers[2]);
     }
 }

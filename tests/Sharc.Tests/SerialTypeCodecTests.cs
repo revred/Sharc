@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Xunit;
@@ -25,7 +41,7 @@ public class SerialTypeCodecTests
     [InlineData(9, 0)]   // Integer constant 1
     public void GetContentSize_FixedTypes_ReturnsCorrectSize(long serialType, int expectedSize)
     {
-        SerialTypeCodec.GetContentSize(serialType).Should().Be(expectedSize);
+        Assert.Equal(expectedSize, SerialTypeCodec.GetContentSize(serialType));
     }
 
     [Theory]
@@ -35,7 +51,7 @@ public class SerialTypeCodecTests
     [InlineData(100, 44)] // BLOB length (100-12)/2 = 44
     public void GetContentSize_BlobTypes_ReturnsCalculatedSize(long serialType, int expectedSize)
     {
-        SerialTypeCodec.GetContentSize(serialType).Should().Be(expectedSize);
+        Assert.Equal(expectedSize, SerialTypeCodec.GetContentSize(serialType));
     }
 
     [Theory]
@@ -45,7 +61,7 @@ public class SerialTypeCodecTests
     [InlineData(101, 44)] // TEXT length (101-13)/2 = 44
     public void GetContentSize_TextTypes_ReturnsCalculatedSize(long serialType, int expectedSize)
     {
-        SerialTypeCodec.GetContentSize(serialType).Should().Be(expectedSize);
+        Assert.Equal(expectedSize, SerialTypeCodec.GetContentSize(serialType));
     }
 
     // --- Storage class ---
@@ -53,7 +69,7 @@ public class SerialTypeCodecTests
     [Fact]
     public void GetStorageClass_Null_ReturnsNull()
     {
-        SerialTypeCodec.GetStorageClass(0).Should().Be(ColumnStorageClass.Null);
+        Assert.Equal(ColumnStorageClass.Null, SerialTypeCodec.GetStorageClass(0));
     }
 
     [Theory]
@@ -67,13 +83,13 @@ public class SerialTypeCodecTests
     [InlineData(9)]
     public void GetStorageClass_IntegerTypes_ReturnsInteger(long serialType)
     {
-        SerialTypeCodec.GetStorageClass(serialType).Should().Be(ColumnStorageClass.Integer);
+        Assert.Equal(ColumnStorageClass.Integer, SerialTypeCodec.GetStorageClass(serialType));
     }
 
     [Fact]
     public void GetStorageClass_Float_ReturnsFloat()
     {
-        SerialTypeCodec.GetStorageClass(7).Should().Be(ColumnStorageClass.Float);
+        Assert.Equal(ColumnStorageClass.Float, SerialTypeCodec.GetStorageClass(7));
     }
 
     [Theory]
@@ -82,7 +98,7 @@ public class SerialTypeCodecTests
     [InlineData(100)]
     public void GetStorageClass_BlobTypes_ReturnsBlob(long serialType)
     {
-        SerialTypeCodec.GetStorageClass(serialType).Should().Be(ColumnStorageClass.Blob);
+        Assert.Equal(ColumnStorageClass.Blob, SerialTypeCodec.GetStorageClass(serialType));
     }
 
     [Theory]
@@ -91,7 +107,7 @@ public class SerialTypeCodecTests
     [InlineData(101)]
     public void GetStorageClass_TextTypes_ReturnsText(long serialType)
     {
-        SerialTypeCodec.GetStorageClass(serialType).Should().Be(ColumnStorageClass.Text);
+        Assert.Equal(ColumnStorageClass.Text, SerialTypeCodec.GetStorageClass(serialType));
     }
 
     // --- Type predicates ---
@@ -102,8 +118,7 @@ public class SerialTypeCodecTests
     public void GetStorageClass_ReservedTypes_ThrowsOrReturnsNull(long serialType)
     {
         // Decision: reserved types 10, 11 are not used — treat as error
-        var act = () => SerialTypeCodec.GetContentSize(serialType);
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => SerialTypeCodec.GetContentSize(serialType));
     }
 
     [Theory]
@@ -112,7 +127,7 @@ public class SerialTypeCodecTests
     [InlineData(13, false)]
     public void IsNull_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
     {
-        SerialTypeCodec.IsNull(serialType).Should().Be(expected);
+        Assert.Equal(expected, SerialTypeCodec.IsNull(serialType));
     }
 
     [Theory]
@@ -122,7 +137,7 @@ public class SerialTypeCodecTests
     [InlineData(15, true)]
     public void IsText_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
     {
-        SerialTypeCodec.IsText(serialType).Should().Be(expected);
+        Assert.Equal(expected, SerialTypeCodec.IsText(serialType));
     }
 
     [Theory]
@@ -132,6 +147,6 @@ public class SerialTypeCodecTests
     [InlineData(15, false)]
     public void IsBlob_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
     {
-        SerialTypeCodec.IsBlob(serialType).Should().Be(expected);
+        Assert.Equal(expected, SerialTypeCodec.IsBlob(serialType));
     }
 }

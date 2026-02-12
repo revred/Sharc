@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Core.Format;
 using Sharc.Exceptions;
 using Xunit;
@@ -50,7 +66,7 @@ public class DatabaseHeaderTests
     {
         var data = CreateValidHeader(pageSize: 4096);
         var header = DatabaseHeader.Parse(data);
-        header.PageSize.Should().Be(4096);
+        Assert.Equal(4096, header.PageSize);
     }
 
     [Fact]
@@ -61,7 +77,7 @@ public class DatabaseHeaderTests
         data[16] = 0x00;
         data[17] = 0x01;
         var header = DatabaseHeader.Parse(data);
-        header.PageSize.Should().Be(65536);
+        Assert.Equal(65536, header.PageSize);
     }
 
     [Fact]
@@ -69,7 +85,7 @@ public class DatabaseHeaderTests
     {
         var data = CreateValidHeader(pageCount: 42);
         var header = DatabaseHeader.Parse(data);
-        header.PageCount.Should().Be(42);
+        Assert.Equal(42, header.PageCount);
     }
 
     [Fact]
@@ -77,7 +93,7 @@ public class DatabaseHeaderTests
     {
         var data = CreateValidHeader(textEncoding: 1);
         var header = DatabaseHeader.Parse(data);
-        header.TextEncoding.Should().Be(1);
+        Assert.Equal(1, header.TextEncoding);
     }
 
     [Fact]
@@ -85,7 +101,7 @@ public class DatabaseHeaderTests
     {
         var data = CreateValidHeader(writeVersion: 2, readVersion: 2);
         var header = DatabaseHeader.Parse(data);
-        header.IsWalMode.Should().BeTrue();
+        Assert.True(header.IsWalMode);
     }
 
     [Fact]
@@ -93,7 +109,7 @@ public class DatabaseHeaderTests
     {
         var data = CreateValidHeader(writeVersion: 1, readVersion: 1);
         var header = DatabaseHeader.Parse(data);
-        header.IsWalMode.Should().BeFalse();
+        Assert.False(header.IsWalMode);
     }
 
     [Fact]
@@ -102,30 +118,28 @@ public class DatabaseHeaderTests
         var data = new byte[100];
         "Not a SQLite db!\0"u8.CopyTo(data);
 
-        var act = () => DatabaseHeader.Parse(data);
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => DatabaseHeader.Parse(data));
     }
 
     [Fact]
     public void Parse_TooShort_ThrowsInvalidDatabaseException()
     {
         var data = new byte[50]; // Less than 100 bytes
-        var act = () => DatabaseHeader.Parse(data);
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => DatabaseHeader.Parse(data));
     }
 
     [Fact]
     public void HasValidMagic_ValidHeader_ReturnsTrue()
     {
         var data = CreateValidHeader();
-        DatabaseHeader.HasValidMagic(data).Should().BeTrue();
+        Assert.True(DatabaseHeader.HasValidMagic(data));
     }
 
     [Fact]
     public void HasValidMagic_InvalidHeader_ReturnsFalse()
     {
         var data = new byte[100];
-        DatabaseHeader.HasValidMagic(data).Should().BeFalse();
+        Assert.False(DatabaseHeader.HasValidMagic(data));
     }
 
     [Fact]
@@ -134,6 +148,6 @@ public class DatabaseHeaderTests
         var data = CreateValidHeader(pageSize: 4096);
         data[20] = 8; // 8 reserved bytes per page
         var header = DatabaseHeader.Parse(data);
-        header.UsablePageSize.Should().Be(4088);
+        Assert.Equal(4088, header.UsablePageSize);
     }
 }

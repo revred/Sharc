@@ -1,0 +1,53 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Release
+        run: dotnet build --configuration Release
+
+      - name: Run comparative benchmarks
+        run: |
+          dotnet run --configuration Release --project bench/Sharc.Benchmarks -- \
+            --filter "*Comparative*" \
+            --exporters json markdown \
+            --artifacts BenchmarkResults
+        timeout-minutes: 30
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: BenchmarkResults/
+          retention-days: 90
+
+      - name: Store benchmark result for tracking
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: Sharc Benchmarks
+          tool: benchmarkdotnet
+          output-file-path: BenchmarkResults/results/Sharc.Benchmarks-report-full-compressed.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: false
+          benchmark-data-dir-path: docs/benchmarks

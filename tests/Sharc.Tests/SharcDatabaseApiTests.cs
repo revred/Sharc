@@ -1,4 +1,20 @@
-using FluentAssertions;
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
 using Sharc.Exceptions;
 using Xunit;
 
@@ -12,22 +28,20 @@ namespace Sharc.Tests;
 /// </summary>
 public class SharcDatabaseTests
 {
-    [Fact(Skip = "TDD RED: SharcDatabase.Open not yet implemented (Milestone 4+)")]
+    [Fact]
     public void Open_NonexistentFile_ThrowsFileNotFoundException()
     {
-        var act = () => SharcDatabase.Open("/nonexistent/path/to/database.db");
-        act.Should().Throw<FileNotFoundException>();
+        Assert.Throws<FileNotFoundException>(() => SharcDatabase.Open("/nonexistent/path/to/database.db"));
     }
 
-    [Fact(Skip = "TDD RED: SharcDatabase.Open not yet implemented (Milestone 4+)")]
+    [Fact]
     public void Open_InvalidFile_ThrowsInvalidDatabaseException()
     {
         var path = Path.GetTempFileName();
         try
         {
             File.WriteAllText(path, "This is not a SQLite database");
-            var act = () => SharcDatabase.Open(path);
-            act.Should().Throw<InvalidDatabaseException>();
+            Assert.Throws<InvalidDatabaseException>(() => SharcDatabase.Open(path));
         }
         finally
         {
@@ -35,28 +49,26 @@ public class SharcDatabaseTests
         }
     }
 
-    [Fact(Skip = "TDD RED: SharcDatabase.OpenMemory not yet implemented (Milestone 4+)")]
+    [Fact]
     public void OpenMemory_EmptyBuffer_ThrowsInvalidDatabaseException()
     {
-        var act = () => SharcDatabase.OpenMemory(ReadOnlyMemory<byte>.Empty);
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => SharcDatabase.OpenMemory(ReadOnlyMemory<byte>.Empty));
     }
 
-    [Fact(Skip = "TDD RED: SharcDatabase.OpenMemory not yet implemented (Milestone 4+)")]
+    [Fact]
     public void OpenMemory_InvalidMagic_ThrowsInvalidDatabaseException()
     {
         var garbage = new byte[4096];
-        var act = () => SharcDatabase.OpenMemory(garbage);
-        act.Should().Throw<InvalidDatabaseException>();
+        Assert.Throws<InvalidDatabaseException>(() => SharcDatabase.OpenMemory(garbage));
     }
 
     [Fact]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var act = () =>
+        var ex = Record.Exception(() =>
         {
             // SharcDatabase.Dispose() is implemented (safe no-op pattern)
-        };
-        act.Should().NotThrow();
+        });
+        Assert.Null(ex);
     }
 }
