@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -27,7 +27,7 @@ namespace Sharc.Benchmarks.Micro;
 ///
 /// Memory profile:
 ///   All transforms operate on pre-allocated buffers: 0 B per operation.
-///   The transform interface uses Span&lt;T&gt; — no boxing, no allocation.
+///   The transform interface uses Span&lt;T&gt; â€” no boxing, no allocation.
 ///   Batch tests confirm 0 B total regardless of iteration count.
 /// </summary>
 [BenchmarkCategory("Micro", "IO", "PageTransform")]
@@ -94,7 +94,7 @@ public class PageTransformBenchmarks
     }
 
     /// <summary>
-    /// Alternating read/write transforms. 0 B — interface dispatch doesn't allocate.
+    /// Alternating read/write transforms. 0 B â€” interface dispatch doesn't allocate.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Batch")]

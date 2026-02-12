@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -70,40 +70,40 @@ public class ColumnValueInferenceTests
     [Fact]
     public void Integer_MaxValue_PreservesExactly()
     {
-        var val = ColumnValue.Integer(6, long.MaxValue);
+        var val = ColumnValue.FromInt64(6, long.MaxValue);
         Assert.Equal(long.MaxValue, val.AsInt64());
     }
 
     [Fact]
     public void Integer_MinValue_PreservesExactly()
     {
-        var val = ColumnValue.Integer(6, long.MinValue);
+        var val = ColumnValue.FromInt64(6, long.MinValue);
         Assert.Equal(long.MinValue, val.AsInt64());
     }
 
     [Fact]
     public void Integer_Zero_PreservesExactly()
     {
-        var val = ColumnValue.Integer(1, 0);
+        var val = ColumnValue.FromInt64(1, 0);
         Assert.Equal(0L, val.AsInt64());
     }
 
     [Fact]
     public void Integer_NegativeOne_PreservesExactly()
     {
-        var val = ColumnValue.Integer(1, -1);
+        var val = ColumnValue.FromInt64(1, -1);
         Assert.Equal(-1L, val.AsInt64());
     }
 
     // --- Serial types 8/9: Constants encoded with zero body bytes ---
-    // SQLite spec: serial type 8 → integer 0, serial type 9 → integer 1
-    // These types have ContentSize=0 — the entire value is encoded in the type code.
+    // SQLite spec: serial type 8 â†’ integer 0, serial type 9 â†’ integer 1
+    // These types have ContentSize=0 â€” the entire value is encoded in the type code.
 
     [Fact]
     public void Integer_SerialType8_Constant0_HasStorageClassInteger()
     {
-        var val = ColumnValue.Integer(8, 0);
-        Assert.Equal(ColumnStorageClass.Integer, val.StorageClass);
+        var val = ColumnValue.FromInt64(8, 0);
+        Assert.Equal(ColumnStorageClass.Integral, val.StorageClass);
         Assert.Equal(0L, val.AsInt64());
         Assert.Equal(8L, val.SerialType);
         Assert.False(val.IsNull);
@@ -112,8 +112,8 @@ public class ColumnValueInferenceTests
     [Fact]
     public void Integer_SerialType9_Constant1_HasStorageClassInteger()
     {
-        var val = ColumnValue.Integer(9, 1);
-        Assert.Equal(ColumnStorageClass.Integer, val.StorageClass);
+        var val = ColumnValue.FromInt64(9, 1);
+        Assert.Equal(ColumnStorageClass.Integral, val.StorageClass);
         Assert.Equal(1L, val.AsInt64());
         Assert.Equal(9L, val.SerialType);
     }
@@ -123,28 +123,28 @@ public class ColumnValueInferenceTests
     [Fact]
     public void Float_PositiveInfinity_RoundTrips()
     {
-        var val = ColumnValue.Float(double.PositiveInfinity);
+        var val = ColumnValue.FromDouble(double.PositiveInfinity);
         Assert.True(double.IsPositiveInfinity(val.AsDouble()));
     }
 
     [Fact]
     public void Float_NegativeInfinity_RoundTrips()
     {
-        var val = ColumnValue.Float(double.NegativeInfinity);
+        var val = ColumnValue.FromDouble(double.NegativeInfinity);
         Assert.True(double.IsNegativeInfinity(val.AsDouble()));
     }
 
     [Fact]
     public void Float_NaN_RoundTrips()
     {
-        var val = ColumnValue.Float(double.NaN);
+        var val = ColumnValue.FromDouble(double.NaN);
         Assert.True(double.IsNaN(val.AsDouble()));
     }
 
     [Fact]
     public void Float_NegativeZero_Preserved()
     {
-        var val = ColumnValue.Float(-0.0);
+        var val = ColumnValue.FromDouble(-0.0);
         // -0.0 equals 0.0 in IEEE 754, but bit pattern differs
         Assert.Equal(0.0, val.AsDouble());
         Assert.True(double.IsNegative(val.AsDouble()));
@@ -153,8 +153,8 @@ public class ColumnValueInferenceTests
     [Fact]
     public void Float_StorageClass_IsFloat()
     {
-        var val = ColumnValue.Float(1.0);
-        Assert.Equal(ColumnStorageClass.Float, val.StorageClass);
+        var val = ColumnValue.FromDouble(1.0);
+        Assert.Equal(ColumnStorageClass.Real, val.StorageClass);
         Assert.Equal(7L, val.SerialType);
     }
 
@@ -174,7 +174,7 @@ public class ColumnValueInferenceTests
     public void Text_Utf8Bytes_DecodesCorrectly()
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes("Hello");
-        var val = ColumnValue.Text(23, bytes); // serial type 23 → (23-13)/2 = 5 bytes
+        var val = ColumnValue.Text(23, bytes); // serial type 23 â†’ (23-13)/2 = 5 bytes
         Assert.Equal("Hello", val.AsString());
     }
 
@@ -200,7 +200,7 @@ public class ColumnValueInferenceTests
     public void Blob_DataPreserved()
     {
         byte[] data = [0xDE, 0xAD, 0xBE, 0xEF];
-        var val = ColumnValue.Blob(20, data); // serial type 20 → (20-12)/2 = 4 bytes
+        var val = ColumnValue.Blob(20, data); // serial type 20 â†’ (20-12)/2 = 4 bytes
         Assert.Equal(data, val.AsBytes().ToArray());
     }
 
@@ -208,21 +208,21 @@ public class ColumnValueInferenceTests
 
     [Theory]
     [InlineData(0, ColumnStorageClass.Null)]
-    [InlineData(1, ColumnStorageClass.Integer)]
-    [InlineData(2, ColumnStorageClass.Integer)]
-    [InlineData(3, ColumnStorageClass.Integer)]
-    [InlineData(4, ColumnStorageClass.Integer)]
-    [InlineData(5, ColumnStorageClass.Integer)]
-    [InlineData(6, ColumnStorageClass.Integer)]
-    [InlineData(8, ColumnStorageClass.Integer)]
-    [InlineData(9, ColumnStorageClass.Integer)]
+    [InlineData(1, ColumnStorageClass.Integral)]
+    [InlineData(2, ColumnStorageClass.Integral)]
+    [InlineData(3, ColumnStorageClass.Integral)]
+    [InlineData(4, ColumnStorageClass.Integral)]
+    [InlineData(5, ColumnStorageClass.Integral)]
+    [InlineData(6, ColumnStorageClass.Integral)]
+    [InlineData(8, ColumnStorageClass.Integral)]
+    [InlineData(9, ColumnStorageClass.Integral)]
     public void Integer_AllSerialTypes_HaveCorrectStorageClass(long serialType, ColumnStorageClass expected)
     {
         ColumnValue val;
         if (serialType == 0)
             val = ColumnValue.Null();
         else
-            val = ColumnValue.Integer(serialType, 42);
+            val = ColumnValue.FromInt64(serialType, 42);
 
         Assert.Equal(expected, val.StorageClass);
     }

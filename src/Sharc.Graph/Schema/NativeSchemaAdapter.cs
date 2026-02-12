@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -53,6 +53,9 @@ public sealed class NativeSchemaAdapter : ISchemaAdapter
     public string? NodeSyncColumn => "sync_status";
     /// <inheritdoc/>
     public string? NodeUpdatedColumn => "updated_at";
+    
+    /// <inheritdoc/>
+    public string? NodeAliasColumn => "alias";
 
     // --- Edge Columns ---
     /// <inheritdoc/>
@@ -80,9 +83,6 @@ public sealed class NativeSchemaAdapter : ISchemaAdapter
     /// <inheritdoc/>
     public IReadOnlyList<string> RequiredIndexDDL => new[]
     {
-        // Ensure Alias uniqueness for interned concepts
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_alias ON _concepts(alias) WHERE alias IS NOT NULL",
-        
         // Ensure Key uniqueness (even though it's likely INTEGER PRIMARY KEY or similar, but spec says `id` is PK (GUID))
         // `id` is PK (GUID). `key` is INTEGER UNIQUE.
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_key ON _concepts(key)",

@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -62,6 +62,9 @@ public interface ISchemaAdapter
     
     /// <summary>Column for Last Updated Timestamp.</summary>
     string? NodeUpdatedColumn { get; }
+
+    /// <summary>Column for Node Alias (interned concepts).</summary>
+    string? NodeAliasColumn { get; }
 
     // --- Edge Columns ---
 

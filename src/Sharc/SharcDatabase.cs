@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -22,7 +22,6 @@ using Sharc.Core.IO;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Exceptions;
-using Sharc.Schema;
 
 namespace Sharc;
 
@@ -124,6 +123,36 @@ public sealed class SharcDatabase : IDisposable
 
         try
         {
+            // Check for WAL mode and wrap page source if a WAL file exists
+            var headerSpan = pageSource.GetPage(1);
+            var header = DatabaseHeader.Parse(headerSpan);
+
+            if (header.IsWalMode)
+            {
+                var walPath = path + "-wal";
+                if (File.Exists(walPath))
+                {
+                    // Read WAL file with ReadWrite sharing since another process
+                    // (e.g., SQLite writer) may hold a lock on it.
+                    byte[] walData;
+                    using (var walStream = new FileStream(walPath, FileMode.Open,
+                        FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        walData = new byte[walStream.Length];
+                        walStream.ReadExactly(walData);
+                    }
+
+                    if (walData.Length >= WalHeader.HeaderSize)
+                    {
+                        var walFrameMap = WalReader.ReadFrameMap(walData, header.PageSize);
+                        if (walFrameMap.Count > 0)
+                        {
+                            pageSource = new WalPageSource(pageSource, walData, walFrameMap);
+                        }
+                    }
+                }
+            }
+
             return CreateFromPageSource(pageSource, options);
         }
         catch
@@ -165,8 +194,6 @@ public sealed class SharcDatabase : IDisposable
         var header = DatabaseHeader.Parse(headerSpan);
 
         // Detect unsupported features
-        if (header.IsWalMode)
-            throw new UnsupportedFeatureException("WAL journal mode");
         if (header.TextEncoding is 2 or 3)
             throw new UnsupportedFeatureException("UTF-16 text encoding");
 
@@ -206,7 +233,9 @@ public sealed class SharcDatabase : IDisposable
         if (table.IsWithoutRowId)
             throw new UnsupportedFeatureException("WITHOUT ROWID tables");
         var cursor = _bTreeReader.CreateCursor((uint)table.RootPage);
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, null);
+        var tableIndexes = GetTableIndexes(tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
+            _bTreeReader, tableIndexes);
     }
 
     /// <summary>
@@ -236,7 +265,16 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection);
+        var tableIndexes = GetTableIndexes(tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
+            _bTreeReader, tableIndexes);
+    }
+
+    private List<IndexInfo> GetTableIndexes(string tableName)
+    {
+        return _schema.Indexes
+            .Where(i => i.TableName.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     /// <summary>

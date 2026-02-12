@@ -9,18 +9,17 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                         |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
-using Sharc.Core.Primitives;
 using Sharc.Core.Records;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
-using Sharc.Schema;
+using Sharc.Core.Schema;
 
 namespace Sharc.Graph.Store;
 
@@ -28,8 +27,13 @@ internal sealed class RelationStore
 {
     private readonly IBTreeReader _reader;
     private readonly ISchemaAdapter _schema;
+    private readonly RecordDecoder _decoder = new();
     private int _tableRootPage;
-    
+    private int _columnCount;
+
+    // Index scan support
+    private int _originIndexRootPage = -1;
+
     // Column ordinals
     private int _colSource = -1;
     private int _colKind = -1;
@@ -39,7 +43,7 @@ internal sealed class RelationStore
     private int _colCvn = -1;
     private int _colLvn = -1;
     private int _colSync = -1;
-    
+
     public RelationStore(IBTreeReader reader, ISchemaAdapter schema)
     {
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
@@ -50,16 +54,24 @@ internal sealed class RelationStore
     {
         var table = schemaInfo.GetTable(_schema.EdgeTableName);
         _tableRootPage = table.RootPage;
-        
+        _columnCount = table.Columns.Count;
+
         _colSource = GetOrdinal(table, _schema.EdgeOriginColumn);
         _colKind = GetOrdinal(table, _schema.EdgeKindColumn);
         _colTarget = GetOrdinal(table, _schema.EdgeTargetColumn);
         _colData = GetOrdinal(table, _schema.EdgeDataColumn);
         _colId = GetOrdinal(table, _schema.EdgeIdColumn);
-        
+
         _colCvn = _schema.EdgeCvnColumn != null ? GetOrdinal(table, _schema.EdgeCvnColumn) : -1;
         _colLvn = _schema.EdgeLvnColumn != null ? GetOrdinal(table, _schema.EdgeLvnColumn) : -1;
         _colSync = _schema.EdgeSyncColumn != null ? GetOrdinal(table, _schema.EdgeSyncColumn) : -1;
+
+        // Look for an index whose first column matches the edge origin column
+        var originIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
+            idx.TableName.Equals(_schema.EdgeTableName, StringComparison.OrdinalIgnoreCase) &&
+            idx.Columns.Count > 0 &&
+            idx.Columns[0].Name.Equals(_schema.EdgeOriginColumn, StringComparison.OrdinalIgnoreCase));
+        _originIndexRootPage = originIndex?.RootPage ?? -1;
     }
     
     private static int GetOrdinal(TableInfo table, string colName)
@@ -71,28 +83,66 @@ internal sealed class RelationStore
 
     /// <summary>
     /// Gets edges originating from the given node key.
+    /// Uses index scan if an index on the origin column exists, otherwise falls back to table scan.
     /// </summary>
     public IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kindFilter = null)
     {
         if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
 
-        // TODO: Implement Index Scan for O(log M) lookup.
-        // Currently doing full table scan (O(M)).
-        
+        if (_originIndexRootPage > 0)
+            return GetEdgesViaIndex(origin, kindFilter);
+
+        return GetEdgesViaTableScan(origin, kindFilter);
+    }
+
+    private IEnumerable<GraphEdge> GetEdgesViaIndex(NodeKey origin, RelationKind? kindFilter)
+    {
+        using var indexCursor = _reader.CreateIndexCursor((uint)_originIndexRootPage);
+        var buffer = new ColumnValue[_columnCount];
+
+        while (indexCursor.MoveNext())
+        {
+            var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
+            if (indexRecord.Length < 2) continue;
+
+            long indexOriginValue = indexRecord[0].AsInt64();
+
+            // Early exit: index is sorted, so if we've passed the target value, stop
+            if (indexOriginValue > origin.Value)
+                yield break;
+
+            if (indexOriginValue != origin.Value) continue;
+
+            // Match found — seek the table row by rowid
+            long rowId = indexRecord[^1].AsInt64();
+            using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
+            if (!tableCursor.Seek(rowId)) continue;
+
+            _decoder.DecodeRecord(tableCursor.Payload, buffer);
+
+            long kindVal = _colKind >= 0 && _colKind < buffer.Length ? buffer[_colKind].AsInt64() : 0;
+            if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
+
+            yield return MapToEdge(buffer);
+        }
+    }
+
+    private IEnumerable<GraphEdge> GetEdgesViaTableScan(NodeKey origin, RelationKind? kindFilter)
+    {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
-        var decoder = new RecordDecoder();
-        
+        var buffer = new ColumnValue[_columnCount];
+
         while (cursor.MoveNext())
         {
-            var columns = decoder.DecodeRecord(cursor.Payload);
-            
-            long sourceKey = _colSource >= 0 && _colSource < columns.Length ? columns[_colSource].AsInt64() : 0;
+            _decoder.DecodeRecord(cursor.Payload, buffer);
+
+            long sourceKey = _colSource >= 0 && _colSource < buffer.Length ? buffer[_colSource].AsInt64() : 0;
             if (sourceKey != origin.Value) continue;
-            
-            long kindVal = _colKind >= 0 && _colKind < columns.Length ? columns[_colKind].AsInt64() : 0;
+
+            long kindVal = _colKind >= 0 && _colKind < buffer.Length ? buffer[_colKind].AsInt64() : 0;
             if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
-            
-            yield return MapToEdge(columns);
+
+            yield return MapToEdge(buffer);
         }
     }
 

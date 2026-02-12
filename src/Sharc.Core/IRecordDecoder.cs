@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Core;
@@ -94,12 +94,12 @@ public readonly struct ColumnValue
     public static ColumnValue Null() => new(0, ColumnStorageClass.Null);
 
     /// <summary>Creates an integer column value.</summary>
-    public static ColumnValue Integer(long serialType, long value) =>
-        new(serialType, ColumnStorageClass.Integer, intValue: value);
+    public static ColumnValue FromInt64(long serialType, long value) =>
+        new(serialType, ColumnStorageClass.Integral, intValue: value);
 
     /// <summary>Creates a float column value.</summary>
-    public static ColumnValue Float(double value) =>
-        new(7, ColumnStorageClass.Float, floatValue: value);
+    public static ColumnValue FromDouble(double value) =>
+        new(7, ColumnStorageClass.Real, floatValue: value);
 
     /// <summary>Creates a text column value.</summary>
     public static ColumnValue Text(long serialType, ReadOnlyMemory<byte> utf8Bytes) =>
@@ -133,9 +133,9 @@ public enum ColumnStorageClass
     /// <summary>NULL value.</summary>
     Null = 0,
     /// <summary>Signed integer (1, 2, 3, 4, 6, or 8 bytes).</summary>
-    Integer = 1,
+    Integral = 1,
     /// <summary>IEEE 754 64-bit float.</summary>
-    Float = 2,
+    Real = 2,
     /// <summary>UTF-8 text string.</summary>
     Text = 3,
     /// <summary>Binary large object.</summary>

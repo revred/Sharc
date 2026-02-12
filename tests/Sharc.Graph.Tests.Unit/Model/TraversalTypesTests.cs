@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -34,7 +34,7 @@ public class TraversalTypesTests
         
         Assert.AreEqual(record, node.Record);
         Assert.AreEqual(2, node.Depth);
-        Assert.AreEqual(3, node.Path.Count);
+        Assert.HasCount(3, node.Path);
         Assert.AreEqual(new NodeKey(1), node.Path[0]);
     }
 
@@ -48,7 +48,7 @@ public class TraversalTypesTests
         
         var result = new GraphResult(list);
         
-        Assert.AreEqual(1, result.Nodes.Count);
+        Assert.HasCount(1, result.Nodes);
         Assert.AreEqual(node, result.Nodes[0]);
     }
 

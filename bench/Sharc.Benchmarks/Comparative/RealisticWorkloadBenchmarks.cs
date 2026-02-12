@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -63,7 +63,7 @@ public class RealisticWorkloadBenchmarks
         _conn?.Dispose();
     }
 
-    // --- 8.1: "Load user profile" — single user lookup via B-tree Seek ---
+    // --- 8.1: "Load user profile" â€” single user lookup via B-tree Seek ---
 
     [Benchmark]
     [BenchmarkCategory("LoadProfile")]
@@ -98,7 +98,7 @@ public class RealisticWorkloadBenchmarks
         return -1;
     }
 
-    // --- 8.4: "Export users to CSV" — full table scan with string formatting ---
+    // --- 8.4: "Export users to CSV" â€” full table scan with string formatting ---
 
     [Benchmark]
     [BenchmarkCategory("ExportCSV")]
@@ -142,7 +142,7 @@ public class RealisticWorkloadBenchmarks
         return totalLen;
     }
 
-    // --- 8.6: "Schema migration check" — read all tables, columns, indexes ---
+    // --- 8.6: "Schema migration check" â€” read all tables, columns, indexes ---
 
     [Benchmark]
     [BenchmarkCategory("SchemaCheck")]
@@ -189,7 +189,7 @@ public class RealisticWorkloadBenchmarks
         return totalColumns;
     }
 
-    // --- 8.7: "Batch read" — first 500 users with column projection ---
+    // --- 8.7: "Batch read" â€” first 500 users with column projection ---
 
     [Benchmark]
     [BenchmarkCategory("BatchLookup")]
@@ -226,7 +226,7 @@ public class RealisticWorkloadBenchmarks
         return sum;
     }
 
-    // --- 8.8: "Config read" — 10 config key lookups ---
+    // --- 8.8: "Config read" â€” 10 config key lookups ---
 
     [Benchmark]
     [BenchmarkCategory("ConfigRead")]

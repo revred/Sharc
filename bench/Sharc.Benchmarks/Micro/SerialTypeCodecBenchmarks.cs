@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -23,7 +23,7 @@ namespace Sharc.Benchmarks.Micro;
 
 /// <summary>
 /// Micro-benchmarks for serial type code interpretation.
-/// Called once per column per row during record decoding — extremely hot path.
+/// Called once per column per row during record decoding â€” extremely hot path.
 /// All operations are pure computation on scalar values: 0 B allocated.
 /// </summary>
 [BenchmarkCategory("Micro", "Primitives", "SerialType")]
@@ -170,7 +170,7 @@ public class SerialTypeCodecBenchmarks
     public ColumnStorageClass GetStorageClass_Blob() => SerialTypeCodec.GetStorageClass(100);
 
     /// <summary>
-    /// Batch GetStorageClass for all types. 0 B — enum return, no boxing.
+    /// Batch GetStorageClass for all types. 0 B â€” enum return, no boxing.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("StorageClass", "Batch")]
@@ -190,11 +190,11 @@ public class SerialTypeCodecBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("Predicate")]
-    public bool IsInteger() => SerialTypeCodec.IsInteger(4);
+    public bool IsInteger() => SerialTypeCodec.IsIntegral(4);
 
     [Benchmark]
     [BenchmarkCategory("Predicate")]
-    public bool IsFloat() => SerialTypeCodec.IsFloat(7);
+    public bool IsFloat() => SerialTypeCodec.IsReal(7);
 
     [Benchmark]
     [BenchmarkCategory("Predicate")]
@@ -216,8 +216,8 @@ public class SerialTypeCodecBenchmarks
         {
             long st = _serialTypes[i];
             if (SerialTypeCodec.IsNull(st)) count++;
-            if (SerialTypeCodec.IsInteger(st)) count++;
-            if (SerialTypeCodec.IsFloat(st)) count++;
+            if (SerialTypeCodec.IsIntegral(st)) count++;
+            if (SerialTypeCodec.IsReal(st)) count++;
             if (SerialTypeCodec.IsText(st)) count++;
             if (SerialTypeCodec.IsBlob(st)) count++;
         }

@@ -9,19 +9,18 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
-using Sharc.Schema;
 
 namespace Sharc.Core.Schema;
 
 /// <summary>
 /// Parses CREATE TABLE SQL statements to extract column information.
-/// Manual string parser — no regex. Handles quoted identifiers and table constraints.
+/// Manual string parser â€” no regex. Handles quoted identifiers and table constraints.
 /// </summary>
 internal static class CreateTableParser
 {
@@ -118,12 +117,12 @@ internal static class CreateTableParser
 
     private static bool IsTableConstraint(string segment)
     {
-        var upper = segment.TrimStart().ToUpperInvariant();
-        return upper.StartsWith("PRIMARY KEY", StringComparison.Ordinal) ||
-               upper.StartsWith("UNIQUE", StringComparison.Ordinal) ||
-               upper.StartsWith("CHECK", StringComparison.Ordinal) ||
-               upper.StartsWith("FOREIGN KEY", StringComparison.Ordinal) ||
-               upper.StartsWith("CONSTRAINT ", StringComparison.Ordinal);
+        var span = segment.AsSpan().TrimStart();
+        return span.StartsWith("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) ||
+               span.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
+               span.StartsWith("CHECK", StringComparison.OrdinalIgnoreCase) ||
+               span.StartsWith("FOREIGN KEY", StringComparison.OrdinalIgnoreCase) ||
+               span.StartsWith("CONSTRAINT ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ColumnInfo? ParseColumnDefinition(string definition, int ordinal)
@@ -139,10 +138,9 @@ internal static class CreateTableParser
 
         // Check remaining for constraints
         string remaining = pos < definition.Length ? definition[pos..] : "";
-        string upper = remaining.ToUpperInvariant();
 
         bool isPrimaryKey = IsIntegerPrimaryKey(definition, name, declaredType);
-        bool isNotNull = upper.Contains("NOT NULL", StringComparison.Ordinal);
+        bool isNotNull = remaining.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase);
 
         return new ColumnInfo
         {
@@ -156,10 +154,9 @@ internal static class CreateTableParser
 
     private static bool IsIntegerPrimaryKey(string fullDef, string name, string declaredType)
     {
-        var upper = fullDef.ToUpperInvariant();
         // INTEGER PRIMARY KEY is the rowid alias pattern
         return declaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase) &&
-               upper.Contains("PRIMARY KEY", StringComparison.Ordinal);
+               fullDef.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadIdentifier(string s, ref int pos)
@@ -205,18 +202,17 @@ internal static class CreateTableParser
             if (depth > 0) { pos++; continue; }
 
             // Stop at constraint keywords
-            string remaining = s[pos..].TrimStart();
-            string upper = remaining.ToUpperInvariant();
-            if (upper.StartsWith("PRIMARY", StringComparison.Ordinal) ||
-                upper.StartsWith("NOT", StringComparison.Ordinal) ||
-                upper.StartsWith("UNIQUE", StringComparison.Ordinal) ||
-                upper.StartsWith("CHECK", StringComparison.Ordinal) ||
-                upper.StartsWith("DEFAULT", StringComparison.Ordinal) ||
-                upper.StartsWith("REFERENCES", StringComparison.Ordinal) ||
-                upper.StartsWith("COLLATE", StringComparison.Ordinal) ||
-                upper.StartsWith("GENERATED", StringComparison.Ordinal) ||
-                upper.StartsWith("AUTOINCREMENT", StringComparison.Ordinal) ||
-                upper.StartsWith("CONSTRAINT", StringComparison.Ordinal))
+            var remaining = s.AsSpan(pos).TrimStart();
+            if (remaining.StartsWith("PRIMARY", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("NOT", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("CHECK", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("REFERENCES", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("COLLATE", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("GENERATED", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("AUTOINCREMENT", StringComparison.OrdinalIgnoreCase) ||
+                remaining.StartsWith("CONSTRAINT", StringComparison.OrdinalIgnoreCase))
                 break;
 
             pos++;

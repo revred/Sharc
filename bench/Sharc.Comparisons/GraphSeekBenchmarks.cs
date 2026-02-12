@@ -2,7 +2,7 @@
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -29,7 +29,7 @@ public class GraphSeekBenchmarks
     private SqliteConnection _conn = null!;
     private SqliteCommand _seekCmd = null!;
 
-    // Target rowids for seeks — spread across the B-tree
+    // Target rowids for seeks â€” spread across the B-tree
     private static readonly long[] SeekTargets = [1, 50, 500, 1000, 2500, 4999];
 
     [GlobalSetup]
@@ -69,7 +69,7 @@ public class GraphSeekBenchmarks
         var header = DatabaseHeader.Parse(pageSource.GetPage(1));
         var bTreeReader = new BTreeReader(pageSource, header);
 
-        // _concepts table root page — find it from schema
+        // _concepts table root page â€” find it from schema
         using var schemaCursor = bTreeReader.CreateCursor(1);
         uint conceptsRoot = 0;
         while (schemaCursor.MoveNext())

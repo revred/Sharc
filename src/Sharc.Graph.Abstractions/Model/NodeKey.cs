@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -46,7 +46,18 @@ public readonly record struct NodeKey(long Value)
             start++;
         }
         
-        if (start == BufferSize) return "0"; // Should be covered by Value == 0 check
+        if (start == BufferSize) return "0";
+
+        // BUG-05: Validate that all bytes are printable ASCII (0x20 - 0x7E)
+        for (int i = start; i < BufferSize; i++)
+        {
+            byte b = bytes[i];
+            if (b < 0x20 || b > 0x7E)
+            {
+                // Not printable ASCII, return numeric representation
+                return ToString();
+            }
+        }
 
         return Encoding.ASCII.GetString(bytes[start..]);
     }

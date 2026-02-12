@@ -7,7 +7,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Logging.AddConsole(options =>
 {
-    // MCP uses stdout for JSON-RPC — log to stderr only
+    // MCP uses stdout for JSON-RPC â€” log to stderr only
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 

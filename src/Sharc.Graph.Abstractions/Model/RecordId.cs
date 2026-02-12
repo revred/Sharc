@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -25,6 +25,9 @@ namespace Sharc.Graph.Model;
 /// </summary>
 public readonly record struct RecordId
 {
+    private readonly string _fullId;
+    private readonly bool _hasKey;
+
     /// <summary>The table or type name part of the ID.</summary>
     public string Table { get; }
     
@@ -35,10 +38,10 @@ public readonly record struct RecordId
     public NodeKey Key { get; }
     
     /// <summary>The full "table:id" string representation.</summary>
-    public string FullId => $"{Table}:{Id}";
+    public string FullId => _fullId;
     
-    /// <summary>True if this ID has an associated integer key (non-zero).</summary>
-    public bool HasIntegerKey => Key.Value != 0;
+    /// <summary>True if this ID has an associated integer key (including zero).</summary>
+    public bool HasIntegerKey => _hasKey;
 
     /// <summary>
     /// Creates a RecordId from a table and ID string.
@@ -46,29 +49,33 @@ public readonly record struct RecordId
     /// <param name="table">Table name.</param>
     /// <param name="id">String ID.</param>
     /// <param name="key">Optional integer key.</param>
-    public RecordId(string table, string id, NodeKey key = default)
+    public RecordId(string table, string id, NodeKey? key = null)
     {
         if (string.IsNullOrWhiteSpace(table)) throw new ArgumentException("Table cannot be empty", nameof(table));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty", nameof(id));
         
         Table = table;
         Id = id;
-        Key = key;
+        Key = key ?? default;
+        _hasKey = key.HasValue;
+        _fullId = $"{table}:{id}";
     }
 
     /// <summary>
     /// Creates a RecordId from an integer TypeID and GUID (Adapter mode).
     /// </summary>
     /// <param name="typeId">The integer type ID (becomes Table).</param>
-    /// <param name="guid">The string GUID.</param>
+    /// <param name="idString">The string ID.</param>
     /// <param name="key">The integer key (BarID).</param>
-    public RecordId(int typeId, string guid, NodeKey key)
+    public RecordId(int typeId, string idString, NodeKey key)
     {
-        if (string.IsNullOrWhiteSpace(guid)) throw new ArgumentException("GUID cannot be empty", nameof(guid));
+        if (string.IsNullOrWhiteSpace(idString)) throw new ArgumentException("ID string cannot be empty", nameof(idString));
         
         Table = typeId.ToString(CultureInfo.InvariantCulture);
-        Id = guid;
+        Id = idString;
         Key = key;
+        _hasKey = true;
+        _fullId = $"{Table}:{Id}";
     }
 
     /// <summary>

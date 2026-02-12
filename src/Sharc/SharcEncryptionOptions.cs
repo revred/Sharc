@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc;
@@ -44,10 +44,10 @@ public sealed class SharcEncryptionOptions
 /// </summary>
 public enum SharcKdfAlgorithm : byte
 {
-    /// <summary>Argon2id — recommended default.</summary>
+    /// <summary>Argon2id â€” recommended default.</summary>
     Argon2id = 1,
 
-    /// <summary>scrypt — alternative KDF.</summary>
+    /// <summary>scrypt â€” alternative KDF.</summary>
     Scrypt = 2
 }
 
@@ -56,9 +56,9 @@ public enum SharcKdfAlgorithm : byte
 /// </summary>
 public enum SharcCipherAlgorithm : byte
 {
-    /// <summary>AES-256-GCM — hardware-accelerated on modern CPUs.</summary>
+    /// <summary>AES-256-GCM â€” hardware-accelerated on modern CPUs.</summary>
     Aes256Gcm = 1,
 
-    /// <summary>XChaCha20-Poly1305 — constant-time on all hardware.</summary>
+    /// <summary>XChaCha20-Poly1305 â€” constant-time on all hardware.</summary>
     XChaCha20Poly1305 = 2
 }

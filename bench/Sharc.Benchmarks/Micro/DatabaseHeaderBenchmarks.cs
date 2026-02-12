@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -23,13 +23,13 @@ namespace Sharc.Benchmarks.Micro;
 
 /// <summary>
 /// Micro-benchmarks for SQLite database header parsing.
-/// Called once per database open — absolute latency matters.
+/// Called once per database open â€” absolute latency matters.
 ///
 /// Memory profile:
-///   Parse: 0 B allocated — readonly struct, span-based parsing
-///   HasValidMagic: 0 B — SequenceEqual on span
-///   All property access: 0 B — struct fields
-///   100x batch: 0 B total — proves no hidden per-parse allocations
+///   Parse: 0 B allocated â€” readonly struct, span-based parsing
+///   HasValidMagic: 0 B â€” SequenceEqual on span
+///   All property access: 0 B â€” struct fields
+///   100x batch: 0 B total â€” proves no hidden per-parse allocations
 /// </summary>
 [BenchmarkCategory("Micro", "Format", "Header")]
 [MemoryDiagnoser]
@@ -106,7 +106,7 @@ public class DatabaseHeaderBenchmarks
     }
 
     /// <summary>
-    /// Access all major properties after parse. 0 B — pure struct field reads.
+    /// Access all major properties after parse. 0 B â€” pure struct field reads.
     /// Shows the total cost of extracting everything from the header.
     /// </summary>
     [Benchmark]
@@ -123,7 +123,7 @@ public class DatabaseHeaderBenchmarks
     // --- Batch: scaling allocation test ---
 
     /// <summary>
-    /// 100 header parses. 0 B total — confirms no hidden allocations at scale.
+    /// 100 header parses. 0 B total â€” confirms no hidden allocations at scale.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Parse", "Batch")]
@@ -139,7 +139,7 @@ public class DatabaseHeaderBenchmarks
     }
 
     /// <summary>
-    /// 1000 header parses. Still 0 B total — struct return value is stack-allocated.
+    /// 1000 header parses. Still 0 B total â€” struct return value is stack-allocated.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Parse", "Batch")]
