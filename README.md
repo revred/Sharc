@@ -49,7 +49,10 @@ while (reader.Read())
 | Capability | Sharc | Microsoft.Data.Sqlite |
 | --- | :---: | :---: |
 | **Read SQLite format 3** | Yes | Yes |
-| **SQL queries / joins / aggregates** | No | Yes |
+| **SQL parsing / VM / query planner** | No — reads raw B-tree pages | Yes (full VDBE) |
+| **WHERE filtering** | **Yes** — 6 operators, all types, scan-based | Yes (via SQL) |
+| **JOIN / GROUP BY / aggregates** | No — consumer's responsibility | Yes |
+| **ORDER BY** | No — rows returned in rowid order | Yes |
 | **Write / INSERT / UPDATE / DELETE** | No | Yes |
 | **Native dependencies** | **None** | Requires `e_sqlite3` native binary |
 | **Sequential table scan** | **2.1x-17.9x faster** | Baseline |
@@ -62,7 +65,6 @@ while (reader.Read())
 | **Integer PRIMARY KEY (rowid alias)** | Yes | Yes |
 | **Overflow page assembly** | Yes | Yes |
 | **Graph storage layer** | **Built-in** (ConceptStore, RelationStore) | Manual |
-| **Simple WHERE filtering** | **Yes** (6 operators, all types) | Yes (via SQL) |
 | **WITHOUT ROWID tables** | **Yes** | Yes |
 | **WAL mode** | **Yes** (read-only) | Yes |
 | **Virtual tables (FTS, R-Tree)** | No | Yes |
