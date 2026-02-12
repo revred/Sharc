@@ -164,12 +164,9 @@ public class GraphSeekBenchmarks
     {
         using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
         using var reader = db.CreateReader("_concepts");
-        // Sequential scan to key 2500 — simulates lookup without direct Seek on reader
-        while (reader.Read())
-        {
-            if (reader.GetInt64(1) == 2500)
-                return reader.GetString(0);
-        }
+        // B-tree Seek: binary search descent to rowid 2500 (key is INTEGER PRIMARY KEY)
+        if (reader.Seek(2500))
+            return reader.GetString(0);
         return null;
     }
 

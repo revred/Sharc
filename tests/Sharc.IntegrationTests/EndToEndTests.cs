@@ -439,6 +439,91 @@ public class EndToEndTests
         Assert.Equal(DBNull.Value, nullVal);
     }
 
+    // --- Seek (B-Tree Point Lookup) ---
+
+    [Fact]
+    public void Seek_ExistingRowId_ReturnsTrue_CorrectValues()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users");
+        Assert.True(reader.Seek(5));
+        Assert.Equal(5, reader.RowId);
+        Assert.Equal("User5", reader.GetString(1));
+        Assert.Equal(25, reader.GetInt32(2));
+    }
+
+    [Fact]
+    public void Seek_NonExistentRowId_ReturnsFalse()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users");
+        Assert.False(reader.Seek(999));
+    }
+
+    [Fact]
+    public void Seek_FirstRow_ReturnsFirstRow()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users");
+        Assert.True(reader.Seek(1));
+        Assert.Equal("User1", reader.GetString(1));
+    }
+
+    [Fact]
+    public void Seek_LastRow_ReturnsLastRow()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users");
+        Assert.True(reader.Seek(10));
+        Assert.Equal("User10", reader.GetString(1));
+    }
+
+    [Fact]
+    public void Seek_ThenRead_ContinuesFromSeekPosition()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users");
+        Assert.True(reader.Seek(5));
+        Assert.Equal("User5", reader.GetString(1));
+
+        // Read() should advance to the next row after the seek position
+        Assert.True(reader.Read());
+        Assert.Equal("User6", reader.GetString(1));
+    }
+
+    [Fact]
+    public void Seek_WithProjection_DecodesOnlyRequestedColumns()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("users", "name", "age");
+        Assert.True(reader.Seek(7));
+        Assert.Equal("User7", reader.GetString(0));
+        Assert.Equal(27, reader.GetInt32(1));
+    }
+
+    [Fact]
+    public void Seek_LargeTable_FindsMiddleRow()
+    {
+        var data = TestDatabaseFactory.CreateLargeDatabase(1000);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("large_table");
+        Assert.True(reader.Seek(500));
+        Assert.Equal(500, reader.RowId);
+    }
+
     // --- GetColumnType ---
 
     [Fact]
