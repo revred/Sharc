@@ -33,6 +33,9 @@
     <Description>High-performance pure managed SQLite file-format reader for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>sqlite;database;reader;high-performance;zero-allocation;wasm;encryption</PackageTags>
+    <PackageProjectUrl>https://github.com/revred/sharc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/revred/sharc.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
 
     <!-- Assembly metadata -->
@@ -44,6 +47,11 @@
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+
+  <!-- Include README.md in NuGet packages for all source projects -->
+  <ItemGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <!-- ─── Test projects (tests/**) ─── -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('tests'))">

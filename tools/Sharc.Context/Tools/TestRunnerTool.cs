@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using ModelContextProtocol.Server;
 
-namespace Sharc.McpServer.Tools;
+namespace Sharc.Context.Tools;
 
 [McpServerToolType]
 public static class TestRunnerTool

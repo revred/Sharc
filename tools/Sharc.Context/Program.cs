@@ -16,7 +16,7 @@ builder.Services
     {
         options.ServerInfo = new()
         {
-            Name = "sharc-dev",
+            Name = "sharc-context",
             Version = "1.0.0"
         };
     })

@@ -1,6 +1,6 @@
-# Sharc.McpServer — MCP Development Server
+# Sharc.Context — MCP Context Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI assistants (Claude Code, VS Code Copilot, etc.) real-time access to Sharc's build, test, and benchmark infrastructure.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI assistants (Claude Code, VS Code Copilot, etc.) real-time access to Sharc's build, test, benchmark, and database query infrastructure.
 
 ## Tools Exposed
 
@@ -15,6 +15,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives A
 | `ProjectHealth` | Comprehensive snapshot: git status, file counts, build status. |
 | `ReadFile` | Read any source file by relative path. |
 | `SearchCode` | Search source code with regex patterns via git grep. |
+| `ListSchema` | List all tables and columns in a SQLite database file. |
+| `GetRowCount` | Get the total row count for a specific table. |
+| `QueryTable` | Query a table with optional projection and filters (up to 100 rows). |
+| `SeekRow` | Seek to a specific row by rowid. |
 
 ## Usage with Claude Code
 
@@ -22,12 +26,12 @@ The server is auto-configured via `.claude/settings.json`. When Claude Code star
 
 **Manual start:**
 ```bash
-dotnet run --project tools/Sharc.McpServer
+dotnet run --project tools/Sharc.Context
 ```
 
 **Test it with MCP inspector:**
 ```bash
-npx @anthropic/mcp-inspector dotnet run --project tools/Sharc.McpServer
+npx @anthropic/mcp-inspector dotnet run --project tools/Sharc.Context
 ```
 
 ## How It Works
@@ -38,13 +42,14 @@ The server uses stdio transport (JSON-RPC over stdin/stdout). When Claude calls 
 2. Captures stdout/stderr incrementally
 3. Returns the complete output when done
 
-This means Claude can run tests, see failures, fix code, and re-run — all without leaving the conversation.
+For database query tools (`ListSchema`, `QueryTable`, etc.), the server uses the Sharc library directly to read SQLite files — no subprocess needed.
 
 ## Architecture
 
 ```
-Claude Code ←→ JSON-RPC (stdio) ←→ Sharc.McpServer
-                                        ├─ TestRunnerTool (dotnet test)
-                                        ├─ BenchmarkTool (dotnet run benchmarks)
-                                        └─ ProjectStatusTool (git, file I/O)
+Claude Code <-> JSON-RPC (stdio) <-> Sharc.Context
+                                        |-- TestRunnerTool (dotnet test)
+                                        |-- BenchmarkTool (dotnet run benchmarks)
+                                        |-- ProjectStatusTool (git, file I/O)
+                                        +-- ContextQueryTool (Sharc library)
 ```

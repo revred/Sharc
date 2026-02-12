@@ -9,18 +9,20 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Text;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
+using Sharc.Crypto;
 using Sharc.Exceptions;
 
 namespace Sharc;
@@ -57,6 +59,7 @@ public sealed class SharcDatabase : IDisposable
     private readonly IRecordDecoder _recordDecoder;
     private readonly SharcSchema _schema;
     private readonly SharcDatabaseInfo _info;
+    private readonly SharcKeyHandle? _keyHandle;
     private bool _disposed;
 
     /// <summary>
@@ -85,7 +88,8 @@ public sealed class SharcDatabase : IDisposable
 
     private SharcDatabase(IPageSource pageSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
-        SharcSchema schema, SharcDatabaseInfo info)
+        SharcSchema schema, SharcDatabaseInfo info,
+        SharcKeyHandle? keyHandle = null)
     {
         _pageSource = pageSource;
         _header = header;
@@ -93,6 +97,7 @@ public sealed class SharcDatabase : IDisposable
         _recordDecoder = recordDecoder;
         _schema = schema;
         _info = info;
+        _keyHandle = keyHandle;
     }
 
     /// <summary>
@@ -109,6 +114,28 @@ public sealed class SharcDatabase : IDisposable
             throw new FileNotFoundException("Database file not found.", path);
 
         options ??= new SharcOpenOptions();
+
+        // Read the first 6 bytes with sharing to detect encrypted vs plain SQLite
+        bool isEncryptedFile;
+        {
+            Span<byte> magic = stackalloc byte[6];
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.Read,
+                options.FileShareMode);
+            int read = probe.Read(magic);
+            isEncryptedFile = read >= 6 && EncryptionHeader.HasMagic(magic);
+        }
+
+        if (isEncryptedFile)
+        {
+            byte[] fileData;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                options.FileShareMode))
+            {
+                fileData = new byte[fs.Length];
+                fs.ReadExactly(fileData);
+            }
+            return OpenEncrypted(fileData, options);
+        }
 
         IPageSource pageSource;
         if (options.PreloadToMemory)
@@ -162,6 +189,54 @@ public sealed class SharcDatabase : IDisposable
         }
     }
 
+    private static SharcDatabase OpenEncrypted(byte[] fileData, SharcOpenOptions options)
+    {
+        var password = options.Encryption?.Password
+            ?? throw new SharcCryptoException("Password required for encrypted database.");
+
+        var encHeader = EncryptionHeader.Parse(fileData);
+        var passwordBytes = Encoding.UTF8.GetBytes(password);
+
+        var keyHandle = SharcKeyHandle.DeriveKey(
+            passwordBytes, encHeader.Salt.Span,
+            encHeader.TimeCost, encHeader.MemoryCostKiB, encHeader.Parallelism);
+
+        try
+        {
+            // Verify the key against the stored verification hash
+            var computedHmac = keyHandle.ComputeHmac(encHeader.Salt.Span);
+            if (!computedHmac.AsSpan().SequenceEqual(encHeader.VerificationHash.Span))
+                throw new SharcCryptoException("Wrong password or corrupted encryption header.");
+
+            var transform = new AesGcmPageTransform(keyHandle);
+            int encryptedPageSize = transform.TransformedPageSize(encHeader.PageSize);
+
+            // Create page source over the encrypted data (after the 128-byte header)
+            var encryptedData = new ReadOnlyMemory<byte>(fileData, EncryptionHeader.HeaderSize,
+                fileData.Length - EncryptionHeader.HeaderSize);
+            var innerSource = new MemoryPageSource(encryptedData, encryptedPageSize, encHeader.PageCount);
+
+            var decryptingSource = new DecryptingPageSource(innerSource, transform, encHeader.PageSize);
+
+            try
+            {
+                // Transfer keyHandle ownership to SharcDatabase
+                return CreateFromPageSource(decryptingSource, options,
+                    isEncrypted: true, keyHandle: keyHandle);
+            }
+            catch
+            {
+                decryptingSource.Dispose();
+                throw;
+            }
+        }
+        catch
+        {
+            keyHandle.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Opens a SQLite database from an in-memory buffer.
     /// The buffer is not copied; caller must keep it alive for the lifetime of this instance.
@@ -182,7 +257,8 @@ public sealed class SharcDatabase : IDisposable
         return CreateFromPageSource(pageSource, options);
     }
 
-    private static SharcDatabase CreateFromPageSource(IPageSource rawSource, SharcOpenOptions options)
+    private static SharcDatabase CreateFromPageSource(IPageSource rawSource, SharcOpenOptions options,
+        bool isEncrypted = false, SharcKeyHandle? keyHandle = null)
     {
         IPageSource pageSource = rawSource;
 
@@ -214,10 +290,10 @@ public sealed class SharcDatabase : IDisposable
             ApplicationId = header.ApplicationId,
             SqliteVersion = header.SqliteVersionNumber,
             IsWalMode = header.IsWalMode,
-            IsEncrypted = false
+            IsEncrypted = isEncrypted
         };
 
-        return new SharcDatabase(pageSource, header, bTreeReader, recordDecoder, schema, info);
+        return new SharcDatabase(pageSource, header, bTreeReader, recordDecoder, schema, info, keyHandle);
     }
 
     /// <summary>
@@ -230,9 +306,7 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var table = _schema.GetTable(tableName);
-        if (table.IsWithoutRowId)
-            throw new UnsupportedFeatureException("WITHOUT ROWID tables");
-        var cursor = _bTreeReader.CreateCursor((uint)table.RootPage);
+        var cursor = CreateTableCursor(table);
         var tableIndexes = GetTableIndexes(tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
             _bTreeReader, tableIndexes);
@@ -248,9 +322,7 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var table = _schema.GetTable(tableName);
-        if (table.IsWithoutRowId)
-            throw new UnsupportedFeatureException("WITHOUT ROWID tables");
-        var cursor = _bTreeReader.CreateCursor((uint)table.RootPage);
+        var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
         if (columns is { Length: > 0 })
@@ -270,6 +342,94 @@ public sealed class SharcDatabase : IDisposable
             _bTreeReader, tableIndexes);
     }
 
+    /// <summary>
+    /// Creates a reader that scans the table with row-level filters applied (AND semantics).
+    /// Rows that do not match all filters are skipped during iteration.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="filters">Filter conditions. All must match for a row to be returned.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, params SharcFilter[] filters)
+    {
+        return CreateReader(tableName, null, filters);
+    }
+
+    /// <summary>
+    /// Creates a reader with both column projection and row-level filters.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
+    /// <param name="filters">Filter conditions (AND semantics). Null or empty for no filtering.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, string[]? columns, SharcFilter[]? filters)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var table = _schema.GetTable(tableName);
+        var cursor = CreateTableCursor(table);
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                var col = table.Columns.FirstOrDefault(c =>
+                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
+                projection[i] = col?.Ordinal
+                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+            }
+        }
+
+        ResolvedFilter[]? resolved = ResolveFilters(table, filters);
+        var tableIndexes = GetTableIndexes(tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
+            _bTreeReader, tableIndexes, resolved);
+    }
+
+    private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
+    {
+        if (filters is not { Length: > 0 })
+            return null;
+
+        var resolved = new ResolvedFilter[filters.Length];
+        for (int i = 0; i < filters.Length; i++)
+        {
+            var col = table.Columns.FirstOrDefault(c =>
+                c.Name.Equals(filters[i].ColumnName, StringComparison.OrdinalIgnoreCase));
+            resolved[i] = new ResolvedFilter
+            {
+                ColumnOrdinal = col?.Ordinal
+                    ?? throw new ArgumentException(
+                        $"Filter column '{filters[i].ColumnName}' not found in table '{table.Name}'."),
+                Operator = filters[i].Operator,
+                Value = filters[i].Value
+            };
+        }
+        return resolved;
+    }
+
+    private IBTreeCursor CreateTableCursor(TableInfo table)
+    {
+        if (table.IsWithoutRowId)
+        {
+            var indexCursor = _bTreeReader.CreateIndexCursor((uint)table.RootPage);
+            int intPkOrdinal = FindIntegerPrimaryKeyOrdinal(table.Columns);
+            return new WithoutRowIdCursorAdapter(indexCursor, _recordDecoder, intPkOrdinal);
+        }
+        return _bTreeReader.CreateCursor((uint)table.RootPage);
+    }
+
+    private static int FindIntegerPrimaryKeyOrdinal(IReadOnlyList<ColumnInfo> columns)
+    {
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].IsPrimaryKey &&
+                columns[i].DeclaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase))
+                return columns[i].Ordinal;
+        }
+        return -1;
+    }
+
     private List<IndexInfo> GetTableIndexes(string tableName)
     {
         return _schema.Indexes
@@ -285,7 +445,7 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var table = _schema.GetTable(tableName);
-        using var cursor = _bTreeReader.CreateCursor((uint)table.RootPage);
+        using var cursor = CreateTableCursor(table);
         long count = 0;
         while (cursor.MoveNext())
             count++;
@@ -298,5 +458,6 @@ public sealed class SharcDatabase : IDisposable
         if (_disposed) return;
         _disposed = true;
         _pageSource.Dispose();
+        _keyHandle?.Dispose();
     }
 }

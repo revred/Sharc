@@ -1,4 +1,4 @@
-# Sharc
+# 🦈 Sharc
 
 [![CI](https://github.com/user/sharc/actions/workflows/ci.yml/badge.svg)](https://github.com/user/sharc/actions/workflows/ci.yml)
 
