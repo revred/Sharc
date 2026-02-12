@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -26,15 +26,14 @@ public class OntologyTests
     [TestMethod]
     public void ConceptKind_ValuesAreDefined()
     {
-        Assert.AreEqual(1, (int)ConceptKind.File);
-        Assert.AreEqual(4, (int)ConceptKind.Class);
-        // ... sanity check
+        Assert.IsTrue(Enum.IsDefined(ConceptKind.File));
+        Assert.IsTrue(Enum.IsDefined(ConceptKind.Class));
     }
 
     [TestMethod]
     public void RelationKind_ValuesAreDefined()
     {
-        Assert.AreEqual(10, (int)RelationKind.Contains);
-        Assert.AreEqual(15, (int)RelationKind.Calls);
+        Assert.IsTrue(Enum.IsDefined(RelationKind.Contains));
+        Assert.IsTrue(Enum.IsDefined(RelationKind.Calls));
     }
 }

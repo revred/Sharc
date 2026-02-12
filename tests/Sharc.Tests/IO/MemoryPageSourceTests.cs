@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.IO;
@@ -61,7 +61,7 @@ public class MemoryPageSourceTests
     [Fact]
     public void Constructor_InvalidHeader_ThrowsInvalidDatabaseException()
     {
-        var data = new byte[4096]; // all zeros — no valid magic
+        var data = new byte[4096]; // all zeros â€” no valid magic
 
         Assert.Throws<InvalidDatabaseException>(() => _ = new MemoryPageSource(data));
     }

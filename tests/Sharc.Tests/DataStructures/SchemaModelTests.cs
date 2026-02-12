@@ -1,5 +1,5 @@
 /*-------------------------------------------------------------------------------------------------!
-  “Where the mind is free to imagine and the craft is guided by clarity, code awakens.”            |
+  â€œWhere the mind is free to imagine and the craft is guided by clarity, code awakens.â€            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
   Software here is treated not as static text, but as a living system designed to learn and evolve.
@@ -9,14 +9,14 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message — or a prompt with the right context.
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 
-using Sharc.Schema;
+using Sharc.Core.Schema;
 using Xunit;
 
 namespace Sharc.Tests.DataStructures;
@@ -67,7 +67,8 @@ public class SchemaModelTests
                     TableName = "users",
                     RootPage = 4,
                     Sql = "CREATE INDEX idx_users_name ON users (name)",
-                    IsUnique = false
+                    IsUnique = false,
+                    Columns = [new IndexColumnInfo { Name = "name", Ordinal = 0, IsDescending = false }]
                 },
                 new IndexInfo
                 {
@@ -75,7 +76,8 @@ public class SchemaModelTests
                     TableName = "users",
                     RootPage = 5,
                     Sql = "CREATE UNIQUE INDEX idx_users_unique_name ON users (name)",
-                    IsUnique = true
+                    IsUnique = true,
+                    Columns = [new IndexColumnInfo { Name = "name", Ordinal = 0, IsDescending = false }]
                 }
             ],
             Views =

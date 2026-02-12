@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.BTree;
@@ -107,9 +107,9 @@ public class CellParserTests
     }
 
     [Theory]
-    [InlineData(50, 4096, 50)]       // Small payload — all inline
-    [InlineData(100, 4096, 100)]     // Medium — still inline
-    [InlineData(4061, 4096, 4061)]   // Exactly at threshold (4096 - 35 = 4061) — all inline
+    [InlineData(50, 4096, 50)]       // Small payload â€” all inline
+    [InlineData(100, 4096, 100)]     // Medium â€” still inline
+    [InlineData(4061, 4096, 4061)]   // Exactly at threshold (4096 - 35 = 4061) â€” all inline
     public void CalculateInlinePayloadSize_SmallPayload_ReturnsFullSize(
         int payloadSize, int usablePageSize, int expected)
     {
@@ -122,7 +122,7 @@ public class CellParserTests
     {
         // For 4096 usable: X = 4061, M = 489
         // SQLite btree.c: K = M + (P-M)%(U-4); if K<=X use K, else use M
-        // P=5000: K = 489 + (5000-489)%4092 = 489 + 419 = 908; 908 <= 4061 → 908
+        // P=5000: K = 489 + (5000-489)%4092 = 489 + 419 = 908; 908 <= 4061 â†’ 908
         int payloadSize = 5000;
         int usablePageSize = 4096;
 
@@ -135,7 +135,7 @@ public class CellParserTests
     public void CalculateInlinePayloadSize_PageSize1024_CorrectThreshold()
     {
         // For 1024 usable: X = 989, M = 103
-        // K = 103 + (1000-103)%1020 = 103 + 897 = 1000; 1000 > 989 → M = 103
+        // K = 103 + (1000-103)%1020 = 103 + 897 = 1000; 1000 > 989 â†’ M = 103
         int payloadSize = 1000;
         int usablePageSize = 1024;
 

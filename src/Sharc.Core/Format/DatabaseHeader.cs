@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -56,7 +56,7 @@ public readonly struct DatabaseHeader
     /// <summary>Schema cookie (incremented on schema change).</summary>
     public uint SchemaCookie { get; }
 
-    /// <summary>Schema format number (1–4).</summary>
+    /// <summary>Schema format number (1â€“4).</summary>
     public int SchemaFormat { get; }
 
     /// <summary>Text encoding (1=UTF-8, 2=UTF-16le, 3=UTF-16be).</summary>

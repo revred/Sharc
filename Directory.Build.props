@@ -51,6 +51,8 @@
     <IsTestProject>true</IsTestProject>
     <!-- Don't treat warnings as errors in test projects — xUnit analyzers can be noisy -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- CA1707 — Method_Scenario_Expected naming is the project's test convention -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <!-- ─── Benchmark projects (bench/**) ─── -->
@@ -58,6 +60,13 @@
     <IsPackable>false</IsPackable>
     <!-- Benchmarks only build in Release -->
     <OutputType>Exe</OutputType>
+    <!-- BenchmarkDotNet conventions differ from library code:
+         CA1707 — Prefix_Description naming is standard for benchmark methods
+         CA1001 — Disposable lifetime managed by [GlobalSetup]/[GlobalCleanup]
+         CA1305 — String formatting in benchmarks doesn't need IFormatProvider
+         CA1822 — BenchmarkDotNet requires instance methods, not static -->
+    <NoWarn>$(NoWarn);CA1707;CA1001;CA1305;CA1822</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
 </Project>

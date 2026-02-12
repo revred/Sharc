@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -48,6 +48,8 @@ public sealed class MakerAiAdapter : ISchemaAdapter
     public string? NodeSyncColumn => "SyncStatus";
     /// <inheritdoc/>
     public string? NodeUpdatedColumn => "LastUpdatedUTC";
+    /// <inheritdoc/>
+    public string? NodeAliasColumn => null;
 
     // --- Edge Columns ---
     /// <inheritdoc/>

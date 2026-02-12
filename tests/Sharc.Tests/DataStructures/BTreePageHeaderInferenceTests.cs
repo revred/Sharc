@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -97,7 +97,7 @@ public class BTreePageHeaderInferenceTests
     [Fact]
     public void Parse_CellContentOffset0_StoredAsZero()
     {
-        // The struct stores the raw value; interpretation of 0→65536 is the caller's job
+        // The struct stores the raw value; interpretation of 0â†’65536 is the caller's job
         var data = MakePageHeader(0x0D, cellContentOffset: 0);
         var header = BTreePageHeader.Parse(data);
         Assert.Equal(0, header.CellContentOffset);

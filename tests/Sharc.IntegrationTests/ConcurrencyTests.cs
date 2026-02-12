@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message — or a prompt with the right context.
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.IntegrationTests.Helpers;
@@ -27,7 +27,7 @@ namespace Sharc.IntegrationTests;
 /// </summary>
 public class ConcurrencyTests
 {
-    // ─── Same Table, Parallel Readers ───────────────────────────────────────
+    // â”€â”€â”€ Same Table, Parallel Readers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_SameTable_AllGetCorrectRowCount()
@@ -141,7 +141,7 @@ public class ConcurrencyTests
         Assert.All(exceptions, ex => Assert.Null(ex));
     }
 
-    // ─── Different Tables, Parallel Readers ─────────────────────────────────
+    // â”€â”€â”€ Different Tables, Parallel Readers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_DifferentTables_AllGetCorrectData()
@@ -178,7 +178,7 @@ public class ConcurrencyTests
         Assert.All(rowCounts.Values, count => Assert.True(count > 0));
     }
 
-    // ─── Large Table, Parallel Scans ────────────────────────────────────────
+    // â”€â”€â”€ Large Table, Parallel Scans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_LargeTable_AllGetSameChecksum()
@@ -223,7 +223,7 @@ public class ConcurrencyTests
         Assert.All(checksums, cs => Assert.Equal(expected, cs));
     }
 
-    // ─── Mixed Operations: Readers + Schema + GetRowCount ───────────────────
+    // â”€â”€â”€ Mixed Operations: Readers + Schema + GetRowCount â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelMixedOps_ReadersSchemaAndRowCount_AllStable()
@@ -278,7 +278,7 @@ public class ConcurrencyTests
         Assert.Empty(exceptions);
     }
 
-    // ─── Sustained Parallel Load ────────────────────────────────────────────
+    // â”€â”€â”€ Sustained Parallel Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void SustainedParallelLoad_100Iterations_NoCorruption()
@@ -331,7 +331,7 @@ public class ConcurrencyTests
         Assert.Empty(exceptions);
     }
 
-    // ─── Column Projection, Parallel ────────────────────────────────────────
+    // â”€â”€â”€ Column Projection, Parallel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_WithColumnProjection_CorrectSubset()
@@ -371,7 +371,7 @@ public class ConcurrencyTests
         });
     }
 
-    // ─── Same Table Different Projections in Parallel ───────────────────────
+    // â”€â”€â”€ Same Table Different Projections in Parallel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_DifferentProjections_SameTable_NoConflict()
@@ -413,7 +413,7 @@ public class ConcurrencyTests
         Assert.Empty(exceptions);
     }
 
-    // ─── File-Backed Concurrent Access ──────────────────────────────────────
+    // â”€â”€â”€ File-Backed Concurrent Access â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_FileBacked_AllGetCorrectData()
@@ -459,7 +459,7 @@ public class ConcurrencyTests
         }
     }
 
-    // ─── Rapid Create/Dispose Readers ───────────────────────────────────────
+    // â”€â”€â”€ Rapid Create/Dispose Readers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void RapidCreateDispose_ManyReaders_NoResourceLeak()
@@ -477,7 +477,7 @@ public class ConcurrencyTests
                 using var reader = db.CreateReader("users");
                 reader.Read();
                 _ = reader.GetInt64(0);
-                // Immediately dispose — tests cleanup under contention
+                // Immediately dispose â€” tests cleanup under contention
             }
             catch (Exception ex)
             {
@@ -489,7 +489,7 @@ public class ConcurrencyTests
         Assert.Empty(exceptions);
     }
 
-    // ─── Interleaved Row Access Across Threads ──────────────────────────────
+    // â”€â”€â”€ Interleaved Row Access Across Threads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ParallelReaders_InterleavedAccess_DataNeverCrossTalks()
@@ -521,7 +521,7 @@ public class ConcurrencyTests
                         long id = reader.GetInt64(0);
                         string name = reader.GetString(1);
 
-                        // Verify data integrity — name must match id
+                        // Verify data integrity â€” name must match id
                         Assert.Equal($"User{id}", name);
                         ids.Add(id);
                     }

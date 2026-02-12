@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -26,7 +26,7 @@ public class NativeSchemaAdapterTests
     [TestMethod]
     public void NativeAdapter_ExpectedConfiguration()
     {
-        ISchemaAdapter adapter = new NativeSchemaAdapter();
+        var adapter = new NativeSchemaAdapter();
         
         Assert.AreEqual("_concepts", adapter.NodeTableName);
         Assert.AreEqual("_relations", adapter.EdgeTableName);

@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message — or a prompt with the right context.
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.IO;
@@ -219,7 +219,7 @@ public class FilePageSourceTests : IDisposable
         source.Dispose();
 
         Assert.True(File.Exists(path));
-        File.Delete(path); // should not throw — handle released
+        File.Delete(path); // should not throw â€” handle released
     }
 
     [Fact]
@@ -271,11 +271,11 @@ public class FilePageSourceTests : IDisposable
 
         using var source = new FilePageSource(path);
 
-        // Read page 2 — internal buffer has 0xAA at [0]
+        // Read page 2 â€” internal buffer has 0xAA at [0]
         var page2 = source.GetPage(2);
         Assert.Equal(0xAA, page2[0]);
 
-        // Read page 3 — internal buffer is overwritten with 0xBB
+        // Read page 3 â€” internal buffer is overwritten with 0xBB
         var page3 = source.GetPage(3);
         Assert.Equal(0xBB, page3[0]);
     }

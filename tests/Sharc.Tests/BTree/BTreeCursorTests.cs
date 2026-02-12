@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -161,7 +161,7 @@ public class BTreeCursorTests
 
     /// <summary>
     /// Builds a minimal SQLite record payload with one integer column (constant 1).
-    /// Record format: [header_size=2][serial_type=9] → body is empty (constant 1).
+    /// Record format: [header_size=2][serial_type=9] â†’ body is empty (constant 1).
     /// </summary>
     private static byte[] MakeSimpleRecord()
     {
@@ -238,7 +238,7 @@ public class BTreeCursorTests
     {
         // Page layout:
         // Page 1: db header
-        // Page 2: interior page → left child = page 3, right child = page 4
+        // Page 2: interior page â†’ left child = page 3, right child = page 4
         // Page 3: leaf page with rows 1, 2
         // Page 4: leaf page with rows 3, 4
         var record = MakeSimpleRecord();

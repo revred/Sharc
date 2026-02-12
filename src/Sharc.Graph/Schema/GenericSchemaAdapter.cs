@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -57,6 +57,9 @@ public sealed class GenericSchemaAdapter : ISchemaAdapter
     
     /// <inheritdoc/>
     public string? NodeUpdatedColumn { get; set; }
+
+    /// <inheritdoc/>
+    public string? NodeAliasColumn { get; set; }
 
     /// <inheritdoc/>
     public string EdgeIdColumn { get; set; } = "Id";

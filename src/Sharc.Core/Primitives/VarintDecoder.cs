@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Runtime.CompilerServices;
@@ -21,7 +21,7 @@ namespace Sharc.Core.Primitives;
 
 /// <summary>
 /// High-performance SQLite varint decoder operating on spans.
-/// SQLite varints are 1–9 bytes, big-endian, MSB continuation flag.
+/// SQLite varints are 1â€“9 bytes, big-endian, MSB continuation flag.
 /// </summary>
 public static class VarintDecoder
 {
@@ -30,7 +30,7 @@ public static class VarintDecoder
     /// </summary>
     /// <param name="data">Input bytes.</param>
     /// <param name="value">The decoded 64-bit value.</param>
-    /// <returns>Number of bytes consumed (1–9).</returns>
+    /// <returns>Number of bytes consumed (1â€“9).</returns>
     /// <exception cref="ArgumentException">Span is empty.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int Read(ReadOnlySpan<byte> data, out long value)
@@ -46,7 +46,7 @@ public static class VarintDecoder
             return 1;
         }
 
-        // Bytes 1–8: high bit = continuation, low 7 bits = data
+        // Bytes 1â€“8: high bit = continuation, low 7 bits = data
         long result = b & 0x7F;
         for (int i = 1; i < 8; i++)
         {
@@ -88,7 +88,7 @@ public static class VarintDecoder
     /// <summary>
     /// Writes a varint to the destination span.
     /// </summary>
-    /// <returns>Number of bytes written (1–9).</returns>
+    /// <returns>Number of bytes written (1â€“9).</returns>
     public static int Write(Span<byte> destination, long value)
     {
         int len = GetEncodedLength(value);
@@ -99,7 +99,7 @@ public static class VarintDecoder
             // Byte 9 gets all 8 bits
             destination[8] = (byte)(v & 0xFF);
             v >>= 8;
-            // Bytes 1–8 get 7 data bits + continuation
+            // Bytes 1â€“8 get 7 data bits + continuation
             for (int i = 7; i >= 0; i--)
             {
                 destination[i] = (byte)((v & 0x7F) | 0x80);

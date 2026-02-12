@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                         |
+  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Graph.Model;
@@ -33,7 +33,7 @@ public sealed class GraphRecord
     public int TypeId { get; init; }
     
     /// <summary>The JSON document body.</summary>
-    public string JsonData { get; private set; }
+    public string JsonData { get; init; }
     
     /// <summary>Cloud Version Number (for sync).</summary>
     public int CVN { get; init; }
@@ -48,19 +48,20 @@ public sealed class GraphRecord
     public DateTimeOffset CreatedAt { get; init; }
     
     /// <summary>Last update timestamp.</summary>
-    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; init; }
 
     /// <summary>
     /// Creates a new GraphRecord.
     /// </summary>
-    public GraphRecord(RecordId id, NodeKey key, int typeId, string jsonData)
+    public GraphRecord(RecordId id, NodeKey key, int typeId, string jsonData, 
+        DateTimeOffset? createdAt = null, DateTimeOffset? updatedAt = null)
     {
         Id = id;
         Key = key;
         TypeId = typeId;
         JsonData = jsonData;
-        CreatedAt = DateTimeOffset.UtcNow;
-        UpdatedAt = CreatedAt;
+        CreatedAt = createdAt ?? default;
+        UpdatedAt = updatedAt ?? CreatedAt;
     }
 
     // Methods for JSON extraction will be added later
