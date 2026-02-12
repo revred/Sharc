@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Sharc.Crypto</RootNamespace>
+    <AssemblyName>Sharc.Crypto</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+  </ItemGroup>
+</Project>

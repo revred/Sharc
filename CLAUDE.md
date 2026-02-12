@@ -1,0 +1,211 @@
+# CLAUDE.md — Sharc Project Instructions
+
+## Project Overview
+
+Sharc is a high-performance, pure managed C# library that reads SQLite database files (format 3) from disk and in-memory buffers, with optional password-based encryption. It is **read-only** — no writes, no SQL VM, no query planner.
+
+## Build & Test Commands
+
+```bash
+# Build everything
+dotnet build
+
+# Run unit tests
+dotnet test tests/Sharc.Tests
+
+# Run integration tests
+dotnet test tests/Sharc.IntegrationTests
+
+# Run all tests
+dotnet test
+
+# Run benchmarks (Release only)
+dotnet run -c Release --project bench/Sharc.Benchmarks
+
+# Run a specific test class
+dotnet test tests/Sharc.Tests --filter "FullyQualifiedName~VarintDecoderTests"
+
+# Run tests with verbose output
+dotnet test --verbosity normal
+```
+
+## Architecture — Read This First
+
+Sharc is a **layered file-format reader**, not a database engine.
+
+```
+┌────────────────────────────────────────────────┐
+│  Public API (Sharc/)                           │
+│  SharcDatabase → SharcDataReader               │
+│  SharcSchema → TableInfo, ColumnInfo           │
+├────────────────────────────────────────────────┤
+│  Schema Layer (Sharc.Core/Schema/)             │
+│  SchemaReader: parses sqlite_schema table      │
+├────────────────────────────────────────────────┤
+│  Record Layer (Sharc.Core/Records/)            │
+│  RecordDecoder: varint + serial type → values  │
+├────────────────────────────────────────────────┤
+│  B-Tree Layer (Sharc.Core/BTree/)              │
+│  BTreeReader → BTreeCursor → CellParser        │
+├────────────────────────────────────────────────┤
+│  Page I/O Layer (Sharc.Core/IO/)               │
+│  IPageSource: File | Memory | Cached           │
+│  IPageTransform: Identity | Decrypting         │
+├────────────────────────────────────────────────┤
+│  Primitives (Sharc.Core/Primitives/)           │
+│  VarintDecoder, SerialTypeCodec                │
+├────────────────────────────────────────────────┤
+│  Crypto (Sharc.Crypto/)                        │
+│  KDF (Argon2id), AEAD (AES-256-GCM)           │
+└────────────────────────────────────────────────┘
+```
+
+## Key Conventions
+
+### TDD Workflow — Non-Negotiable
+
+Every feature starts with tests. The cycle is:
+1. Write failing test(s) that define behavior
+2. Run → RED
+3. Write minimum implementation to pass
+4. Run → GREEN
+5. Refactor
+6. Run all tests → still GREEN
+7. Commit
+
+Never write implementation code without a corresponding test. If you're unsure what to test, check `PRC/TestStrategy.md`.
+
+### Test Naming
+
+```
+[MethodUnderTest]_[Scenario]_[ExpectedResult]
+```
+
+Examples: `DecodeVarint_SingleByteZero_ReturnsZero`, `Parse_InvalidMagic_ThrowsInvalidDatabaseException`
+
+### Code Style
+
+- **Prefer `ReadOnlySpan<byte>` and `Span<byte>`** over `byte[]` in all internal APIs
+- **Zero-allocation hot paths**: no LINQ, no boxing, no string interpolation in tight loops
+- **`[MethodImpl(MethodImplOptions.AggressiveInlining)]`** on tiny primitive methods (varint decode, serial type lookup)
+- **Big-endian reads**: use `BinaryPrimitives.ReadUInt16BigEndian()` etc., never manual bit shifts
+- **Structs for parsed headers**: `DatabaseHeader`, `BTreePageHeader`, `ColumnValue` are `readonly struct`
+- **Classes for stateful objects**: `SharcDatabase`, `SharcDataReader`, page sources, cursors
+- **`sealed`** on all classes unless designed for inheritance (almost none are)
+- **`required` properties** with `init` for immutable data objects
+- **No heavy dependencies**: only xUnit, FluentAssertions, BenchmarkDotNet. No Newtonsoft, no EF, no DI container
+- **XML doc comments** on all public API members
+- **Nullable reference types** enabled everywhere (`<Nullable>enable</Nullable>`)
+- **`using` declarations** (not `using` blocks) for disposables in short-lived scopes
+
+### Namespace Conventions
+
+```
+Sharc                        — Public API (SharcDatabase, SharcDataReader, options, enums)
+Sharc.Schema                 — Public schema models (TableInfo, ColumnInfo, etc.)
+Sharc.Exceptions             — Public exception types
+Sharc.Core                   — Internal interfaces (IPageSource, IBTreeReader, etc.)
+Sharc.Core.Primitives        — Varint, serial type codecs
+Sharc.Core.Format            — File/page header parsers
+Sharc.Core.IO                — Page sources, caching
+Sharc.Core.BTree             — B-tree traversal
+Sharc.Core.Records           — Record decoding
+Sharc.Core.Schema            — Internal schema reader
+Sharc.Crypto                 — Encryption (KDF, ciphers, key handles)
+```
+
+### Error Handling
+
+- Throw `InvalidDatabaseException` for file-format violations (bad magic, invalid header)
+- Throw `CorruptPageException` for page-level corruption (bad page type, pointer out of bounds)
+- Throw `SharcCryptoException` for encryption errors (wrong password, tampered data)
+- Throw `UnsupportedFeatureException` for valid-but-unsupported SQLite features
+- Throw `ArgumentException` / `ArgumentOutOfRangeException` for API misuse
+- Never catch and swallow exceptions in library code
+- Use `ThrowHelper` pattern for hot paths to keep method bodies JIT-friendly
+
+### Performance Rules
+
+- All page reads go through `IPageSource` — never open files directly from upper layers
+- Page cache is LRU with configurable capacity (default 2000 pages)
+- Record decoding operates directly on page spans — no intermediate buffer copies
+- Column projection: when a reader requests specific columns, skip decoding unwanted columns
+- Overflow page assembly: use `ArrayPool<byte>.Shared` for temporary buffers, return after use
+
+## Project Structure
+
+```
+sharc/
+├── CLAUDE.md                          ← You are here
+├── README.md                          ← User-facing docs
+├── Sharc.sln                          ← Solution file
+├── PRC/                               ← Architecture docs & decisions
+│   ├── SQLiteC_Analysis.md            ← SQLite format analysis
+│   ├── StrategyDecision.md            ← Why pure managed (Option A)
+│   ├── EncryptionSpec.md              ← Encryption file format spec
+│   ├── TestStrategy.md                ← Test layers & approach
+│   ├── ExecutionPlan.md               ← Milestone roadmap
+│   ├── ArchitectureOverview.md        ← Full architecture reference
+│   ├── APIDesign.md                   ← API design rationale
+│   ├── PerformanceStrategy.md         ← Performance budget & techniques
+│   ├── CodingStandards.md            ← Detailed code conventions
+│   ├── DecisionLog.md                 ← ADR-style decision records
+│   ├── DependencyPolicy.md           ← Allowed dependencies
+│   ├── ErrorHandling.md              ← Exception hierarchy & patterns
+│   ├── FileFormatQuickRef.md         ← Condensed SQLite format reference
+│   ├── SecurityModel.md              ← Threat model & security design
+│   ├── CompatibilityMatrix.md        ← SQLite feature support matrix
+│   └── Glossary.md                    ← Domain terminology
+├── src/
+│   ├── Sharc/                         ← Public API library
+│   ├── Sharc.Core/                    ← Internal engine
+│   └── Sharc.Crypto/                  ← Encryption layer
+├── tests/
+│   ├── Sharc.Tests/                   ← Unit tests
+│   └── Sharc.IntegrationTests/        ← End-to-end tests
+├── bench/
+│   └── Sharc.Benchmarks/             ← BenchmarkDotNet suite
+└── tools/                             ← Build scripts, test DB generators
+```
+
+## Current Status
+
+**Milestone 1 (Primitives + Spans)**: Tests written (RED), implementation stubs in place.
+
+All tests currently throw `NotImplementedException`. Next step is implementing:
+1. `VarintDecoder.Read()` / `.Write()` / `.GetEncodedLength()`
+2. `SerialTypeCodec.GetContentSize()` / `.GetStorageClass()`
+3. `DatabaseHeader.Parse()`
+4. `BTreePageHeader.Parse()` / `.ReadCellPointers()`
+
+## What NOT To Do
+
+- **Do not add SQL parsing or execution** — Sharc is a format reader, not a database engine
+- **Do not add write support** until read-only is solid and benchmarked (Milestone 10 gate)
+- **Do not add dependencies** without checking `PRC/DependencyPolicy.md`
+- **Do not use `unsafe` code** unless profiling proves it's necessary and the gain is >20%
+- **Do not allocate in hot paths** — use spans, stackalloc, ArrayPool
+- **Do not break the public API surface** without updating all docs and tests
+- **Do not merge without all tests green**
+
+## Key Files to Understand the System
+
+| To understand... | Read... |
+|-----------------|---------|
+| What Sharc does | `README.md` |
+| SQLite file format | `PRC/SQLiteC_Analysis.md` and `PRC/FileFormatQuickRef.md` |
+| Why pure managed | `PRC/StrategyDecision.md` |
+| Architecture layers | `PRC/ArchitectureOverview.md` |
+| Public API design | `PRC/APIDesign.md` |
+| Encryption format | `PRC/EncryptionSpec.md` |
+| What to build next | `PRC/ExecutionPlan.md` |
+| How to test | `PRC/TestStrategy.md` |
+| All decisions made | `PRC/DecisionLog.md` |
+
+## Asking Questions
+
+If you encounter ambiguity:
+1. List 2–3 reasonable interpretations
+2. Pick the one that's simplest, most testable, and closest to SQLite's behavior
+3. Document the choice in `PRC/DecisionLog.md`
+4. Add a `// DECISION:` comment at the relevant code site

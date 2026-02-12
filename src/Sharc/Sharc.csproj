@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Sharc</RootNamespace>
+    <AssemblyName>Sharc</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sharc.Tests" />
+    <InternalsVisibleTo Include="Sharc.IntegrationTests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+  </ItemGroup>
+</Project>
