@@ -193,7 +193,7 @@ All tests currently throw `NotImplementedException`. Next step is implementing:
 | To understand... | Read... |
 |-----------------|---------|
 | What Sharc does | `README.md` |
-| SQLite file format | `PRC/SQLiteC_Analysis.md` and `PRC/FileFormatQuickRef.md` |
+| SQLite file format | `docs/SQLiteC_Analysis.md` and `docs/FileFormatQuickRef.md` |
 | Why pure managed | `PRC/StrategyDecision.md` |
 | Architecture layers | `PRC/ArchitectureOverview.md` |
 | Public API design | `PRC/APIDesign.md` |

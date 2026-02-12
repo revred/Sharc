@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers;
@@ -97,6 +97,40 @@ internal sealed class BTreeCursor : IBTreeCursor
         return AdvanceToNextCell();
     }
 
+    /// <inheritdoc />
+    public bool Seek(long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ReturnAssembledPayload();
+
+        _stack.Clear();
+        _exhausted = false;
+        _initialized = true;
+
+        bool exactMatch = DescendToLeaf(_rootPage, rowId);
+
+        if (_currentCellIndex < _currentHeader.CellCount)
+        {
+            ParseCurrentLeafCell();
+            return exactMatch;
+        }
+        else
+        {
+            // Moved past end of leaf, try next leaf
+            if (MoveToNextLeaf())
+            {
+                _currentCellIndex = 0;
+                ParseCurrentLeafCell();
+                return false;
+            }
+            else
+            {
+                _exhausted = true;
+                return false;
+            }
+        }
+    }
+
     private void DescendToLeftmostLeaf(uint pageNumber)
     {
         while (true)
@@ -128,11 +162,86 @@ internal sealed class BTreeCursor : IBTreeCursor
             _stack.Push((pageNumber, 0, pointers, header));
 
             // Descend to the left child of the first cell
-            // Cell pointers are page-absolute offsets (from start of page)
             var interiorPage = _pageSource.GetPage(pageNumber);
             uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(
                 interiorPage[pointers[0]..]);
             pageNumber = leftChild;
+        }
+    }
+
+    private bool DescendToLeaf(uint pageNumber, long targetRowId)
+    {
+        while (true)
+        {
+            var page = _pageSource.GetPage(pageNumber);
+            int headerOffset = pageNumber == 1 ? 100 : 0;
+            var header = BTreePageHeader.Parse(page[headerOffset..]);
+            var pointers = header.ReadCellPointers(page[headerOffset..]);
+
+            if (header.IsLeaf)
+            {
+                _currentLeafPage = pageNumber;
+                _currentHeader = header;
+                _currentPointers = pointers;
+
+                // Binary search leaf cells
+                int low = 0;
+                int high = header.CellCount - 1;
+                while (low <= high)
+                {
+                    int mid = low + ((high - low) >> 1);
+                    int cellOffset = pointers[mid];
+
+                    CellParser.ParseTableLeafCell(page[cellOffset..], out int _, out long rowId);
+
+                    if (rowId < targetRowId)
+                        low = mid + 1;
+                    else if (rowId > targetRowId)
+                        high = mid - 1;
+                    else
+                    {
+                        _currentCellIndex = mid;
+                        return true;
+                    }
+                }
+
+                _currentCellIndex = low;
+                return false;
+            }
+
+            // Interior page — binary search for the correct child
+            int idx = -1;
+            int l = 0;
+            int r = header.CellCount - 1;
+
+            while (l <= r)
+            {
+                int mid = l + ((r - l) >> 1);
+                int cellOffset = pointers[mid];
+                CellParser.ParseTableInteriorCell(page[cellOffset..], out _, out long key);
+
+                if (key >= targetRowId)
+                {
+                    idx = mid;
+                    r = mid - 1;
+                }
+                else
+                {
+                    l = mid + 1;
+                }
+            }
+
+            if (idx != -1)
+            {
+                _stack.Push((pageNumber, idx, pointers, header));
+                int cellOffset = pointers[idx];
+                CellParser.ParseTableInteriorCell(page[cellOffset..], out uint leftChild, out _);
+                pageNumber = leftChild;
+            }
+            else
+            {
+                pageNumber = header.RightChildPage;
+            }
         }
     }
 
