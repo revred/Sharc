@@ -195,4 +195,41 @@ public class BTreePageHeaderTests
         Assert.Equal((ushort)60, pointers[1]);
         Assert.Equal((ushort)70, pointers[2]);
     }
+
+    // --- Write → Parse round-trip ---
+
+    [Fact]
+    public void WriteAndParse_LeafTable_RoundTrips()
+    {
+        var original = BTreePageHeader.Parse(CreateLeafTableHeader(cellCount: 7, contentOffset: 2048));
+
+        var buf = new byte[12];
+        BTreePageHeader.Write(buf, original);
+        var roundTripped = BTreePageHeader.Parse(buf);
+
+        Assert.Equal(original.PageType, roundTripped.PageType);
+        Assert.Equal(original.CellCount, roundTripped.CellCount);
+        Assert.Equal(original.CellContentOffset, roundTripped.CellContentOffset);
+        Assert.Equal(original.FirstFreeblockOffset, roundTripped.FirstFreeblockOffset);
+        Assert.Equal(original.FragmentedFreeBytes, roundTripped.FragmentedFreeBytes);
+        Assert.Equal(original.RightChildPage, roundTripped.RightChildPage);
+        Assert.True(roundTripped.IsLeaf);
+    }
+
+    [Fact]
+    public void WriteAndParse_InteriorTable_RoundTrips()
+    {
+        var original = BTreePageHeader.Parse(CreateInteriorTableHeader(cellCount: 5, rightChild: 12345));
+
+        var buf = new byte[12];
+        BTreePageHeader.Write(buf, original);
+        var roundTripped = BTreePageHeader.Parse(buf);
+
+        Assert.Equal(original.PageType, roundTripped.PageType);
+        Assert.Equal(original.CellCount, roundTripped.CellCount);
+        Assert.Equal(original.CellContentOffset, roundTripped.CellContentOffset);
+        Assert.Equal(original.RightChildPage, roundTripped.RightChildPage);
+        Assert.False(roundTripped.IsLeaf);
+        Assert.Equal(12345u, roundTripped.RightChildPage);
+    }
 }

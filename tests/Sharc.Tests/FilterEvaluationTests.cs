@@ -189,4 +189,44 @@ public sealed class FilterEvaluationTests
         var row = new[] { ColumnValue.FromInt64(4, 42L) };
         Assert.True(FilterEvaluator.MatchesAll([], row));
     }
+
+    // --- Blob column always false (not comparable) ---
+
+    [Fact]
+    public void Matches_BlobColumn_AnyOperator_ReturnsFalse()
+    {
+        var col = ColumnValue.Blob(14, new byte[] { 0xFF });
+        Assert.False(FilterEvaluator.Matches(col, SharcOperator.Equal, new byte[] { 0xFF }));
+        Assert.False(FilterEvaluator.Matches(col, SharcOperator.NotEqual, 1L));
+        Assert.False(FilterEvaluator.Matches(col, SharcOperator.LessThan, "abc"));
+    }
+
+    // --- Real ←→ Int cross-type ---
+
+    [Fact]
+    public void Matches_RealColumn_LongFilterValue_CrossTypeComparison()
+    {
+        var col = ColumnValue.FromDouble(42.0);
+        Assert.True(FilterEvaluator.Matches(col, SharcOperator.Equal, 42L));
+        Assert.True(FilterEvaluator.Matches(col, SharcOperator.GreaterThan, 41L));
+        Assert.False(FilterEvaluator.Matches(col, SharcOperator.LessThan, 42L));
+    }
+
+    [Fact]
+    public void Matches_RealColumn_FloatFilterValue_CrossTypeComparison()
+    {
+        // Use a value that round-trips exactly between float and double
+        var col = ColumnValue.FromDouble(3.0);
+        Assert.True(FilterEvaluator.Matches(col, SharcOperator.Equal, 3.0f));
+        Assert.True(FilterEvaluator.Matches(col, SharcOperator.GreaterOrEqual, 3.0f));
+    }
+
+    // --- Incompatible types ---
+
+    [Fact]
+    public void Matches_IntegralColumn_IncompatibleStringFilter_ReturnsFalse()
+    {
+        var col = ColumnValue.FromInt64(4, 42L);
+        Assert.False(FilterEvaluator.Matches(col, SharcOperator.Equal, "42"));
+    }
 }
