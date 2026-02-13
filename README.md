@@ -235,7 +235,7 @@ Primitives          VarintDecoder, SerialTypeCodec
 src/Sharc/                    -- Public API (SharcDatabase, SharcDataReader, Schema)
 src/Sharc.Core/               -- Internal: page I/O, b-tree, record decoding, primitives
 src/Sharc.Graph/              -- Graph storage layer (ConceptStore, RelationStore)
-src/Sharc.Graph.Abstractions/ -- Graph interfaces and models
+src/Sharc.Graph.Surface/      -- Graph interfaces and models
 src/Sharc.Crypto/             -- Encryption: AES-256-GCM, Argon2id KDF, key management
 tests/Sharc.Tests/            -- Unit tests (xUnit)
 tests/Sharc.IntegrationTests/ -- End-to-end tests with real SQLite databases
