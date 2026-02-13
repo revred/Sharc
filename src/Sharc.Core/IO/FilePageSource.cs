@@ -54,7 +54,7 @@ public sealed class FilePageSource : IWritablePageSource
     public int PageSize { get; }
 
     /// <inheritdoc />
-    public int PageCount { get; }
+    public int PageCount => (int)((RandomAccess.GetLength(_handle) + PageSize - 1) / PageSize);
 
     /// <summary>
     /// Opens a SQLite database file for on-demand page reads and optional writes.
@@ -91,7 +91,6 @@ public sealed class FilePageSource : IWritablePageSource
             {
                 var header = DatabaseHeader.Parse(headerBuf);
                 PageSize = header.PageSize;
-                PageCount = header.PageCount;
             }
             catch
             {
@@ -103,7 +102,6 @@ public sealed class FilePageSource : IWritablePageSource
         {
             // New database creation - defaults or wait for header write
             PageSize = 4096;
-            PageCount = 0;
         }
     }
 

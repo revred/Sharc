@@ -31,7 +31,8 @@ public sealed class AgentRegistry
     /// Registers an agent in the local registry.
     /// </summary>
     /// <param name="agent">The agent information to register.</param>
-    public void RegisterAgent(AgentInfo agent)
+    /// <param name="transaction">Optional active transaction. If null, a new one is created and committed.</param>
+    public void RegisterAgent(AgentInfo agent, Transaction? transaction = null)
     {
         var table = GetTable(AgentsTableName);
         if (table == null) throw new InvalidOperationException($"System table {AgentsTableName} not found.");
@@ -52,14 +53,34 @@ public sealed class AgentRegistry
         EnsureCacheLoaded();
         long rowId = ++_maxRowId;
 
-        using var tx = _db.BeginTransaction();
-        var source = tx.GetShadowSource();
-        
-        AppendToTableBTree(source, table.RootPage, rowId, recordBuffer);
-        tx.Commit();
+        bool ownsTransaction = transaction == null;
+        var tx = transaction ?? _db.BeginTransaction();
 
-        // Update cache
-        _cache![agent.AgentId] = agent;
+        try
+        {
+            var source = tx.GetShadowSource();
+            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
+            
+            mutator.Insert((uint)table.RootPage, rowId, recordBuffer);
+            
+            if (ownsTransaction) 
+            {
+                tx.Commit();
+                // Update cache only on separate commit
+                _cache![agent.AgentId] = agent;
+            }
+            else
+            {
+                // If external transaction, we don't know if it will commit.
+                // Invalidate cache so subsequent reads force a reload from DB
+                // (which will see the transaction's view or the original state).
+                _cache = null;
+            }
+        }
+        finally
+        {
+            if (ownsTransaction) tx.Dispose();
+        }
     }
 
     /// <summary>
@@ -106,36 +127,5 @@ public sealed class AgentRegistry
             if (t.Name == name) return t;
         }
         return null;
-    }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859", Justification = "Generic IWritablePageSource is required for flexibility across sync providers.")]
-    private void AppendToTableBTree(IWritablePageSource source, int rootPage, long rowId, byte[] payload)
-    {
-        uint pageNum = (uint)rootPage;
-        byte[] pageData = new byte[source.PageSize];
-        source.ReadPage(pageNum, pageData);
-
-        var header = BTreePageHeader.Parse(pageData.AsSpan(pageNum == 1 ? 100 : 0));
-        int headerOffset = (pageNum == 1) ? SQLiteLayout.DatabaseHeaderSize : 0;
-        
-        int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, payload.Length, _db.Header.UsablePageSize);
-        ushort newContentOffset = (ushort)(header.CellContentOffset - cellSize);
-        
-        CellBuilder.BuildTableLeafCell(rowId, payload, pageData.AsSpan(newContentOffset), _db.Header.UsablePageSize);
-
-        int cellPointerOffset = headerOffset + header.HeaderSize;
-        int newPointerPos = cellPointerOffset + (header.CellCount * 2);
-        BinaryPrimitives.WriteUInt16BigEndian(pageData.AsSpan(newPointerPos), newContentOffset);
-
-        var updatedHeader = new BTreePageHeader(
-            header.PageType,
-            header.FirstFreeblockOffset,
-            (ushort)(header.CellCount + 1),
-            newContentOffset,
-            header.FragmentedFreeBytes,
-            header.RightChildPage);
-
-        BTreePageHeader.Write(pageData.AsSpan(headerOffset), updatedHeader);
-        source.WritePage(pageNum, pageData);
     }
 }

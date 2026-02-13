@@ -5,7 +5,7 @@ namespace Sharc.Trust;
 /// <summary>
 /// ECDsa P-256 implementation of <see cref="ISharcSigner"/>.
 /// </summary>
-public sealed class SharcSigner : ISharcSigner
+public sealed class SharcSigner : ISharcSigner, IDisposable
 {
     private readonly ECDsa _dsa;
 
@@ -48,5 +48,11 @@ public sealed class SharcSigner : ISharcSigner
         using var dsa = ECDsa.Create();
         dsa.ImportSubjectPublicKeyInfo(publicKey, out _);
         return dsa.VerifyData(data, signature, HashAlgorithmName.SHA256);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _dsa.Dispose();
     }
 }
