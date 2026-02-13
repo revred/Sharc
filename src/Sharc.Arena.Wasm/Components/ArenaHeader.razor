@@ -1,0 +1,82 @@
+@* Arena header with title, preset selector, run controls, and engine legend *@
+
+<header class="arena-header">
+    <div class="arena-header-badge">&#x1F988; SHARC BENCHMARK ARENA</div>
+    <h1 class="arena-header-title">Browser Database Showdown</h1>
+    <p class="arena-header-subtitle">
+        @Slides.Count benchmarks &middot; @Engines.Count engines &middot; Sequential &middot; ~@EstimateSeconds()s
+    </p>
+
+    @* Workload Presets *@
+    <div class="arena-presets-section">
+        <div class="arena-presets-label">Workload Profile</div>
+        <PresetSelector ActivePreset="@Preset" Presets="@Presets" OnChange="@OnPresetChange" Disabled="@(State == BenchmarkState.Running)" />
+    </div>
+
+    @* Run controls *@
+    <div class="arena-controls">
+        <button class="@RunButtonClass" @onclick="@OnRunClick">
+            @RunButtonText
+        </button>
+
+        @if (State != BenchmarkState.Idle)
+        {
+            <div class="arena-timer @(State == BenchmarkState.Running ? "active" : "")">
+                @if (State == BenchmarkState.Running)
+                {
+                    <span class="blink-dot"></span>
+                }
+                @((ElapsedMs / 1000.0).ToString("F1"))s
+            </div>
+            <span class="arena-progress-text">@DoneCount/@Slides.Count</span>
+        }
+    </div>
+
+    @* Engine legend *@
+    <div class="arena-legend">
+        @foreach (var e in Engines)
+        {
+            <div class="arena-legend-item">
+                <span class="arena-legend-dot" style="background: @e.Color"></span>
+                <span class="arena-legend-text">@e.Icon @e.Name <span class="arena-legend-footprint">@e.Footprint</span></span>
+            </div>
+        }
+    </div>
+</header>
+
+@code {
+    [Parameter] public required IReadOnlyList<SlideDefinition> Slides { get; set; }
+    [Parameter] public required IReadOnlyList<EngineDefinition> Engines { get; set; }
+    [Parameter] public required string Preset { get; set; }
+    [Parameter] public required IReadOnlyList<Preset> Presets { get; set; }
+    [Parameter] public required BenchmarkState State { get; set; }
+    [Parameter] public required int DoneCount { get; set; }
+    [Parameter] public required double ElapsedMs { get; set; }
+    [Parameter] public required EventCallback<string> OnPresetChange { get; set; }
+    [Parameter] public required EventCallback OnRun { get; set; }
+    [Parameter] public required EventCallback OnStop { get; set; }
+
+    private int EstimateSeconds()
+    {
+        var preset = Presets.FirstOrDefault(p => p.Id == Preset);
+        if (preset is null) return 0;
+        return (int)Math.Round(Slides.Count * (preset.TransitionMs + preset.PauseMs) / 1000.0);
+    }
+
+    private string RunButtonClass => State == BenchmarkState.Running ? "btn-stop" : "btn-run";
+
+    private string RunButtonText => State switch
+    {
+        BenchmarkState.Idle => "\u25B6  Run All Benchmarks",
+        BenchmarkState.Running => "\u25FC  Stop",
+        _ => "\u25B6  Run Again",
+    };
+
+    private async Task OnRunClick()
+    {
+        if (State == BenchmarkState.Running)
+            await OnStop.InvokeAsync();
+        else
+            await OnRun.InvokeAsync();
+    }
+}

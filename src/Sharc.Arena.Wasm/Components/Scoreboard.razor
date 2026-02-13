@@ -1,0 +1,67 @@
+@* Final standings scoreboard shown after all benchmarks complete *@
+
+@{
+    // Calculate wins
+    var scores = new Dictionary<string, (int Wins, int Supported)>();
+    foreach (var e in Engines) scores[e.Id] = (0, 0);
+
+    foreach (var slide in Slides)
+    {
+        if (!Results.TryGetValue(slide.Id, out var data)) continue;
+        double bestVal = double.MaxValue;
+        string? bestId = null;
+        foreach (var e in Engines)
+        {
+            if (data.TryGetValue(e.Id, out var r) && !r.NotSupported && r.Value.HasValue)
+            {
+                var s = scores[e.Id];
+                scores[e.Id] = (s.Wins, s.Supported + 1);
+                if (r.Value.Value < bestVal) { bestVal = r.Value.Value; bestId = e.Id; }
+            }
+        }
+        if (bestId is not null)
+        {
+            var s = scores[bestId];
+            scores[bestId] = (s.Wins + 1, s.Supported);
+        }
+    }
+
+    var winnerId = scores.OrderByDescending(kv => kv.Value.Wins).First().Key;
+    var winnerEngine = Engines.FirstOrDefault(e => e.Id == winnerId);
+}
+
+<div class="scoreboard" style="border-color: @(winnerEngine?.Color)28; box-shadow: 0 0 80px @(winnerEngine?.Color)08">
+    <div class="scoreboard-header">
+        <div class="scoreboard-header-label">Final Standings</div>
+        <div class="scoreboard-header-title" style="background: linear-gradient(135deg, @(winnerEngine?.Color), #fff); -webkit-background-clip: text; -webkit-text-fill-color: transparent">
+            &#x1F3C6; @winnerEngine?.Name Dominates
+        </div>
+    </div>
+    <div class="scoreboard-grid" style="grid-template-columns: repeat(@Engines.Count, 1fr)">
+        @foreach (var e in Engines)
+        {
+            var (wins, supported) = scores[e.Id];
+            var isWinner = e.Id == winnerId;
+            <div class="scoreboard-card @(isWinner ? "winner" : "")" style="@(isWinner ? $"background: {e.Color}0D; border-color: {e.Color}30" : "")">
+                <span class="scoreboard-icon">@e.Icon</span>
+                <div class="scoreboard-name" style="color: @e.Color">@e.Name</div>
+                <div class="scoreboard-wins @(isWinner ? "winner-wins" : "")" style="@(isWinner ? $"color: {e.Color}" : "")">@wins</div>
+                <div class="scoreboard-total">wins / @Slides.Count</div>
+                <div class="scoreboard-supported">@supported supported</div>
+                @if (isWinner)
+                {
+                    <div class="scoreboard-champion" style="background: linear-gradient(135deg, @e.Color, @(e.Color)CC)">&#x1F3C6; CHAMPION</div>
+                }
+            </div>
+        }
+    </div>
+    <div class="scoreboard-footer">
+        BenchmarkDotNet v0.15.8 &middot; .NET 10.0.2 &middot; Win11 &middot; i7-11800H. SQLite via Microsoft.Data.Sqlite (pre-opened, pre-prepared). Sequential execution. "Not Supported" = no native API.
+    </div>
+</div>
+
+@code {
+    [Parameter] public required Dictionary<string, IReadOnlyDictionary<string, EngineBaseResult>> Results { get; set; }
+    [Parameter] public required IReadOnlyList<SlideDefinition> Slides { get; set; }
+    [Parameter] public required IReadOnlyList<EngineDefinition> Engines { get; set; }
+}

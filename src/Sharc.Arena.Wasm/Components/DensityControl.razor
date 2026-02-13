@@ -1,0 +1,25 @@
+@* Per-tile density (row count) selector *@
+
+@if (Tiers.Count > 1)
+{
+    <div class="density-control">
+        <span class="density-label">Rows</span>
+        <div class="density-buttons">
+            @foreach (var t in Tiers)
+            {
+                var isActive = ActiveTier == t.Id;
+                <button class="density-btn @(isActive ? "active" : "") @(Disabled ? "disabled" : "")"
+                        @onclick="@(() => { if (!Disabled) OnChange.InvokeAsync(t.Id); })">
+                    @t.Label
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public required IReadOnlyList<DensityTier> Tiers { get; set; }
+    [Parameter] public required string ActiveTier { get; set; }
+    [Parameter] public required EventCallback<string> OnChange { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+}

@@ -10,3 +10,12 @@ TestResults/
 nul
 .claude/
 secrets/
+
+# 3rdparty build artifacts (db rebuild infra [rust] + build output)
+3rdparty/surrealdb/src/
+3rdparty/surrealdb/out/
+3rdparty/surrealdb/node_modules/
+
+# 3rdparty build artifacts (db rebuild infra [C/C++] + build output)
+3rdParty/arangodb/src
+3rdParty/arangodb/out
