@@ -15,6 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Buffers;
 using Sharc.Core;
 using Sharc.Core.Records;
 using Sharc.Graph.Model;
@@ -100,69 +101,98 @@ internal sealed class RelationStore
     private IEnumerable<GraphEdge> GetEdgesViaIndex(NodeKey origin, RelationKind? kindFilter)
     {
         using var indexCursor = _reader.CreateIndexCursor((uint)_originIndexRootPage);
-        var buffer = new ColumnValue[_columnCount];
-
-        // Use SeekFirst for O(log n) initial positioning instead of linear scan
-        if (!indexCursor.SeekFirst(origin.Value))
-            yield break; // No entries with this origin key
-
-        // Reuse a single table cursor for all row lookups
-        using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
-
-        // Process the first entry (SeekFirst already positioned us)
-        do
+        var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+        try
         {
-            var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
-            if (indexRecord.Length < 2) continue;
+            // Use SeekFirst for O(log n) initial positioning instead of linear scan
+            if (!indexCursor.SeekFirst(origin.Value))
+                yield break; // No entries with this origin key
 
-            long indexOriginValue = indexRecord[0].AsInt64();
+            // Reuse a single table cursor for all row lookups
+            using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
 
-            // Early exit: index is sorted, so if we've passed the target value, stop
-            if (indexOriginValue > origin.Value)
-                yield break;
+            // Process the first entry (SeekFirst already positioned us)
+            do
+            {
+                var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
+                if (indexRecord.Length < 2) continue;
 
-            if (indexOriginValue != origin.Value) continue;
+                long indexOriginValue = indexRecord[0].AsInt64();
 
-            // Match found — seek the table row by rowid
-            long rowId = indexRecord[^1].AsInt64();
-            if (!tableCursor.Seek(rowId)) continue;
+                // Early exit: index is sorted, so if we've passed the target value, stop
+                if (indexOriginValue > origin.Value)
+                    yield break;
 
-            _decoder.DecodeRecord(tableCursor.Payload, buffer);
+                if (indexOriginValue != origin.Value) continue;
 
-            long kindVal = _colKind >= 0 && _colKind < buffer.Length ? buffer[_colKind].AsInt64() : 0;
-            if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
+                // Match found — seek the table row by rowid
+                long rowId = indexRecord[^1].AsInt64();
+                if (!tableCursor.Seek(rowId)) continue;
 
-            yield return MapToEdge(buffer);
+                _decoder.DecodeRecord(tableCursor.Payload, buffer);
+
+                long kindVal = _colKind >= 0 && _colKind < _columnCount ? buffer[_colKind].AsInt64() : 0;
+                if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
+
+                yield return MapToEdge(buffer);
+            }
+            while (indexCursor.MoveNext());
         }
-        while (indexCursor.MoveNext());
+        finally
+        {
+            ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+        }
     }
 
     private IEnumerable<GraphEdge> GetEdgesViaTableScan(NodeKey origin, RelationKind? kindFilter)
     {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
-        var buffer = new ColumnValue[_columnCount];
-
-        while (cursor.MoveNext())
+        var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+        try
         {
-            _decoder.DecodeRecord(cursor.Payload, buffer);
+            while (cursor.MoveNext())
+            {
+                _decoder.DecodeRecord(cursor.Payload, buffer);
 
-            long sourceKey = _colSource >= 0 && _colSource < buffer.Length ? buffer[_colSource].AsInt64() : 0;
-            if (sourceKey != origin.Value) continue;
+                long sourceKey = _colSource >= 0 && _colSource < _columnCount ? buffer[_colSource].AsInt64() : 0;
+                if (sourceKey != origin.Value) continue;
 
-            long kindVal = _colKind >= 0 && _colKind < buffer.Length ? buffer[_colKind].AsInt64() : 0;
-            if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
+                long kindVal = _colKind >= 0 && _colKind < _columnCount ? buffer[_colKind].AsInt64() : 0;
+                if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
 
-            yield return MapToEdge(buffer);
+                yield return MapToEdge(buffer);
+            }
         }
+        finally
+        {
+            ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+        }
+    }
+
+    /// <summary>
+    /// Creates a zero-allocation edge cursor for the given origin node.
+    /// Avoids GraphEdge allocation per row — caller reads typed properties directly.
+    /// </summary>
+    internal IEdgeCursor CreateEdgeCursor(NodeKey origin, RelationKind? kindFilter = null)
+    {
+        if (_originIndexRootPage > 0)
+        {
+            return new IndexEdgeCursor(_reader, _decoder, _originIndexRootPage,
+                _tableRootPage, _columnCount, origin.Value, kindFilter,
+                _colSource, _colKind, _colTarget, _colData, _colWeight);
+        }
+        return new TableScanEdgeCursor(_reader, _decoder, _tableRootPage,
+            _columnCount, origin.Value, kindFilter,
+            _colSource, _colKind, _colTarget, _colData, _colWeight);
     }
 
     private GraphEdge MapToEdge(ColumnValue[] columns)
     {
-        long source = _colSource >= 0 && _colSource < columns.Length ? columns[_colSource].AsInt64() : 0;
-        long target = _colTarget >= 0 && _colTarget < columns.Length ? columns[_colTarget].AsInt64() : 0;
-        int kind = _colKind >= 0 && _colKind < columns.Length ? (int)columns[_colKind].AsInt64() : 0;
-        string data = _colData >= 0 && _colData < columns.Length ? columns[_colData].AsString() : "{}";
-        string id = _colId >= 0 && _colId < columns.Length ? columns[_colId].AsString() : "";
+        long source = _colSource >= 0 && _colSource < _columnCount ? columns[_colSource].AsInt64() : 0;
+        long target = _colTarget >= 0 && _colTarget < _columnCount ? columns[_colTarget].AsInt64() : 0;
+        int kind = _colKind >= 0 && _colKind < _columnCount ? (int)columns[_colKind].AsInt64() : 0;
+        string data = _colData >= 0 && _colData < _columnCount ? columns[_colData].AsString() : "{}";
+        string id = _colId >= 0 && _colId < _columnCount ? columns[_colId].AsString() : "";
         
         var edge = new GraphEdge(
             new RecordId(_schema.EdgeTableName, id),
@@ -171,10 +201,10 @@ internal sealed class RelationStore
             kind,
             data)
         {
-            CVN = _colCvn >= 0 && _colCvn < columns.Length ? (int)columns[_colCvn].AsInt64() : 0,
-            LVN = _colLvn >= 0 && _colLvn < columns.Length ? (int)columns[_colLvn].AsInt64() : 0,
-            SyncStatus = _colSync >= 0 && _colSync < columns.Length ? (int)columns[_colSync].AsInt64() : 0,
-            Weight = _colWeight >= 0 && _colWeight < columns.Length ? (float)columns[_colWeight].AsDouble() : 1.0f
+            CVN = _colCvn >= 0 && _colCvn < _columnCount ? (int)columns[_colCvn].AsInt64() : 0,
+            LVN = _colLvn >= 0 && _colLvn < _columnCount ? (int)columns[_colLvn].AsInt64() : 0,
+            SyncStatus = _colSync >= 0 && _colSync < _columnCount ? (int)columns[_colSync].AsInt64() : 0,
+            Weight = _colWeight >= 0 && _colWeight < _columnCount ? (float)columns[_colWeight].AsDouble() : 1.0f
         };
         
         return edge;

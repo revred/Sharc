@@ -92,6 +92,13 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     }
 
     /// <inheritdoc/>
+    public IEdgeCursor GetEdgeCursor(NodeKey origin, RelationKind? kind = null)
+    {
+        EnsureInitialized();
+        return _relations.CreateEdgeCursor(origin, kind);
+    }
+
+    /// <inheritdoc/>
     public GraphResult Traverse(NodeKey startKey, TraversalPolicy policy)
     {
         EnsureInitialized();
@@ -109,14 +116,14 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         {
             var (currentKey, depth, currentPath) = queue.Dequeue();
             var record = _concepts.Get(currentKey);
-            
+
             if (record != null)
             {
                 // Token Budgeting
                 if (policy.MaxTokens.HasValue && totalTokens + record.Tokens > policy.MaxTokens.Value)
                 {
                     // If we can't fit this entire node, we stop expansion here for this branch
-                    if (resultNodes.Count > 0) break; 
+                    if (resultNodes.Count > 0) break;
                     // Special case: if even the first node exceeds budget, we still return it but stop.
                 }
 
@@ -133,27 +140,43 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
                 if (policy.MaxDepth.HasValue && depth >= policy.MaxDepth.Value) continue;
 
                 int count = 0;
-                
-                // Sort edges by weight if budget is active (Phase 3 optimization)
-                var edges = _relations.GetEdges(currentKey);
+
                 if (policy.MaxTokens.HasValue)
                 {
-                    edges = edges.OrderByDescending(e => e.Weight);
-                }
+                    // Budget active — need to sort by weight, must materialize edges
+                    var edges = _relations.GetEdges(currentKey)
+                        .OrderByDescending(e => e.Weight);
 
-                foreach (var edge in edges)
-                {
-                    // Weight filter
-                    if (policy.MinWeight.HasValue && edge.Weight < policy.MinWeight.Value) continue;
-
-                    if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break;
-                    
-                    if (!visited.Contains(edge.TargetKey))
+                    foreach (var edge in edges)
                     {
-                        visited.Add(edge.TargetKey);
-                        var nextPath = new List<NodeKey>(currentPath) { edge.TargetKey };
-                        queue.Enqueue((edge.TargetKey, depth + 1, nextPath));
-                        count++;
+                        if (policy.MinWeight.HasValue && edge.Weight < policy.MinWeight.Value) continue;
+                        if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break;
+
+                        if (!visited.Contains(edge.TargetKey))
+                        {
+                            visited.Add(edge.TargetKey);
+                            var nextPath = new List<NodeKey>(currentPath) { edge.TargetKey };
+                            queue.Enqueue((edge.TargetKey, depth + 1, nextPath));
+                            count++;
+                        }
+                    }
+                }
+                else
+                {
+                    // No budget — use zero-alloc edge cursor (no GraphEdge allocation per row)
+                    using var cursor = _relations.CreateEdgeCursor(currentKey);
+                    while (cursor.MoveNext())
+                    {
+                        if (policy.MinWeight.HasValue && cursor.Weight < policy.MinWeight.Value) continue;
+                        if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break;
+
+                        var targetKey = new NodeKey(cursor.TargetKey);
+                        if (visited.Add(targetKey))
+                        {
+                            var nextPath = new List<NodeKey>(currentPath) { targetKey };
+                            queue.Enqueue((targetKey, depth + 1, nextPath));
+                            count++;
+                        }
                     }
                 }
             }

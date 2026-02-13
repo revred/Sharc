@@ -57,9 +57,9 @@ public sealed class SharcDatabase : IDisposable
     private readonly DatabaseHeader _header;
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
-    private readonly SharcSchema _schema;
     private readonly SharcDatabaseInfo _info;
     private readonly SharcKeyHandle? _keyHandle;
+    private SharcSchema? _schema;
     private bool _disposed;
 
     /// <summary>
@@ -70,7 +70,7 @@ public sealed class SharcDatabase : IDisposable
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _schema;
+            return GetSchema();
         }
     }
 
@@ -101,17 +101,22 @@ public sealed class SharcDatabase : IDisposable
 
     private SharcDatabase(IPageSource pageSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
-        SharcSchema schema, SharcDatabaseInfo info,
-        SharcKeyHandle? keyHandle = null)
+        SharcDatabaseInfo info, SharcKeyHandle? keyHandle = null)
     {
         _pageSource = pageSource;
         _header = header;
         _bTreeReader = bTreeReader;
         _recordDecoder = recordDecoder;
-        _schema = schema;
         _info = info;
         _keyHandle = keyHandle;
     }
+
+    /// <summary>
+    /// Lazily loads the schema on first access. Avoids ~15-28 KB allocation on
+    /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
+    /// </summary>
+    private SharcSchema GetSchema() =>
+        _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
 
     /// <summary>
     /// Opens a SQLite database from a file path.
@@ -289,10 +294,6 @@ public sealed class SharcDatabase : IDisposable
         var bTreeReader = new BTreeReader(pageSource, header);
         var recordDecoder = new RecordDecoder();
 
-        // Read schema from page 1
-        var schemaReader = new SchemaReader(bTreeReader, recordDecoder);
-        var schema = schemaReader.ReadSchema();
-
         var info = new SharcDatabaseInfo
         {
             PageSize = header.PageSize,
@@ -306,7 +307,7 @@ public sealed class SharcDatabase : IDisposable
             IsEncrypted = isEncrypted
         };
 
-        return new SharcDatabase(pageSource, header, bTreeReader, recordDecoder, schema, info, keyHandle);
+        return new SharcDatabase(pageSource, header, bTreeReader, recordDecoder, info, keyHandle);
     }
 
     /// <summary>
@@ -318,9 +319,10 @@ public sealed class SharcDatabase : IDisposable
     public SharcDataReader CreateReader(string tableName)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var table = _schema.GetTable(tableName);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
         var cursor = CreateTableCursor(table);
-        var tableIndexes = GetTableIndexes(tableName);
+        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
             _bTreeReader, tableIndexes);
     }
@@ -334,7 +336,7 @@ public sealed class SharcDatabase : IDisposable
     public SharcDataReader CreateReader(string tableName, params string[]? columns)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var table = _schema.GetTable(tableName);
+        var table = GetSchema().GetTable(tableName);
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -350,7 +352,7 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        var tableIndexes = GetTableIndexes(tableName);
+        var tableIndexes = GetTableIndexes(GetSchema(), tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
             _bTreeReader, tableIndexes);
     }
@@ -377,7 +379,8 @@ public sealed class SharcDatabase : IDisposable
     public SharcDataReader CreateReader(string tableName, string[]? columns, SharcFilter[]? filters)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var table = _schema.GetTable(tableName);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -394,9 +397,55 @@ public sealed class SharcDatabase : IDisposable
         }
 
         ResolvedFilter[]? resolved = ResolveFilters(table, filters);
-        var tableIndexes = GetTableIndexes(tableName);
+        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
             _bTreeReader, tableIndexes, resolved);
+    }
+
+    /// <summary>
+    /// Creates a reader with byte-level row filtering using the FilterStar expression tree.
+    /// Rows that do not match the filter are skipped without full record decoding.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="filter">FilterStar expression tree.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, IFilterStar filter)
+    {
+        return CreateReader(tableName, null, filter);
+    }
+
+    /// <summary>
+    /// Creates a reader with column projection and byte-level row filtering.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
+    /// <param name="filter">FilterStar expression tree.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
+        var cursor = CreateTableCursor(table);
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                var col = table.Columns.FirstOrDefault(c =>
+                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
+                projection[i] = col?.Ordinal
+                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+            }
+        }
+
+        int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
+        var filterNode = FilterCompiler.Compile(filter, table.Columns, rowidAlias);
+        var tableIndexes = GetTableIndexes(schema, tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
+            _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
     }
 
     private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
@@ -443,9 +492,9 @@ public sealed class SharcDatabase : IDisposable
         return -1;
     }
 
-    private List<IndexInfo> GetTableIndexes(string tableName)
+    private static List<IndexInfo> GetTableIndexes(SharcSchema schema, string tableName)
     {
-        return _schema.Indexes
+        return schema.Indexes
             .Where(i => i.TableName.Equals(tableName, StringComparison.OrdinalIgnoreCase))
             .ToList();
     }
@@ -457,7 +506,7 @@ public sealed class SharcDatabase : IDisposable
     public long GetRowCount(string tableName)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var table = _schema.GetTable(tableName);
+        var table = GetSchema().GetTable(tableName);
         using var cursor = CreateTableCursor(table);
         long count = 0;
         while (cursor.MoveNext())

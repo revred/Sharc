@@ -10,6 +10,8 @@ TestResults/
 nul
 .claude/
 secrets/
+published/
+
 
 # 3rdparty build artifacts (db rebuild infra [rust] + build output)
 3rdparty/surrealdb/src/
