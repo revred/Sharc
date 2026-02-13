@@ -388,7 +388,7 @@ public sealed class FilterStarIntegrationTests
         var data = TestDatabaseFactory.CreateUsersDatabase(10);
         using var db = SharcDatabase.OpenMemory(data);
         using var reader = db.CreateReader("users",
-            new[] { "name", "age" },
+            ["name", "age"],
             FilterStar.Column("age").Lte(22L));
 
         Assert.Equal(2, reader.FieldCount);

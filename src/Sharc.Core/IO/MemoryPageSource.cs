@@ -23,7 +23,7 @@ namespace Sharc.Core.IO;
 /// Page source backed by an in-memory byte buffer.
 /// All page reads are zero-copy span slices â€” no allocation, no I/O.
 /// </summary>
-public sealed class MemoryPageSource : IPageSource
+public sealed class MemoryPageSource : IWritablePageSource
 {
     private readonly ReadOnlyMemory<byte> _data;
 
@@ -71,6 +71,33 @@ public sealed class MemoryPageSource : IPageSource
     {
         GetPage(pageNumber).CopyTo(destination);
         return PageSize;
+    }
+
+    /// <inheritdoc />
+    public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
+    {
+        ValidatePageNumber(pageNumber);
+        int offset = (int)(pageNumber - 1) * PageSize;
+        
+        // MemoryPageSource usually wraps a ReadOnlyMemory. 
+        // We need a mutable reference or cast away read-only if we want to support writes.
+        // Actually, MemoryPageSource is often used with byte[] that is passed as ReadOnlyMemory.
+        // If data is really read-only, this will throw.
+        
+        if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(_data, out var segment))
+        {
+            source.CopyTo(segment.AsSpan(offset, PageSize));
+        }
+        else
+        {
+            throw new InvalidOperationException("Cannot write to MemoryPageSource because the underlying memory is not an array.");
+        }
+    }
+
+    /// <inheritdoc />
+    public void Flush()
+    {
+        // No-op for in-memory source.
     }
 
     /// <summary>

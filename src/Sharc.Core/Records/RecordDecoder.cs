@@ -24,8 +24,14 @@ namespace Sharc.Core.Records;
 /// <summary>
 /// Decodes SQLite record format (header + body) into typed column values.
 /// </summary>
-internal sealed class RecordDecoder : IRecordDecoder
+internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
 {
+    /// <inheritdoc />
+    public string Name => "RecordDecoder";
+
+    /// <inheritdoc />
+    public void OnRegister(object context) { }
+
     /// <inheritdoc />
     public ColumnValue[] DecodeRecord(ReadOnlySpan<byte> payload)
     {
@@ -129,10 +135,11 @@ internal sealed class RecordDecoder : IRecordDecoder
     }
 
     /// <inheritdoc />
-    public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes)
+    public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
-        int headerEnd = (int)headerSize;
+        bodyOffset = (int)headerSize;
+        int headerEnd = bodyOffset;
 
         int colCount = 0;
         while (offset < headerEnd && colCount < serialTypes.Length)

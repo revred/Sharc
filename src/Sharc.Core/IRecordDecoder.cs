@@ -59,8 +59,9 @@ public interface IRecordDecoder
     /// <param name="payload">The raw record bytes (header + body).</param>
     /// <param name="serialTypes">Pre-allocated array to fill with serial type values.
     /// Only the first min(columnCount, serialTypes.Length) entries are written.</param>
+    /// <param name="bodyOffset">Receives the byte offset where the record body begins.</param>
     /// <returns>The number of columns found in the record.</returns>
-    int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes);
+    int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset);
 }
 
 /// <summary>

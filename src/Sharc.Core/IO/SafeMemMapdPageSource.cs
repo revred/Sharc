@@ -27,7 +27,7 @@ namespace Sharc.Core.IO;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses <see cref="UnmanagedMemoryManager"/> (the BCL <c>MemoryManager&lt;byte&gt;</c> pattern)
+/// Uses <see cref="UnsafeMemoryManager"/> (the BCL <c>MemoryManager&lt;byte&gt;</c> pattern)
 /// to expose the mapped region as safe <see cref="ReadOnlyMemory{T}"/> / <see cref="ReadOnlySpan{T}"/>.
 /// The single <c>unsafe</c> block is confined to the constructor's pointer acquisition.
 /// All subsequent page reads are fully safe span slices.
@@ -37,11 +37,11 @@ namespace Sharc.Core.IO;
 /// <see cref="Span{T}"/> length limits. For larger files, use a streaming page source.
 /// </para>
 /// </remarks>
-public sealed class MemoryMappedPageSource : IPageSource
+public sealed class SafeMemMapdPageSource : IPageSource
 {
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
-    private readonly UnmanagedMemoryManager _memoryManager;
+    private readonly UnsafeMemoryManager _memoryManager;
     private readonly ReadOnlyMemory<byte> _memory;
     private bool _disposed;
 
@@ -58,7 +58,7 @@ public sealed class MemoryMappedPageSource : IPageSource
     /// <exception cref="FileNotFoundException">File does not exist.</exception>
     /// <exception cref="ArgumentException">File is empty or exceeds 2 GiB.</exception>
     /// <exception cref="Sharc.Exceptions.InvalidDatabaseException">Database header is invalid.</exception>
-    public MemoryMappedPageSource(string filePath)
+    public SafeMemMapdPageSource(string filePath)
     {
         var fileInfo = new FileInfo(filePath);
         if (!fileInfo.Exists)
@@ -79,14 +79,14 @@ public sealed class MemoryMappedPageSource : IPageSource
         _accessor = _mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
 
         // SAFETY: The single unsafe block â€” acquires the OS-pinned pointer and wraps it
-        // in UnmanagedMemoryManager (BCL MemoryManager<byte> pattern) so all downstream
+        // in UnsafeMemoryManager (BCL MemoryManager<byte> pattern) so all downstream
         // code uses safe Memory<byte> / Span<byte>.
         unsafe
         {
             byte* ptr = null;
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
             ptr += _accessor.PointerOffset;
-            _memoryManager = new UnmanagedMemoryManager(ptr, fileLength);
+            _memoryManager = new UnsafeMemoryManager(ptr, fileLength);
         }
 
         _memory = _memoryManager.Memory;

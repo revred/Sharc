@@ -68,9 +68,12 @@ public readonly struct BTreePageHeader
     public bool IsTable => PageType == BTreePageType.LeafTable || PageType == BTreePageType.InteriorTable;
 
     /// <summary>Header size in bytes (8 for leaf, 12 for interior).</summary>
-    public int HeaderSize => IsLeaf ? 8 : 12;
+    public int HeaderSize => IsLeaf ? SQLiteLayout.TableLeafHeaderSize : SQLiteLayout.TableInteriorHeaderSize;
 
-    private BTreePageHeader(BTreePageType pageType, ushort firstFreeblockOffset,
+    /// <summary>
+    /// Initializes a new b-tree page header.
+    /// </summary>
+    public BTreePageHeader(BTreePageType pageType, ushort firstFreeblockOffset,
         ushort cellCount, ushort cellContentOffset, byte fragmentedFreeBytes,
         uint rightChildPage)
     {
@@ -104,7 +107,7 @@ public readonly struct BTreePageHeader
         bool isLeaf = pageType is BTreePageType.LeafTable or BTreePageType.LeafIndex;
         if (!isLeaf)
         {
-            rightChild = BinaryPrimitives.ReadUInt32BigEndian(data[8..]);
+            rightChild = BinaryPrimitives.ReadUInt32BigEndian(data[SQLiteLayout.RightChildPageOffset..]);
         }
 
         return new BTreePageHeader(pageType, firstFreeblock, cellCount,
@@ -141,5 +144,28 @@ public readonly struct BTreePageHeader
             offset += 2;
         }
         return pointers;
+    }
+
+    /// <summary>
+    /// Writes the b-tree page header to the destination span.
+    /// </summary>
+    /// <param name="destination">At least 12 bytes.</param>
+    /// <param name="header">The header values to write.</param>
+    /// <returns>Number of bytes written (8 for leaf, 12 for interior).</returns>
+    public static int Write(Span<byte> destination, BTreePageHeader header)
+    {
+        destination[0] = (byte)header.PageType;
+        BinaryPrimitives.WriteUInt16BigEndian(destination[1..], header.FirstFreeblockOffset);
+        BinaryPrimitives.WriteUInt16BigEndian(destination[3..], header.CellCount);
+        BinaryPrimitives.WriteUInt16BigEndian(destination[5..], header.CellContentOffset);
+        destination[7] = header.FragmentedFreeBytes;
+
+        if (!header.IsLeaf)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(destination[SQLiteLayout.RightChildPageOffset..], header.RightChildPage);
+            return SQLiteLayout.TableInteriorHeaderSize;
+        }
+
+        return SQLiteLayout.TableLeafHeaderSize;
     }
 }

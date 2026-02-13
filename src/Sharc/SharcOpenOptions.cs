@@ -44,4 +44,9 @@ public sealed class SharcOpenOptions
     /// Default is <see cref="FileShare.ReadWrite"/> to coexist with SQLite writers.
     /// </summary>
     public FileShare FileShareMode { get; set; } = FileShare.ReadWrite;
+
+    /// <summary>
+    /// If true, the database is opened for writing (if supported by the page source).
+    /// </summary>
+    public bool Writable { get; set; }
 }
