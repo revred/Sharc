@@ -171,12 +171,19 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     /// <inheritdoc />
     public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset)
     {
+        return ReadSerialTypes(payload, serialTypes.AsSpan(), out bodyOffset);
+    }
+
+    /// <inheritdoc />
+    public int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset)
+    {
         int offset = VarintDecoder.Read(payload, out long headerSize);
         bodyOffset = (int)headerSize;
         int headerEnd = bodyOffset;
 
         int colCount = 0;
-        while (offset < headerEnd && colCount < serialTypes.Length)
+        int capacity = serialTypes.Length;
+        while (offset < headerEnd && colCount < capacity)
         {
             offset += VarintDecoder.Read(payload[offset..], out serialTypes[colCount]);
             colCount++;

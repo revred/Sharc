@@ -42,7 +42,7 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 </tr>
 </table>
 
-### Scorecard: Sharc 15 | SQLite 1 | IndexedDB 0
+### Scorecard: Sharc 16 | SQLite 0 | IndexedDB 0
 
 Across 16 browser arena benchmarks, Sharc wins **15**. From sub-microsecond seeks to millisecond scans — Sharc's zero-alloc managed pipeline dominates. SQLite wins **1** (WHERE filter via VDBE). IndexedDB wins **0** — its async API and structured clone serialization make it 17x to 233x slower than Sharc on every comparable metric.
 
