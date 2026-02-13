@@ -48,7 +48,7 @@ Across 16 browser arena benchmarks, Sharc wins **15**. From sub-microsecond seek
 
 | Benchmark | Sharc | SQLite | Winner |
 |:---|---:|---:|:---:|
-| WHERE Filter (age > 30 AND score < 50) | 1.23 ms | **0.55 ms** | **SQLite** |
+| WHERE Filter (age > 30 AND score < 50) | 0.69 ms | **0.55 ms** | **SQLite** |
 
 Sharc wins 8 of 9 core benchmarks on speed. SQLite's VDBE still leads on complex WHERE filters — Tier 3 SIMD is planned to close the gap. For reads, seeks, scans, graphs, and encryption — Sharc is the undisputed performance leader for the browser.
 
@@ -68,7 +68,7 @@ Speed without memory discipline is a lie. Here's what each engine allocates per 
 | Schema Read | 6.8 KB | **2.5 KB** | SQLite |
 | Point Lookup (Seek) | 7.7 KB | **728 B** | SQLite |
 | Sequential Scan (5K rows) | 2.4 MB | **1.4 MB** | SQLite |
-| WHERE Filter | **430 KB** | **720 B** | SQLite |
+| WHERE Filter | 8.4 KB | **720 B** | SQLite |
 
 > **Sharc allocates less in 5 of 9 core benchmarks.** On hot-path scans where GC pauses kill latency — NULL scans, type decode, sustained reads — Sharc's allocation is **12x lower** than SQLite per-row.
 >
@@ -181,7 +181,7 @@ All benchmarks below are from BenchmarkDotNet v0.15.8, DefaultJob (15 iterations
 | Batch 6 Lookups | **5,237 ns** | 127,763 ns | **24.4x** | 9,424 B | 3,712 B |
 | Type Decode (5K ints) | **213 us** | 819 us | **3.8x** | 8,416 B | 688 B |
 | NULL Detection | **156 us** | 746 us | **4.8x** | 8,416 B | 688 B |
-| WHERE Filter | 1,229 us | **554 us** | 0.45x | 1,089,200 B | 720 B |
+| WHERE Filter | 692 us | **542 us** | 0.78x | 8,376 B | 720 B |
 | GC Pressure (sustained) | **213 us** | 798 us | **3.7x** | 8,416 B | 688 B |
 
 > **Bold = winner.** Sharc wins 8 of 9 on speed. SQLite's native VDBE wins WHERE filter — Tier 3 SIMD is planned to close this gap. Sharc dominates on seeks, scans, and decode operations.

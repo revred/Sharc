@@ -45,7 +45,7 @@ internal sealed class FilterNode : IFilterNode
         // Tier 2: Offset Hoisting
         // Use stackalloc for the offsets buffer to keep it zero-alloc
         Span<int> offsets = stackalloc int[serialTypes.Length];
-        offsets.Clear();
+        // offsets.Clear(); // Redundant: We only read offsets at indices that we explicitly write to in the loop below.
         
         int currentOffset = bodyOffset;
         int refIdx = 0;
