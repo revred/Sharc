@@ -78,10 +78,18 @@ internal static class RawByteComparer
 
     /// <summary>
     /// Compares two UTF-8 byte sequences lexicographically (ordinal comparison).
-    /// Zero-alloc equivalent of string.Compare(a, b, StringComparison.Ordinal).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int Utf8Compare(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+    {
+        return a.SequenceCompareTo(b);
+    }
+
+    /// <summary>
+    /// Overload for JIT path (Expression Trees do not support Spans).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int Utf8Compare(ReadOnlySpan<byte> a, byte[] b)
     {
         return a.SequenceCompareTo(b);
     }
@@ -96,6 +104,15 @@ internal static class RawByteComparer
     }
 
     /// <summary>
+    /// Overload for JIT path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool Utf8StartsWith(ReadOnlySpan<byte> columnUtf8, byte[] prefixUtf8)
+    {
+        return columnUtf8.StartsWith(prefixUtf8);
+    }
+
+    /// <summary>
     /// Checks if raw UTF-8 bytes end with the given suffix. No string allocation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -105,11 +122,28 @@ internal static class RawByteComparer
     }
 
     /// <summary>
+    /// Overload for JIT path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool Utf8EndsWith(ReadOnlySpan<byte> columnUtf8, byte[] suffixUtf8)
+    {
+        return columnUtf8.EndsWith(suffixUtf8);
+    }
+
+    /// <summary>
     /// Searches for a UTF-8 substring within raw column bytes.
-    /// Uses Span.IndexOf which leverages SIMD-accelerated search on .NET 8+.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool Utf8Contains(ReadOnlySpan<byte> columnUtf8, ReadOnlySpan<byte> patternUtf8)
+    {
+        return columnUtf8.IndexOf(patternUtf8) >= 0;
+    }
+
+    /// <summary>
+    /// Overload for JIT path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool Utf8Contains(ReadOnlySpan<byte> columnUtf8, byte[] patternUtf8)
     {
         return columnUtf8.IndexOf(patternUtf8) >= 0;
     }

@@ -15,6 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Linq.Expressions;
 using Sharc.Core.Schema;
 
 namespace Sharc;
@@ -23,7 +24,7 @@ namespace Sharc;
 /// Compiles an IFilterStar expression tree into an IFilterNode evaluation tree.
 /// Resolves column names to ordinals and validates the expression.
 /// </summary>
-internal static class FilterCompiler
+internal static class FilterTreeCompiler
 {
     private const int MaxDepth = 32;
 
@@ -38,6 +39,18 @@ internal static class FilterCompiler
                                         int rowidAliasOrdinal = -1)
     {
         return CompileNode(expression, columns, rowidAliasOrdinal, 0);
+    }
+
+    /// <summary>
+    /// Compiles a filter expression into a JIT-optimized "Baked" evaluation node.
+    /// This is the high-performance path that eliminates virtual dispatch and redundant header parsing.
+    /// </summary>
+    internal static IFilterNode CompileBaked(IFilterStar expression, IReadOnlyList<ColumnInfo> columns,
+                                             int rowidAliasOrdinal = -1)
+    {
+        var ordinals = GetReferencedColumns(expression, columns);
+        var compiled = FilterStarCompiler.Compile(expression, columns, rowidAliasOrdinal);
+        return new FilterNode(compiled, ordinals);
     }
 
     private static IFilterNode CompileNode(IFilterStar expr, IReadOnlyList<ColumnInfo> columns,
@@ -65,39 +78,58 @@ internal static class FilterCompiler
         return nodes;
     }
 
-    private static PredicateNode CompilePredicate(PredicateExpression pred,
-                                                   IReadOnlyList<ColumnInfo> columns,
-                                                   int rowidAliasOrdinal)
+    private static int ResolveOrdinal(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns)
     {
-        int ordinal;
-
         if (pred.ColumnOrdinal.HasValue)
         {
-            ordinal = pred.ColumnOrdinal.Value;
+            int ordinal = pred.ColumnOrdinal.Value;
             if (ordinal < 0 || ordinal >= columns.Count)
-                throw new ArgumentOutOfRangeException(nameof(pred),
-                    $"Column ordinal {ordinal} is out of range (0..{columns.Count - 1}).");
+                throw new ArgumentOutOfRangeException(nameof(pred), $"Column ordinal {ordinal} is out of range (0..{columns.Count - 1}).");
+            return ordinal;
         }
-        else if (pred.ColumnName != null)
+
+        if (pred.ColumnName != null)
         {
-            ordinal = -1;
             for (int i = 0; i < columns.Count; i++)
             {
                 if (columns[i].Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase))
-                {
-                    ordinal = columns[i].Ordinal;
-                    break;
-                }
+                    return columns[i].Ordinal;
             }
-            if (ordinal < 0)
-                throw new ArgumentException(
-                    $"Filter column '{pred.ColumnName}' not found in table.");
-        }
-        else
-        {
-            throw new ArgumentException("Filter predicate must specify either column name or ordinal.");
+            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found in table.");
         }
 
+        throw new ArgumentException("Filter predicate must specify either column name or ordinal.");
+    }
+
+    private static PredicateNode CompilePredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
+    {
+        int ordinal = ResolveOrdinal(pred, columns);
         return new PredicateNode(ordinal, pred.Operator, pred.Value, rowidAliasOrdinal);
+    }
+
+    internal static HashSet<int> GetReferencedColumns(IFilterStar expression, IReadOnlyList<ColumnInfo> columns)
+    {
+        var ordinals = new HashSet<int>();
+        CollectOrdinals(expression, columns, ordinals);
+        return ordinals;
+    }
+
+    private static void CollectOrdinals(IFilterStar expr, IReadOnlyList<ColumnInfo> columns, HashSet<int> ordinals)
+    {
+        switch (expr)
+        {
+            case AndExpression and:
+                foreach (var child in and.Children) CollectOrdinals(child, columns, ordinals);
+                break;
+            case OrExpression or:
+                foreach (var child in or.Children) CollectOrdinals(child, columns, ordinals);
+                break;
+            case NotExpression not:
+                CollectOrdinals(not.Inner, columns, ordinals);
+                break;
+            case PredicateExpression pred:
+                ordinals.Add(ResolveOrdinal(pred, columns));
+                break;
+        }
     }
 }

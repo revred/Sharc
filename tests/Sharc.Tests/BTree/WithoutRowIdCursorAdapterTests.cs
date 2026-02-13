@@ -141,6 +141,10 @@ public sealed class WithoutRowIdCursorAdapterTests
         public ColumnValue[] DecodeRecord(ReadOnlySpan<byte> payload) => [];
         public void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination) { }
         public int GetColumnCount(ReadOnlySpan<byte> payload) => 0;
-        public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes) => 0;
+        public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset)
+        {
+            bodyOffset = 0;
+            return 0;
+        }
     }
 }

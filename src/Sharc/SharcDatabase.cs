@@ -53,14 +53,33 @@ namespace Sharc;
 /// </example>
 public sealed class SharcDatabase : IDisposable
 {
-    private readonly IPageSource _pageSource;
+    private readonly ProxyPageSource _proxySource;
+    private readonly IPageSource _rawSource;
     private readonly DatabaseHeader _header;
+    private Transaction? _activeTransaction;
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
     private readonly SharcDatabaseInfo _info;
     private readonly SharcKeyHandle? _keyHandle;
+    private readonly SharcExtensionRegistry _extensions = new();
+    private readonly ISharcBufferPool _bufferPool = SharcBufferPool.Shared;
     private SharcSchema? _schema;
     private bool _disposed;
+
+    /// <summary>
+    /// Gets the extension registry for this database instance.
+    /// </summary>
+    public SharcExtensionRegistry Extensions => _extensions;
+
+    /// <summary>
+    /// Gets the buffer pool used for temporary allocations.
+    /// </summary>
+    public ISharcBufferPool BufferPool => _bufferPool;
+
+    /// <summary>
+    /// Gets the file path of the database, or null if it is an in-memory database.
+    /// </summary>
+    public string? FilePath { get; private set; }
 
     /// <summary>
     /// Gets the database schema containing tables, indexes, and views.
@@ -73,6 +92,26 @@ public sealed class SharcDatabase : IDisposable
             return GetSchema();
         }
     }
+
+    /// <summary>
+    /// Gets the record decoder for this database.
+    /// </summary>
+    public IRecordDecoder RecordDecoder => _recordDecoder;
+
+    /// <summary>
+    /// Gets the usable page size (PageSize - ReservedBytes).
+    /// </summary>
+    public int UsablePageSize => _header.UsablePageSize;
+
+    /// <summary>
+    /// Gets the database header.
+    /// </summary>
+    public DatabaseHeader Header => _header;
+
+    /// <summary>
+    /// Gets the underlying page source.
+    /// </summary>
+    public IPageSource PageSource => _proxySource;
 
     /// <summary>
     /// Gets the database header information.
@@ -99,16 +138,26 @@ public sealed class SharcDatabase : IDisposable
         }
     }
 
-    private SharcDatabase(IPageSource pageSource, DatabaseHeader header,
+
+    private SharcDatabase(ProxyPageSource proxySource, IPageSource rawSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
-        SharcDatabaseInfo info, SharcKeyHandle? keyHandle = null)
+        SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null)
     {
-        _pageSource = pageSource;
+        _proxySource = proxySource;
+        _rawSource = rawSource;
         _header = header;
         _bTreeReader = bTreeReader;
         _recordDecoder = recordDecoder;
         _info = info;
+        FilePath = filePath;
         _keyHandle = keyHandle;
+
+        // Register default extensions
+        if (_recordDecoder is ISharcExtension ext)
+        {
+            _extensions.Register(ext);
+            ext.OnRegister(this);
+        }
     }
 
     /// <summary>
@@ -128,10 +177,17 @@ public sealed class SharcDatabase : IDisposable
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
     public static SharcDatabase Open(string path, SharcOpenOptions? options = null)
     {
-        if (!File.Exists(path))
-            throw new FileNotFoundException("Database file not found.", path);
-
         options ??= new SharcOpenOptions();
+
+        // Recovery: Check for journal file
+        var journalPath = path + ".journal";
+        if (File.Exists(journalPath))
+        {
+            // We found a journal! This means the previous session crashed during commit.
+            // Recover original state before opening.
+            RollbackJournal.Recover(path, journalPath);
+            File.Delete(journalPath);
+        }
 
         // Read the first 6 bytes with sharing to detect encrypted vs plain SQLite
         bool isEncryptedFile;
@@ -163,7 +219,7 @@ public sealed class SharcDatabase : IDisposable
         }
         else
         {
-            pageSource = new FilePageSource(path, options.FileShareMode);
+            pageSource = new FilePageSource(path, options.FileShareMode, allowWrites: options.Writable);
         }
 
         try
@@ -198,7 +254,7 @@ public sealed class SharcDatabase : IDisposable
                 }
             }
 
-            return CreateFromPageSource(pageSource, options);
+            return CreateFromPageSource(pageSource, options, filePath: path);
         }
         catch
         {
@@ -276,7 +332,7 @@ public sealed class SharcDatabase : IDisposable
     }
 
     private static SharcDatabase CreateFromPageSource(IPageSource rawSource, SharcOpenOptions options,
-        bool isEncrypted = false, SharcKeyHandle? keyHandle = null)
+        bool isEncrypted = false, string? filePath = null, SharcKeyHandle? keyHandle = null)
     {
         IPageSource pageSource = rawSource;
 
@@ -291,7 +347,8 @@ public sealed class SharcDatabase : IDisposable
         if (header.TextEncoding is 2 or 3)
             throw new UnsupportedFeatureException("UTF-16 text encoding");
 
-        var bTreeReader = new BTreeReader(pageSource, header);
+        var proxySource = new ProxyPageSource(pageSource);
+        var bTreeReader = new BTreeReader(proxySource, header);
         var recordDecoder = new RecordDecoder();
 
         var info = new SharcDatabaseInfo
@@ -307,7 +364,7 @@ public sealed class SharcDatabase : IDisposable
             IsEncrypted = isEncrypted
         };
 
-        return new SharcDatabase(pageSource, header, bTreeReader, recordDecoder, info, keyHandle);
+        return new SharcDatabase(proxySource, pageSource, header, bTreeReader, recordDecoder, info, filePath, keyHandle);
     }
 
     /// <summary>
@@ -336,7 +393,8 @@ public sealed class SharcDatabase : IDisposable
     public SharcDataReader CreateReader(string tableName, params string[]? columns)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var table = GetSchema().GetTable(tableName);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -352,7 +410,7 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        var tableIndexes = GetTableIndexes(GetSchema(), tableName);
+        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
             _bTreeReader, tableIndexes);
     }
@@ -442,10 +500,46 @@ public sealed class SharcDatabase : IDisposable
         }
 
         int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
-        var filterNode = FilterCompiler.Compile(filter, table.Columns, rowidAlias);
+        var filterNode = FilterTreeCompiler.CompileBaked(filter, table.Columns, rowidAlias);
         var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
             _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
+    }
+
+    /// <summary>
+    /// Internal overload to support pre-compiled filter nodes with projection.
+    /// </summary>
+    internal SharcDataReader CreateReader(string tableName, string[]? columns, IFilterNode filterNode)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
+        var cursor = CreateTableCursor(table);
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                var col = table.Columns.FirstOrDefault(c =>
+                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
+                projection[i] = col?.Ordinal
+                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+            }
+        }
+
+        var tableIndexes = GetTableIndexes(schema, tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
+            _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
+    }
+
+    /// <summary>
+    /// Internal overload to support pre-compiled filter nodes for high-performance usage.
+    /// </summary>
+    internal SharcDataReader CreateReader(string tableName, IFilterNode filterNode)
+    {
+        return CreateReader(tableName, null, filterNode);
     }
 
     private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
@@ -514,12 +608,72 @@ public sealed class SharcDatabase : IDisposable
         return count;
     }
 
+    /// <summary>
+    /// Begins a new transaction for atomic writes.
+    /// Only one transaction can be active at a time.
+    /// </summary>
+    public Transaction BeginTransaction()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_activeTransaction != null)
+            throw new InvalidOperationException("A transaction is already active.");
+
+        if (_rawSource is not IWritablePageSource writable)
+            throw new NotSupportedException("The database is opened in read-only mode.");
+
+        _activeTransaction = new Transaction(this, writable);
+        _proxySource.SetTarget(_activeTransaction.PageSource);
+        return _activeTransaction;
+    }
+
+    internal void EndTransaction(Transaction transaction)
+    {
+        if (_activeTransaction == transaction)
+        {
+            _activeTransaction = null;
+            _proxySource.SetTarget(_rawSource);
+        }
+    }
+
+    /// <summary>
+    /// Writes a page to the database. If a transaction is active, the write is buffered.
+    /// Otherwise, it is written directly (auto-commit behavior can be added later).
+    /// </summary>
+    public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_activeTransaction != null)
+        {
+            _activeTransaction.WritePage(pageNumber, source);
+        }
+        else if (_rawSource is IWritablePageSource writable)
+        {
+            writable.WritePage(pageNumber, source);
+            writable.Flush();
+        }
+        else
+        {
+            throw new NotSupportedException("The database is opened in read-only mode.");
+        }
+    }
+
+    /// <summary>
+    /// Reads a page from the database. If a transaction is active, it may return a buffered write.
+    /// </summary>
+    public ReadOnlySpan<byte> ReadPage(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _proxySource.GetPage(pageNumber);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _pageSource.Dispose();
+        _activeTransaction?.Dispose();
+        _proxySource.Dispose();
+        _rawSource.Dispose();
         _keyHandle?.Dispose();
     }
 }

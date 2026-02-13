@@ -31,7 +31,10 @@ public class SharcDatabaseTests
     [Fact]
     public void Open_NonexistentFile_ThrowsFileNotFoundException()
     {
-        Assert.Throws<FileNotFoundException>(() => SharcDatabase.Open("/nonexistent/path/to/database.db"));
+        // Use a path whose parent directory exists to ensure FileNotFoundException (not DirectoryNotFoundException)
+        var dir = Path.GetTempPath();
+        var fakePath = Path.Combine(dir, "nonexistent_sharc_" + Guid.NewGuid().ToString("N") + ".db");
+        Assert.Throws<FileNotFoundException>(() => SharcDatabase.Open(fakePath));
     }
 
     [Fact]

@@ -369,7 +369,7 @@ public class RecordDecoderTests
         var record = BuildRecord((0, []), (4, intBytes), (9, []));
 
         var serialTypes = new long[3];
-        int count = _decoder.ReadSerialTypes(record, serialTypes);
+        int count = _decoder.ReadSerialTypes(record, serialTypes, out _);
 
         Assert.Equal(3, count);
         Assert.Equal(0L, serialTypes[0]);  // NULL
@@ -387,7 +387,7 @@ public class RecordDecoderTests
 
         // Destination smaller than column count
         var serialTypes = new long[2];
-        int count = _decoder.ReadSerialTypes(record, serialTypes);
+        int count = _decoder.ReadSerialTypes(record, serialTypes, out _);
 
         Assert.Equal(3, count);          // Reports full count
         Assert.Equal(0L, serialTypes[0]); // Filled

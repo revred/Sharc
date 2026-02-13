@@ -38,6 +38,15 @@ public interface IRecordDecoder
     void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination);
 
     /// <summary>
+    /// Decodes a record payload using pre-parsed serial types to avoid header re-parsing.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="destination">Pre-allocated array to fill.</param>
+    /// <param name="serialTypes">Pre-parsed serial types.</param>
+    /// <param name="bodyOffset">Byte offset where the body begins.</param>
+    void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
     /// Gets the number of columns in the record without fully decoding it.
     /// </summary>
     /// <param name="payload">The raw record bytes.</param>
@@ -53,14 +62,20 @@ public interface IRecordDecoder
     ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex);
 
     /// <summary>
+    /// Decodes a single column using pre-parsed serial types to calculate offset.
+    /// </summary>
+    ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
     /// Reads only the serial types from a record header without decoding any body data.
     /// Used for lightweight null-checking and lazy decode patterns.
     /// </summary>
     /// <param name="payload">The raw record bytes (header + body).</param>
     /// <param name="serialTypes">Pre-allocated array to fill with serial type values.
     /// Only the first min(columnCount, serialTypes.Length) entries are written.</param>
+    /// <param name="bodyOffset">Receives the byte offset where the record body begins.</param>
     /// <returns>The number of columns found in the record.</returns>
-    int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes);
+    int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset);
 }
 
 /// <summary>

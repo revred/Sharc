@@ -58,7 +58,10 @@ public sealed class SharcDataReader : IDisposable
 
     // Byte-level filter support (FilterStar path)
     private readonly IFilterNode? _filterNode;
+    private readonly FilterNode? _concreteFilterNode;
     private readonly long[]? _filterSerialTypes;
+    private int _filterBodyOffset;
+    private int _filterColCount;
 
     // Lazy decode support for projection path — avoids decoding TEXT/BLOB
     // body data until the caller actually requests the value.
@@ -66,6 +69,7 @@ public sealed class SharcDataReader : IDisposable
     private readonly int[]? _decodedGenerations;
     private int _decodedGeneration;
     private bool _lazyMode;
+    private int _currentBodyOffset;
 
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
         IReadOnlyList<ColumnInfo> columns, int[]? projection,
@@ -79,7 +83,9 @@ public sealed class SharcDataReader : IDisposable
         _bTreeReader = bTreeReader;
         _tableIndexes = tableIndexes;
         _filters = filters;
+        _filters = filters;
         _filterNode = filterNode;
+        _concreteFilterNode = filterNode as FilterNode;
         _columnCount = columns.Count;
 
         // Rent a reusable buffer from ArrayPool — returned in Dispose()
@@ -260,13 +266,17 @@ public sealed class SharcDataReader : IDisposable
             // ── FilterStar byte-level path: evaluate raw record before decoding ──
             if (_filterNode != null)
             {
-                int colCount = _recordDecoder.ReadSerialTypes(_cursor.Payload, _filterSerialTypes!);
-                VarintDecoder.Read(_cursor.Payload, out long headerSize);
-                int bodyOffset = (int)headerSize;
-                int stCount = Math.Min(colCount, _filterSerialTypes!.Length);
+                _filterColCount = _recordDecoder.ReadSerialTypes(_cursor.Payload, _filterSerialTypes!, out _filterBodyOffset);
+                int stCount = Math.Min(_filterColCount, _filterSerialTypes!.Length);
 
-                if (!_filterNode.Evaluate(_cursor.Payload,
-                    _filterSerialTypes.AsSpan(0, stCount), bodyOffset, _cursor.RowId))
+                if (_concreteFilterNode != null)
+                {
+                    if (!_concreteFilterNode.Evaluate(_cursor.Payload,
+                        _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, _cursor.RowId))
+                        continue;
+                }
+                else if (!_filterNode.Evaluate(_cursor.Payload,
+                    _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, _cursor.RowId))
                     continue;
 
                 DecodeCurrentRow();
@@ -310,17 +320,45 @@ public sealed class SharcDataReader : IDisposable
     {
         if (_projection != null)
         {
-            // Lazy decode: only read serial types (varint parsing, no body decode).
-            // Actual column values are decoded on first access via GetColumnValue().
-            _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!);
-            // Increment generation instead of Array.Clear â€” O(1) vs O(N)
+            // PROJECTION PATH (Lazy Decode)
+            // If we have a filter, we already parsed the serial types in Read().
+            // Reuse them to avoid re-parsing the header.
+            if (_filterNode != null)
+            {
+                // Copy filter serial types to projection serial types
+                // We only need to copy up to the number of columns in the table (or found columns)
+                int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
+                Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
+                
+                // Cache the body offset for fast lazy decoding
+                _currentBodyOffset = _filterBodyOffset;
+            }
+            else
+            {
+                // Lazy decode: read serial types (varint parsing, no body decode).
+                _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!, out _currentBodyOffset);
+            }
+
+            // Increment generation instead of Array.Clear — O(1) vs O(N)
             _decodedGeneration++;
             _lazyMode = true;
         }
         else
         {
-            // Full decode â€” reuse the pre-allocated buffer
-            _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            // FULL ROW PATH
+            if (_filterNode != null && _filterSerialTypes != null)
+            {
+                // Optimization: Use the pre-parsed serial types from the filter step
+                // to skip header parsing in RecordDecoder.
+                _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!,
+                    _filterSerialTypes.AsSpan(0, Math.Min(_filterColCount, _filterSerialTypes.Length)),
+                    _filterBodyOffset);
+            }
+            else
+            {
+                // Full decode — reuse the pre-allocated buffer
+                _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            }
             _lazyMode = false;
         }
 
@@ -340,6 +378,7 @@ public sealed class SharcDataReader : IDisposable
         // Fast path: in lazy mode, check serial type directly (no body decode needed)
         if (_lazyMode)
         {
+            _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!, out _);
             // INTEGER PRIMARY KEY stores NULL in record; real value is rowid â€” not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;
@@ -457,7 +496,7 @@ public sealed class SharcDataReader : IDisposable
         // Lazy decode: decode this column on first access (projection path only)
         if (_lazyMode && _decodedGenerations![actualOrdinal] != _decodedGeneration)
         {
-            _reusableBuffer![actualOrdinal] = _recordDecoder.DecodeColumn(_cursor.Payload, actualOrdinal);
+            _reusableBuffer![actualOrdinal] = _recordDecoder.DecodeColumn(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
             _decodedGenerations[actualOrdinal] = _decodedGeneration;
         }
 
