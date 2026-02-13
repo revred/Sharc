@@ -358,4 +358,40 @@ public class RecordDecoderTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _decoder.DecodeColumn(record, 5));
     }
+
+    // --- ReadSerialTypes ---
+
+    [Fact]
+    public void ReadSerialTypes_ThreeColumns_ReturnsAllTypes()
+    {
+        var intBytes = new byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(intBytes, 42);
+        var record = BuildRecord((0, []), (4, intBytes), (9, []));
+
+        var serialTypes = new long[3];
+        int count = _decoder.ReadSerialTypes(record, serialTypes);
+
+        Assert.Equal(3, count);
+        Assert.Equal(0L, serialTypes[0]);  // NULL
+        Assert.Equal(4L, serialTypes[1]);  // INT32
+        Assert.Equal(9L, serialTypes[2]);  // Constant 1
+    }
+
+    [Fact]
+    public void ReadSerialTypes_ShortDestination_ReturnsFullCountButFillsPartially()
+    {
+        var intBytes = new byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(intBytes, 42);
+        var textBytes = "Hi"u8.ToArray();
+        var record = BuildRecord((0, []), (4, intBytes), (17, textBytes));
+
+        // Destination smaller than column count
+        var serialTypes = new long[2];
+        int count = _decoder.ReadSerialTypes(record, serialTypes);
+
+        Assert.Equal(3, count);          // Reports full count
+        Assert.Equal(0L, serialTypes[0]); // Filled
+        Assert.Equal(4L, serialTypes[1]); // Filled
+        // serialTypes[2] doesn't exist — that's the edge case
+    }
 }
