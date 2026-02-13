@@ -86,6 +86,19 @@ public sealed class SharcDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets the internal B-tree reader, allowing advanced consumers (e.g. graph stores)
+    /// to share the same page source without duplicating it.
+    /// </summary>
+    public IBTreeReader BTreeReader
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _bTreeReader;
+        }
+    }
+
     private SharcDatabase(IPageSource pageSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
         SharcSchema schema, SharcDatabaseInfo info,

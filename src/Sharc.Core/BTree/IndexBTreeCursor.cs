@@ -111,6 +111,185 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         }
     }
 
+    /// <inheritdoc />
+    public bool SeekFirst(long firstColumnKey)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ReturnAssembledPayload();
+
+        _stack.Clear();
+        _exhausted = false;
+        _initialized = true;
+
+        bool exactMatch = DescendToLeafByKey(_rootPage, firstColumnKey);
+
+        if (_currentCellIndex < _currentHeader.CellCount)
+        {
+            ParseCurrentLeafCell();
+            return exactMatch;
+        }
+        else
+        {
+            // Moved past end of leaf, try next leaf
+            if (MoveToNextLeaf())
+            {
+                _currentCellIndex = 0;
+                ParseCurrentLeafCell();
+                return false;
+            }
+            else
+            {
+                _exhausted = true;
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Binary search descent through the index B-tree comparing the first column value.
+    /// </summary>
+    private bool DescendToLeafByKey(uint pageNumber, long targetKey)
+    {
+        while (true)
+        {
+            var page = _pageSource.GetPage(pageNumber);
+            int headerOffset = pageNumber == 1 ? 100 : 0;
+            var header = BTreePageHeader.Parse(page[headerOffset..]);
+
+            if (header.IsLeaf)
+            {
+                _currentLeafPage = pageNumber;
+                _currentHeaderOffset = headerOffset;
+                _currentHeader = header;
+
+                // Binary search leaf cells
+                int low = 0;
+                int high = header.CellCount - 1;
+                while (low <= high)
+                {
+                    int mid = low + ((high - low) >> 1);
+                    int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
+
+                    // Leaf cell: [payloadSize:varint] [payload...]
+                    int headerBytes = IndexCellParser.ParseIndexLeafCell(page[cellOffset..], out int payloadSize);
+                    int payloadStart = cellOffset + headerBytes;
+                    int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(payloadSize, _usablePageSize);
+                    int safeSize = Math.Min(payloadSize, inlineSize);
+
+                    long colValue = ExtractFirstIntColumn(page.Slice(payloadStart, safeSize));
+
+                    if (colValue < targetKey)
+                        low = mid + 1;
+                    else if (colValue > targetKey)
+                        high = mid - 1;
+                    else
+                    {
+                        // Found a match — scan backwards to find the first occurrence
+                        while (mid > 0)
+                        {
+                            int prevOffset = header.GetCellPointer(page[headerOffset..], mid - 1);
+                            int prevHdrBytes = IndexCellParser.ParseIndexLeafCell(page[prevOffset..], out int prevPayloadSize);
+                            int prevPayloadStart = prevOffset + prevHdrBytes;
+                            int prevInlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(prevPayloadSize, _usablePageSize);
+                            int prevSafeSize = Math.Min(prevPayloadSize, prevInlineSize);
+
+                            long prevVal = ExtractFirstIntColumn(page.Slice(prevPayloadStart, prevSafeSize));
+                            if (prevVal != targetKey) break;
+                            mid--;
+                        }
+
+                        _currentCellIndex = mid;
+                        return true;
+                    }
+                }
+
+                _currentCellIndex = low;
+                return false;
+            }
+
+            // Interior page — binary search for the correct child
+            int idx = -1;
+            int l = 0;
+            int r = header.CellCount - 1;
+
+            while (l <= r)
+            {
+                int mid = l + ((r - l) >> 1);
+                int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
+
+                // Interior cell: [leftChild:4-BE] [payloadSize:varint] [payload...]
+                int cellHdrSize = IndexCellParser.ParseIndexInteriorCell(page[cellOffset..], out _, out int payloadSize);
+                int payloadStart = cellOffset + cellHdrSize;
+                int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(payloadSize, _usablePageSize);
+                int safeSize = Math.Min(payloadSize, inlineSize);
+
+                long colValue = ExtractFirstIntColumn(page.Slice(payloadStart, safeSize));
+
+                if (colValue >= targetKey)
+                {
+                    idx = mid;
+                    r = mid - 1;
+                }
+                else
+                {
+                    l = mid + 1;
+                }
+            }
+
+            if (idx != -1)
+            {
+                _stack.Push((pageNumber, idx, headerOffset, header));
+                int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
+                uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(page[cellOffset..]);
+                pageNumber = leftChild;
+            }
+            else
+            {
+                _stack.Push((pageNumber, header.CellCount - 1, headerOffset, header));
+                pageNumber = header.RightChildPage;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts the first integer column from a SQLite record payload without full decode.
+    /// Assumes the first column is an integer type (serial types 0-9).
+    /// </summary>
+    private static long ExtractFirstIntColumn(ReadOnlySpan<byte> payload)
+    {
+        // Record header: [headerSize:varint] [serialType0:varint] ...
+        int offset = Primitives.VarintDecoder.Read(payload, out long headerSize);
+        Primitives.VarintDecoder.Read(payload[offset..], out long serialType);
+
+        // Body starts after the header
+        int bodyOffset = (int)headerSize;
+
+        return serialType switch
+        {
+            0 => 0,                   // NULL
+            1 => (sbyte)payload[bodyOffset],
+            2 => BinaryPrimitives.ReadInt16BigEndian(payload[bodyOffset..]),
+            3 => ((payload[bodyOffset] << 16) | (payload[bodyOffset + 1] << 8) | payload[bodyOffset + 2]) | 
+                 (((payload[bodyOffset] & 0x80) != 0) ? unchecked((int)0xFF000000) : 0),
+            4 => BinaryPrimitives.ReadInt32BigEndian(payload[bodyOffset..]),
+            5 => ExtractInt48(payload[bodyOffset..]),
+            6 => BinaryPrimitives.ReadInt64BigEndian(payload[bodyOffset..]),
+            8 => 0,  // Constant 0
+            9 => 1,  // Constant 1
+            _ => 0   // Non-integer types default to 0
+        };
+    }
+
+    private static long ExtractInt48(ReadOnlySpan<byte> data)
+    {
+        long raw = ((long)data[0] << 40) | ((long)data[1] << 32) |
+                   ((long)data[2] << 24) | ((long)data[3] << 16) |
+                   ((long)data[4] << 8) | data[5];
+        if ((raw & 0x800000000000L) != 0)
+            raw |= unchecked((long)0xFFFF000000000000L);
+        return raw;
+    }
+
     private bool AdvanceToNextCell()
     {
         _currentCellIndex++;

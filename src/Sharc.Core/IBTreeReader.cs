@@ -85,6 +85,16 @@ public interface IIndexBTreeCursor : IDisposable
     bool MoveNext();
 
     /// <summary>
+    /// Seeks to the first index entry whose first column (integer) equals or exceeds
+    /// <paramref name="firstColumnKey"/>. Uses binary search through the B-tree for O(log n) access.
+    /// After calling this method, <see cref="Payload"/> points to the first matching entry
+    /// (if found), and subsequent <see cref="MoveNext"/> calls continue from that position.
+    /// </summary>
+    /// <param name="firstColumnKey">The integer value to seek for in the first column of the index.</param>
+    /// <returns>True if an entry with first column == <paramref name="firstColumnKey"/> was found.</returns>
+    bool SeekFirst(long firstColumnKey);
+
+    /// <summary>
     /// Gets the payload data of the current index entry.
     /// The payload is a standard SQLite record where the last column is the table rowid.
     /// May involve reading overflow pages. Valid until <see cref="MoveNext"/> is called.

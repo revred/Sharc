@@ -102,7 +102,15 @@ internal sealed class RelationStore
         using var indexCursor = _reader.CreateIndexCursor((uint)_originIndexRootPage);
         var buffer = new ColumnValue[_columnCount];
 
-        while (indexCursor.MoveNext())
+        // Use SeekFirst for O(log n) initial positioning instead of linear scan
+        if (!indexCursor.SeekFirst(origin.Value))
+            yield break; // No entries with this origin key
+
+        // Reuse a single table cursor for all row lookups
+        using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
+
+        // Process the first entry (SeekFirst already positioned us)
+        do
         {
             var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
             if (indexRecord.Length < 2) continue;
@@ -117,7 +125,6 @@ internal sealed class RelationStore
 
             // Match found — seek the table row by rowid
             long rowId = indexRecord[^1].AsInt64();
-            using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
             if (!tableCursor.Seek(rowId)) continue;
 
             _decoder.DecodeRecord(tableCursor.Payload, buffer);
@@ -127,6 +134,7 @@ internal sealed class RelationStore
 
             yield return MapToEdge(buffer);
         }
+        while (indexCursor.MoveNext());
     }
 
     private IEnumerable<GraphEdge> GetEdgesViaTableScan(NodeKey origin, RelationKind? kindFilter)
