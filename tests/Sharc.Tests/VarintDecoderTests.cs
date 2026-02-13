@@ -164,6 +164,16 @@ public class VarintDecoderTests
     [InlineData(16384)]
     [InlineData(1_000_000)]
     [InlineData(long.MaxValue)]
+    // Negative values (use full 9-byte encoding)
+    [InlineData(-1)]
+    [InlineData(-128)]
+    [InlineData(-32768)]
+    [InlineData(long.MinValue)]
+    // Intermediate byte-width boundary values
+    [InlineData(2_097_151)]             // 3-byte max
+    [InlineData(268_435_455)]           // 4-byte max
+    [InlineData(34_359_738_367)]        // 5-byte max
+    [InlineData(4_398_046_511_103)]     // 6-byte max
     public void WriteRead_Roundtrip_ReturnsOriginalValue(long original)
     {
         Span<byte> buffer = stackalloc byte[9];

@@ -149,4 +149,84 @@ public class SerialTypeCodecTests
     {
         Assert.Equal(expected, SerialTypeCodec.IsBlob(serialType));
     }
+
+    // --- GetSerialType inverse mapping ---
+
+    [Fact]
+    public void GetSerialType_Null_Returns0()
+    {
+        var value = ColumnValue.Null();
+        Assert.Equal(0L, SerialTypeCodec.GetSerialType(value));
+    }
+
+    [Theory]
+    [InlineData(0, 8)]        // constant 0
+    [InlineData(1, 9)]        // constant 1
+    [InlineData(2, 1)]        // 8-bit
+    [InlineData(127, 1)]      // 8-bit max
+    [InlineData(-128, 1)]     // 8-bit min
+    [InlineData(128, 2)]      // 16-bit
+    [InlineData(32767, 2)]    // 16-bit max
+    [InlineData(-32768, 2)]   // 16-bit min
+    [InlineData(32768, 3)]    // 24-bit
+    [InlineData(8388607, 3)]  // 24-bit max
+    [InlineData(8388608, 4)]  // 32-bit
+    [InlineData(2147483647, 4)]       // 32-bit max
+    [InlineData(2147483648L, 5)]      // 48-bit
+    [InlineData(140737488355328L, 6)] // 64-bit (over 48-bit max)
+    public void GetSerialType_IntegerBoundaries_ReturnsCorrectTypes(long intValue, long expectedType)
+    {
+        var value = ColumnValue.FromInt64(4, intValue);
+        Assert.Equal(expectedType, SerialTypeCodec.GetSerialType(value));
+    }
+
+    [Fact]
+    public void GetSerialType_Real_Returns7()
+    {
+        var value = ColumnValue.FromDouble(3.14);
+        Assert.Equal(7L, SerialTypeCodec.GetSerialType(value));
+    }
+
+    [Fact]
+    public void GetSerialType_Text_ReturnsOddCodeGte13()
+    {
+        var value = ColumnValue.Text(13 + 2 * 5, "hello"u8.ToArray());
+        long st = SerialTypeCodec.GetSerialType(value);
+        Assert.Equal(23L, st); // 2*5+13 = 23
+        Assert.True(st >= 13 && (st & 1) == 1);
+    }
+
+    [Fact]
+    public void GetSerialType_Blob_ReturnsEvenCodeGte12()
+    {
+        var value = ColumnValue.Blob(12 + 2 * 3, new byte[3]);
+        long st = SerialTypeCodec.GetSerialType(value);
+        Assert.Equal(18L, st); // 2*3+12 = 18
+        Assert.True(st >= 12 && (st & 1) == 0);
+    }
+
+    // --- IsIntegral / IsReal predicates ---
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(6, true)]
+    [InlineData(8, true)]
+    [InlineData(9, true)]
+    [InlineData(0, false)]   // NULL
+    [InlineData(7, false)]   // Real
+    [InlineData(13, false)]  // Text
+    public void IsIntegral_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
+    {
+        Assert.Equal(expected, SerialTypeCodec.IsIntegral(serialType));
+    }
+
+    [Theory]
+    [InlineData(7, true)]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(13, false)]
+    public void IsReal_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
+    {
+        Assert.Equal(expected, SerialTypeCodec.IsReal(serialType));
+    }
 }
