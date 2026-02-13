@@ -33,6 +33,7 @@ internal sealed class ConceptStore
 
     // Index scan support
     private int _keyIndexRootPage = -1;
+    private int _idIndexRootPage = -1;
 
     // Column ordinals
     private int _colId = -1;
@@ -43,6 +44,7 @@ internal sealed class ConceptStore
     private int _colLvn = -1;
     private int _colSync = -1;
     private int _colUpdated = -1;
+    private int _colTokens = -1;
 
     public ConceptStore(IBTreeReader reader, ISchemaAdapter schema)
     {
@@ -65,6 +67,7 @@ internal sealed class ConceptStore
         _colLvn = _schema.NodeLvnColumn != null ? GetOrdinal(table, _schema.NodeLvnColumn) : -1;
         _colSync = _schema.NodeSyncColumn != null ? GetOrdinal(table, _schema.NodeSyncColumn) : -1;
         _colUpdated = _schema.NodeUpdatedColumn != null ? GetOrdinal(table, _schema.NodeUpdatedColumn) : -1;
+        _colTokens = _schema.NodeTokensColumn != null ? GetOrdinal(table, _schema.NodeTokensColumn) : -1;
 
         // Look for an index whose first column matches the node key column
         var keyIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
@@ -72,6 +75,13 @@ internal sealed class ConceptStore
             idx.Columns.Count > 0 &&
             idx.Columns[0].Name.Equals(_schema.NodeKeyColumn, StringComparison.OrdinalIgnoreCase));
         _keyIndexRootPage = keyIndex?.RootPage ?? -1;
+
+        // Look for an index on the string ID column
+        var idIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
+            idx.TableName.Equals(_schema.NodeTableName, StringComparison.OrdinalIgnoreCase) &&
+            idx.Columns.Count > 0 &&
+            idx.Columns[0].Name.Equals(_schema.NodeIdColumn, StringComparison.OrdinalIgnoreCase));
+        _idIndexRootPage = idIndex?.RootPage ?? -1;
     }
     
     private static int GetOrdinal(TableInfo table, string colName)
@@ -122,6 +132,57 @@ internal sealed class ConceptStore
         return null;
     }
 
+    public GraphRecord? Get(string id)
+    {
+        if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
+
+        if (_idIndexRootPage > 0)
+            return GetViaIdIndex(id);
+
+        return GetViaIdTableScan(id);
+    }
+
+    private GraphRecord? GetViaIdIndex(string id)
+    {
+        using var indexCursor = _reader.CreateIndexCursor((uint)_idIndexRootPage);
+        while (indexCursor.MoveNext())
+        {
+            var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
+            if (indexRecord.Length < 2) continue;
+
+            string indexIdValue = indexRecord[0].AsString();
+            if (indexIdValue.Equals(id, StringComparison.OrdinalIgnoreCase))
+            {
+                long rowId = indexRecord[^1].AsInt64();
+                using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
+                if (tableCursor.Seek(rowId))
+                {
+                    var buffer = new ColumnValue[_columnCount];
+                    _decoder.DecodeRecord(tableCursor.Payload, buffer);
+                    return MapToRecord(buffer);
+                }
+                return null;
+            }
+
+            // GUID/String indices might not be sorted in a way easy to early-exit with Equals
+        }
+        return null;
+    }
+
+    private GraphRecord? GetViaIdTableScan(string id)
+    {
+        using var cursor = _reader.CreateCursor((uint)_tableRootPage);
+        var buffer = new ColumnValue[_columnCount];
+        while (cursor.MoveNext())
+        {
+            _decoder.DecodeRecord(cursor.Payload, buffer);
+            string rowIdStr = _colId >= 0 && _colId < buffer.Length ? buffer[_colId].AsString() : "";
+            if (!rowIdStr.Equals(id, StringComparison.OrdinalIgnoreCase)) continue;
+            return MapToRecord(buffer);
+        }
+        return null;
+    }
+
     private GraphRecord? GetViaTableScan(NodeKey key)
     {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
@@ -136,9 +197,12 @@ internal sealed class ConceptStore
         return null;
     }
 
-    private GraphRecord MapToRecord(ColumnValue[] columns, NodeKey key)
+    private GraphRecord MapToRecord(ColumnValue[] columns, NodeKey? keyOverride = null)
     {
         string id = _colId >= 0 && _colId < columns.Length ? columns[_colId].AsString() : "";
+        long keyVal = keyOverride?.Value ?? (_colKey >= 0 && _colKey < columns.Length ? columns[_colKey].AsInt64() : 0);
+        NodeKey key = new NodeKey(keyVal);
+
         int kind = _colKind >= 0 && _colKind < columns.Length ? (int)columns[_colKind].AsInt64() : 0;
         string data = _colData >= 0 && _colData < columns.Length ? columns[_colData].AsString() : "{}";
         
@@ -153,7 +217,8 @@ internal sealed class ConceptStore
         {
             CVN = _colCvn >= 0 && _colCvn < columns.Length ? (int)columns[_colCvn].AsInt64() : 0,
             LVN = _colLvn >= 0 && _colLvn < columns.Length ? (int)columns[_colLvn].AsInt64() : 0,
-            SyncStatus = _colSync >= 0 && _colSync < columns.Length ? (int)columns[_colSync].AsInt64() : 0
+            SyncStatus = _colSync >= 0 && _colSync < columns.Length ? (int)columns[_colSync].AsInt64() : 0,
+            Tokens = _colTokens >= 0 && _colTokens < columns.Length ? (int)columns[_colTokens].AsInt64() : 0
         };
         
         return record;

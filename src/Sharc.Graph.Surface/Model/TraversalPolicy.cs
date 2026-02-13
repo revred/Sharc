@@ -37,6 +37,15 @@ public readonly record struct TraversalPolicy
     /// <summary>Maximum processing time or token count (future).</summary>
     public TimeSpan? Timeout { get; init; }
 
+    /// <summary>Maximum tokens to retrieve in this traversal.</summary>
+    public int? MaxTokens { get; init; }
+
+    /// <summary>Maximum search depth (hops).</summary>
+    public int? MaxDepth { get; init; }
+
+    /// <summary>Minimum edge weight to follow.</summary>
+    public float? MinWeight { get; init; }
+
     /// <summary>Default constructor.</summary>
     public TraversalPolicy() { }
 }

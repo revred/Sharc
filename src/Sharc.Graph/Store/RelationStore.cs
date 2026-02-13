@@ -43,6 +43,7 @@ internal sealed class RelationStore
     private int _colCvn = -1;
     private int _colLvn = -1;
     private int _colSync = -1;
+    private int _colWeight = -1;
 
     public RelationStore(IBTreeReader reader, ISchemaAdapter schema)
     {
@@ -65,6 +66,7 @@ internal sealed class RelationStore
         _colCvn = _schema.EdgeCvnColumn != null ? GetOrdinal(table, _schema.EdgeCvnColumn) : -1;
         _colLvn = _schema.EdgeLvnColumn != null ? GetOrdinal(table, _schema.EdgeLvnColumn) : -1;
         _colSync = _schema.EdgeSyncColumn != null ? GetOrdinal(table, _schema.EdgeSyncColumn) : -1;
+        _colWeight = _schema.EdgeWeightColumn != null ? GetOrdinal(table, _schema.EdgeWeightColumn) : -1;
 
         // Look for an index whose first column matches the edge origin column
         var originIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
@@ -163,7 +165,8 @@ internal sealed class RelationStore
         {
             CVN = _colCvn >= 0 && _colCvn < columns.Length ? (int)columns[_colCvn].AsInt64() : 0,
             LVN = _colLvn >= 0 && _colLvn < columns.Length ? (int)columns[_colLvn].AsInt64() : 0,
-            SyncStatus = _colSync >= 0 && _colSync < columns.Length ? (int)columns[_colSync].AsInt64() : 0
+            SyncStatus = _colSync >= 0 && _colSync < columns.Length ? (int)columns[_colSync].AsInt64() : 0,
+            Weight = _colWeight >= 0 && _colWeight < columns.Length ? (float)columns[_colWeight].AsDouble() : 1.0f
         };
         
         return edge;

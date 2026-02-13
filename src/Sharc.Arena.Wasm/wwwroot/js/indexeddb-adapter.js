@@ -8,6 +8,10 @@ window.indexedDbAdapter = {
     // Open (or create) the IndexedDB database
     init: async function () {
         const t0 = performance.now();
+        if (this._db) {
+            this._db.close();
+            this._db = null;
+        }
         await this._deleteIfExists();
         this._db = await this._openDb();
         const t1 = performance.now();
@@ -59,22 +63,28 @@ window.indexedDbAdapter = {
     sequentialScan: async function (storeName) {
         const t0 = performance.now();
         let count = 0;
-        await new Promise((resolve, reject) => {
-            const tx = this._db.transaction(storeName, 'readonly');
-            const store = tx.objectStore(storeName);
-            const request = store.openCursor();
-            request.onsuccess = (event) => {
-                const cursor = event.target.result;
-                if (cursor) {
-                    const _val = cursor.value; // force decode
-                    count++;
-                    cursor.continue();
-                } else {
-                    resolve();
-                }
-            };
-            request.onerror = () => reject(request.error);
-        });
+        try {
+            await new Promise((resolve, reject) => {
+                const tx = this._db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const request = store.openCursor();
+                request.onsuccess = (event) => {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        const _val = cursor.value; // force decode
+                        count++;
+                        cursor.continue();
+                    } else {
+                        resolve();
+                    }
+                };
+                request.onerror = (e) => {
+                    reject(e.target.error);
+                };
+            });
+        } catch (err) {
+            throw err;
+        }
         const t1 = performance.now();
         return { ms: t1 - t0, rowCount: count };
     },

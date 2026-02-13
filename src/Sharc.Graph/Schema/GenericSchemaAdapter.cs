@@ -60,6 +60,8 @@ public sealed class GenericSchemaAdapter : ISchemaAdapter
 
     /// <inheritdoc/>
     public string? NodeAliasColumn { get; set; }
+    /// <inheritdoc/>
+    public string? NodeTokensColumn { get; set; }
 
     /// <inheritdoc/>
     public string EdgeIdColumn { get; set; } = "Id";
@@ -83,6 +85,8 @@ public sealed class GenericSchemaAdapter : ISchemaAdapter
     public string? EdgeLvnColumn { get; set; }
     /// <inheritdoc/>
     public string? EdgeSyncColumn { get; set; }
+    /// <inheritdoc/>
+    public string? EdgeWeightColumn { get; set; }
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<int, string> TypeNames { get; set; } = new Dictionary<int, string>();

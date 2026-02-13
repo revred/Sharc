@@ -103,17 +103,23 @@ public sealed class SharcEngine
     {
         if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        using (var warmup = _db.CreateReader("users"))
+        var columnNames = new[] { "id", "name", "email", "age", "score", "bio", "active", "dept", "created" };
+
+        // Thorough warm-up
+        using (var warmup = _db.CreateReader("users", columnNames))
         {
-            while (warmup.Read()) { _ = warmup.GetInt64(0); }
+            while (warmup.Read()) 
+            { 
+                for (int i = 0; i < columnNames.Length; i++) _ = warmup.GetValue(i);
+            }
         }
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
         long rowCount = 0;
-        using (var reader = _db.CreateReader("users"))
+        // USE PROJECTION: This triggers the optimized lazy decoder path
+        using (var reader = _db.CreateReader("users", columnNames))
         {
             while (reader.Read())
             {
@@ -138,7 +144,7 @@ public sealed class SharcEngine
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
             Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{rowCount} rows decoded",
+            Note = $"{rowCount} rows (projection + lazy decode)",
         };
     }
 
@@ -381,8 +387,8 @@ public sealed class SharcEngine
         {
             while (reader.Read())
             {
-                _ = reader.GetInt64(1);   // origin
-                _ = reader.GetInt64(2);   // target
+                _ = reader.GetInt64(1);   // source_key
+                _ = reader.GetInt64(2);   // target_key
                 _ = reader.GetInt64(3);   // kind
                 _ = reader.GetString(5);  // data
                 count++;
@@ -468,18 +474,18 @@ public sealed class SharcEngine
         // Hop 1: edges from startKey
         var hop1Targets = new HashSet<long>();
         using (var reader = _db!.CreateReader("_relations", null,
-            [new SharcFilter("origin", SharcOperator.Equal, startKey)]))
+            [new SharcFilter("source_key", SharcOperator.Equal, startKey)]))
         {
             while (reader.Read())
-                hop1Targets.Add(reader.GetInt64(2)); // target
+                hop1Targets.Add(reader.GetInt64(2)); // target_key
         }
 
         // Hop 2: edges from each hop-1 target
         var hop2Count = 0;
         foreach (var target in hop1Targets)
         {
-            using var reader = _db.CreateReader("_relations", null,
-                [new SharcFilter("origin", SharcOperator.Equal, target)]);
+            using (var reader = _db.CreateReader("_relations", null,
+                [new SharcFilter("source_key", SharcOperator.Equal, target)]))
             while (reader.Read())
                 hop2Count++;
         }

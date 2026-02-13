@@ -52,6 +52,9 @@ public sealed class GraphEdge
     /// <summary>Creation timestamp.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 
+    /// <summary>Edge relevance weight (0.0 to 1.0).</summary>
+    public float Weight { get; init; } = 1.0f;
+
     /// <summary>
     /// Creates a new GraphEdge connecting origin and target.
     /// </summary>

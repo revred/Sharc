@@ -15,6 +15,7 @@
   Licensed under the MIT License â€” free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Linq;
 using Sharc.Core;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
@@ -80,8 +81,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
             return _concepts.Get(id.Key);
         }
         
-        // TODO: M7 will add index lookups by string ID
-        return null;
+        return _concepts.Get(id.Id);
     }
 
     /// <inheritdoc/>
@@ -99,6 +99,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         var resultNodes = new List<TraversalNode>();
         var visited = new HashSet<NodeKey>();
         var queue = new Queue<(NodeKey Key, int Depth, List<NodeKey> Path)>();
+        int totalTokens = 0;
 
         var startPath = new List<NodeKey> { startKey };
         queue.Enqueue((startKey, 0, startPath));
@@ -111,7 +112,16 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
             
             if (record != null)
             {
+                // Token Budgeting
+                if (policy.MaxTokens.HasValue && totalTokens + record.Tokens > policy.MaxTokens.Value)
+                {
+                    // If we can't fit this entire node, we stop expansion here for this branch
+                    if (resultNodes.Count > 0) break; 
+                    // Special case: if even the first node exceeds budget, we still return it but stop.
+                }
+
                 resultNodes.Add(new TraversalNode(record, depth, currentPath));
+                totalTokens += record.Tokens;
             }
 
             if (currentKey == policy.StopAtKey && visited.Count > 1) break;
@@ -119,9 +129,23 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
             // Follow edges (currently only Outgoing is supported efficiently)
             if (policy.Direction == TraversalDirection.Outgoing)
             {
+                // Depth limit
+                if (policy.MaxDepth.HasValue && depth >= policy.MaxDepth.Value) continue;
+
                 int count = 0;
-                foreach (var edge in _relations.GetEdges(currentKey))
+                
+                // Sort edges by weight if budget is active (Phase 3 optimization)
+                var edges = _relations.GetEdges(currentKey);
+                if (policy.MaxTokens.HasValue)
                 {
+                    edges = edges.OrderByDescending(e => e.Weight);
+                }
+
+                foreach (var edge in edges)
+                {
+                    // Weight filter
+                    if (policy.MinWeight.HasValue && edge.Weight < policy.MinWeight.Value) continue;
+
                     if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break;
                     
                     if (!visited.Contains(edge.TargetKey))

@@ -47,6 +47,26 @@ public class ConceptStoreTests
     }
 
     [TestMethod]
+    public void Get_WithTokens_ReturnsCorrectTokens()
+    {
+        var schema = CreateTestSchemaWithTokens();
+        var adapter = new TestSchemaAdapterWithTokens();
+        var rows = new List<(long rowId, byte[] payload)>
+        {
+            (1, BuildEntityRecordWithTokens("guid-a", 100, 1, "{}", 500))
+        };
+        var reader = new FakeBTreeReader(rows);
+
+        var store = new ConceptStore(reader, adapter);
+        store.Initialize(schema);
+
+        var result = store.Get(new NodeKey(100));
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(500, result.Tokens);
+    }
+
+    [TestMethod]
     public void Get_NonexistentKey_ReturnsNull()
     {
         var schema = CreateTestSchema();
@@ -201,11 +221,59 @@ public class ConceptStoreTests
         return result;
     }
 
+    private static SharcSchema CreateTestSchemaWithTokens()
+    {
+        var originalTable = CreateTestSchema().Tables[0];
+        var columns = new List<ColumnInfo>(originalTable.Columns)
+        {
+            new() { Name = "tokens", Ordinal = 4, DeclaredType = "INTEGER", IsPrimaryKey = false, IsNotNull = false }
+        };
+
+        var tableWithTokens = new TableInfo
+        {
+            Name = originalTable.Name,
+            RootPage = originalTable.RootPage,
+            Sql = originalTable.Sql,
+            Columns = columns,
+            IsWithoutRowId = originalTable.IsWithoutRowId
+        };
+
+        return new SharcSchema
+        {
+            Tables = new List<TableInfo> { tableWithTokens },
+            Indexes = new List<IndexInfo>(),
+            Views = new List<ViewInfo>()
+        };
+    }
+
+    private static byte[] BuildEntityRecordWithTokens(string id, long key, int kind, string data, int tokens)
+    {
+        var idBytes = Encoding.UTF8.GetBytes(id);
+        var dataBytes = Encoding.UTF8.GetBytes(data);
+        long idSt = idBytes.Length * 2 + 13;
+        var keyCol = EncodeInteger(key);
+        var kindCol = EncodeInteger(kind);
+        long dataSt = dataBytes.Length * 2 + 13;
+        var tokensCol = EncodeInteger(tokens);
+
+        return BuildRecord(
+            (idSt, idBytes),
+            (keyCol.serialType, keyCol.body),
+            (kindCol.serialType, kindCol.body),
+            (dataSt, dataBytes),
+            (tokensCol.serialType, tokensCol.body));
+    }
+
     #endregion
 
     #region Test Doubles
 
-    private sealed class TestSchemaAdapter : ISchemaAdapter
+    private sealed class TestSchemaAdapterWithTokens : TestSchemaAdapter
+    {
+        public override string? NodeTokensColumn => "tokens";
+    }
+
+    private class TestSchemaAdapter : ISchemaAdapter
     {
         public string NodeTableName => "_concepts";
         public string EdgeTableName => "_relations";
@@ -220,6 +288,7 @@ public class ConceptStoreTests
         public string? NodeSyncColumn => null;
         public string? NodeUpdatedColumn => null;
         public string? NodeAliasColumn => null;
+        public virtual string? NodeTokensColumn => null;
         public string EdgeIdColumn => "id";
         public string EdgeOriginColumn => "origin";
         public string EdgeTargetColumn => "target";
@@ -228,6 +297,7 @@ public class ConceptStoreTests
         public string? EdgeCvnColumn => null;
         public string? EdgeLvnColumn => null;
         public string? EdgeSyncColumn => null;
+        public string? EdgeWeightColumn => null;
         public IReadOnlyDictionary<int, string> TypeNames { get; } = new Dictionary<int, string>
         {
             [1] = "File",
