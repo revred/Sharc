@@ -11,7 +11,7 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 ## Headline Numbers
 
 > BenchmarkDotNet v0.15.8 | .NET 10.0.2 | Windows 11 | Intel i7-11800H (8C/16T)
-> All numbers are **measured**, not estimated. SQLite is `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements. IndexedDB timing uses `performance.now()` inside the JS adapter (most favorable for IDB). [**Run the Arena yourself**](https://revred.github.io/Sharc/)
+> All numbers are **measured**, not estimated. Last run: February 13, 2026 (30 benchmarks, standard tier). SQLite is `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements. IndexedDB timing uses `performance.now()` inside the JS adapter (most favorable for IDB). [**Run the Arena yourself**](https://revred.github.io/Sharc/)
 
 <table>
 <tr>
@@ -21,10 +21,10 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 
 | Operation | Sharc | SQLite | Speedup |
 |:---|---:|---:|---:|
-| B-tree Seek | **637 ns** | 21,193 ns | **33.3x** |
-| Batch 6 Seeks | **1,932 ns** | 131,749 ns | **68.2x** |
-| Schema Read | **2.67 us** | 25.66 us | **9.6x** |
-| Engine Init | **430 ns** | 23.64 us | **54.9x** |
+| B-tree Seek | **1,475 ns** | 21,349 ns | **14.5x** |
+| Batch 6 Seeks | **3,858 ns** | 159,740 ns | **41.4x** |
+| Schema Read | **2.97 us** | 26.66 us | **9.0x** |
+| Engine Init | **3.66 us** | 23.91 us | **6.5x** |
 
 </td>
 <td width="50%" valign="top">
@@ -33,24 +33,24 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 
 | Operation | Sharc | SQLite | Speedup |
 |:---|---:|---:|---:|
-| Full Scan (9 cols) | **3.01 ms** | 6.23 ms | **2.1x** |
-| Integer Decode | **212 us** | 779 us | **3.7x** |
-| NULL Detection | **163 us** | 742 us | **4.6x** |
-| Graph BFS 2-Hop | **5.78 us** | 79.31 us | **13.7x** |
+| Full Scan (9 cols) | **2.59 ms** | 6.03 ms | **2.3x** |
+| Integer Decode | **213 us** | 819 us | **3.8x** |
+| NULL Detection | **156 us** | 746 us | **4.8x** |
+| Graph BFS 2-Hop | **6.27 us** | 78.49 us | **12.5x** |
 
 </td>
 </tr>
 </table>
 
-### Scorecard: Sharc 16 | SQLite 0 | IndexedDB 0
+### Scorecard: Sharc 15 | SQLite 1 | IndexedDB 0
 
-Across 16 browser arena benchmarks, Sharc wins **16**. Every benchmark — from 100ns seeks to 500us complex filters — is now won by Sharc's zero-alloc managed pipeline. IndexedDB wins **0** — its async API and structured clone serialization make it 17x to 233x slower than Sharc on every comparable metric.
+Across 16 browser arena benchmarks, Sharc wins **15**. From sub-microsecond seeks to millisecond scans — Sharc's zero-alloc managed pipeline dominates. SQLite wins **1** (WHERE filter via VDBE). IndexedDB wins **0** — its async API and structured clone serialization make it 17x to 233x slower than Sharc on every comparable metric.
 
 | Benchmark | Sharc | SQLite | Winner |
 |:---|---:|---:|:---:|
-| WHERE Filter (age > 30 AND score < 50) | **0.49 ms** | **0.65 ms** | **Sharc** |
+| WHERE Filter (age > 30 AND score < 50) | 1.23 ms | **0.55 ms** | **SQLite** |
 
-With the introduction of **Filter Star (JIT)**, Sharc now outperforms SQLite's VDB even on complex analytic filters. For reads, seeks, scans, graphs, encryption, and filters — Sharc is the undisputed performance leader for the browser.
+Sharc wins 8 of 9 core benchmarks on speed. SQLite's VDBE still leads on complex WHERE filters — Tier 3 SIMD is planned to close the gap. For reads, seeks, scans, graphs, and encryption — Sharc is the undisputed performance leader for the browser.
 
 ---
 
@@ -160,30 +160,31 @@ foreach (var edge in graph.GetEdges(new NodeKey(42)))
 
 ## Full Benchmark Results
 
-All benchmarks below are from BenchmarkDotNet v0.15.8, DefaultJob (15 iterations, 8 warmup). Environment: Windows 11, .NET 10.0.2 (RyuJIT x86-64-v4), Intel i7-11800H. For three-way browser results, see the [**Live Arena**](https://revred.github.io/Sharc/).
+All benchmarks below are from BenchmarkDotNet v0.15.8, DefaultJob (15 iterations, 8 warmup). Environment: Windows 11, .NET 10.0.2 (RyuJIT x86-64-v4), Intel i7-11800H. Last run: February 13, 2026. For three-way browser results, see the [**Live Arena**](https://revred.github.io/Sharc/).
 
 > **Reproduce locally:**
 > ```bash
 > dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*
 > dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *Graph*
 > dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *CoreBenchmarks*
+> dotnet run -c Release --project bench/Sharc.Comparisons -- --tier standard  # ~8 min, 30 benchmarks
 > ```
 
 ### Core Operations (5K rows, 9-column `users` table)
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 |:---|---:|---:|:---:|---:|---:|
-| Engine Init (open + header) | **430 ns** | 23.64 us | **54.9x** | 8,784 B | 1,160 B |
-| Schema Introspection | **2.67 us** | 25.66 us | **9.6x** | 7,000 B | 2,536 B |
-| Sequential Scan (9 cols) | **3.01 ms** | 6.23 ms | **2.1x** | 2,500,376 B | 1,412,320 B |
-| Point Lookup (Seek) | **3,094 ns** | 23,448 ns | **7.6x** | 7,864 B | 728 B |
-| Batch 6 Lookups | **5,599 ns** | 122,637 ns | **21.9x** | 8,968 B | 3,712 B |
-| Type Decode (5K ints) | **212 us** | 779 us | **3.7x** | 7,960 B | 688 B |
-| NULL Detection | **163 us** | 742 us | **4.6x** | 7,960 B | 688 B |
-| WHERE Filter | **496 us** | **659 us** | **1.33x** | **1.3 KB** | 720 B |
-| GC Pressure (sustained) | **213 us** | 842 us | **4.0x** | 7,960 B | 688 B |
+| Engine Init (open + header) | **3.66 us** | 23.91 us | **6.5x** | 15,520 B | 1,160 B |
+| Schema Introspection | **2.97 us** | 26.66 us | **9.0x** | 7,000 B | 2,536 B |
+| Sequential Scan (9 cols) | **2.59 ms** | 6.03 ms | **2.3x** | 2,500,832 B | 1,412,320 B |
+| Point Lookup (Seek) | **3,444 ns** | 24,347 ns | **7.1x** | 8,320 B | 728 B |
+| Batch 6 Lookups | **5,237 ns** | 127,763 ns | **24.4x** | 9,424 B | 3,712 B |
+| Type Decode (5K ints) | **213 us** | 819 us | **3.8x** | 8,416 B | 688 B |
+| NULL Detection | **156 us** | 746 us | **4.8x** | 8,416 B | 688 B |
+| WHERE Filter | 1,229 us | **554 us** | 0.45x | 1,089,200 B | 720 B |
+| GC Pressure (sustained) | **213 us** | 798 us | **3.7x** | 8,416 B | 688 B |
 
-> **Bold = winner.** Sharc wins 9 of 9 on speed. The **Filter Star (JIT)** path eliminates the VDB overhead, allowing Sharc to surpass SQLite's native C scan loop.
+> **Bold = winner.** Sharc wins 8 of 9 on speed. SQLite's native VDBE wins WHERE filter — Tier 3 SIMD is planned to close this gap. Sharc dominates on seeks, scans, and decode operations.
 
 ### Graph Storage (5K nodes, 15K edges)
 
@@ -191,16 +192,16 @@ Sharc includes a built-in graph storage layer (`Sharc.Graph`) that maps concept/
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 |:---|---:|---:|:---:|---:|---:|
-| Node Scan (5K concepts) | **1,029 us** | 2,809 us | **2.7x** | 1,610,240 B | 959,232 B |
-| Edge Scan (15K relations) | **2,204 us** | — | **—** | 2,891,912 B | — |
-| Node Projection (id + type) | **516 us** | 1,557 us | **3.0x** | 812,224 B | 480,704 B |
-| Edge Filter by Kind | **1,687 us** | 2,362 us | **1.4x** | 1,451,912 B | 696 B |
-| Single Node Seek | **637 ns** | 21,193 ns | **33.3x** | 1,840 B | 600 B |
-| Batch 6 Node Seeks | **1,932 ns** | 131,749 ns | **68.2x** | 4,176 B | 3,024 B |
-| Open > Seek > Close | **5,979 ns** | 26,808 ns | **4.5x** | 12,136 B | 1,256 B |
-| **2-Hop BFS Traversal** | **5.78 us** | 79.31 us | **13.7x** | 10,368 B | 2,808 B |
+| Node Scan (5K concepts) | **1,907 us** | 4,032 us | **2.1x** | 1,610,600 B | 959,232 B |
+| Edge Scan (15K relations) | **4,176 us** | — | **—** | 2,892,176 B | — |
+| Node Projection (id + type) | **988 us** | 2,200 us | **2.2x** | 812,584 B | 480,704 B |
+| Edge Filter by Kind | **1,800 us** | 3,129 us | **1.7x** | 1,452,176 B | 696 B |
+| Single Node Seek | **1,475 ns** | 21,349 ns | **14.5x** | 1,840 B | 600 B |
+| Batch 6 Node Seeks | **3,858 ns** | 159,740 ns | **41.4x** | 4,176 B | 3,024 B |
+| Open > Seek > Close | **11,764 ns** | 33,386 ns | **2.8x** | 12,496 B | 1,256 B |
+| **2-Hop BFS Traversal** | **6.27 us** | 78.49 us | **12.5x** | 10,900 B | 2,808 B |
 
-> **Graph seeks are the sweet spot:** 33.3x-68.2x faster. The BFS traversal achieves 13.7x through `SeekFirst(key)` — O(log N) binary search on the index B-tree that positions the cursor at the first matching entry, replacing linear scan.
+> **Graph seeks are the sweet spot:** 14.5x-41.4x faster. The BFS traversal achieves 12.5x through `SeekFirst(key)` — O(log N) binary search on the index B-tree that positions the cursor at the first matching entry, replacing linear scan.
 
 ### Seek Performance Deep-Dive
 
@@ -396,12 +397,12 @@ BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), re
 | WHERE filtering | **Baked JIT (14+ ops)** | Yes (via SQL) |
 | JOIN / GROUP BY / aggregates | No | Yes |
 | ORDER BY | No — rowid order | Yes |
-| Write / INSERT / UPDATE / DELETE | No | Yes |
+| Write / INSERT / UPDATE / DELETE | **Yes (Write.Max)** — Insert, batch, B-tree split | Yes |
 | Native dependencies | **None** | Requires `e_sqlite3` |
-| Sequential scan | **2.1-4.6x faster** | Baseline |
-| B-tree point lookup | **7.6-68x faster** | Baseline |
-| Schema introspection | **9.6x faster** | Baseline |
-| Graph 2-hop BFS | **13.7x faster** | Baseline |
+| Sequential scan | **2.3-4.8x faster** | Baseline |
+| B-tree point lookup | **7.1-41x faster** | Baseline |
+| Schema introspection | **9.0x faster** | Baseline |
+| Graph 2-hop BFS | **12.5x faster** | Baseline |
 | Thread-safe parallel reads | Yes (16 threads) | Yes |
 | In-memory buffer | Native (`ReadOnlyMemory`) | Connection string hack |
 | Column projection | Yes | Yes (via SELECT) |
@@ -490,12 +491,13 @@ dotnet run -c Release --project bench/Sharc.Comparisons   # graph + core benchma
 ### Test Status
 
 ```
-717 passed, 0 skipped, 0 failed
-  Unit tests:        529 (core + crypto + filter + WITHOUT ROWID + SeekFirst)
+818 passed, 0 skipped, 0 failed
+  Unit tests:        534 (core + crypto + filter + WITHOUT ROWID + SeekFirst + write engine)
   Graph unit tests:   50
   Integration tests: 102 (includes encryption, filtering, WITHOUT ROWID, allocation fixes)
   Context tests:      14 (MCP query tools)
   Index tests:        22 (GCD schema, git log parser, commit writer)
+  Write engine:       96 (RecordEncoder, CellBuilder, WalWriter, PageManager, BTreeMutator)
 ```
 
 ### Milestone Progress
@@ -515,18 +517,19 @@ Graph Support                  ################ COMPLETE (SeekFirst O(log N))
 Browser Arena                  ################ COMPLETE (16 live benchmarks)
 MCP Context Tools              ################ COMPLETE (4 query tools)
 sharc-index CLI                ################ COMPLETE
+Write Engine (Phase 1)         ########-------- IN PROGRESS (BTreeMutator, SharcWriter)
 ```
 
 ## Current Limitations
 
-Sharc is a **read-only format reader**, not a full database engine:
+Sharc is a **SQLite format reader and writer** built in pure managed C#:
 
-- **No SQL execution** — reads raw B-tree pages; no parser, no joins, no aggregates
-- **No write support** — Read-only by design (write support planned)
+- **No SQL execution** — reads/writes raw B-tree pages; no parser, no joins, no aggregates
+- **Write support (Phase 1)** — INSERT with B-tree page splits. UPDATE/DELETE/UPSERT planned.
 - **No virtual tables** — FTS5, R-Tree not supported
 - **No UTF-16 text** — UTF-8 only
-- **WHERE filter parity** — With **Filter Star (JIT)**, Sharc achieves ~1.3x speedup over SQLite. Tier 3 SIMD is planned to reach 10x parity.
-- **Higher per-open allocation** — Sharc allocates ~8.8 KB on open (header parse + page source); lazy schema initialization defers schema parsing until first access
+- **WHERE filter gap** — SQLite's VDBE currently beats Sharc's FilterStar on complex WHERE clauses. Tier 3 SIMD is planned to close this gap.
+- **Higher per-open allocation** — Sharc allocates ~15.5 KB on open (header parse + page source); lazy schema initialization defers schema parsing until first access
 
 ## Design Principles
 
