@@ -36,7 +36,7 @@ The four features in Phase 2 transform Sharc from a fast reader into the default
 
 **Scope:** Every `.cs` file (50 source, 39 test, 22 benchmark), all `.csproj` files, `Directory.Build.props`, README, PRC documentation. ~5,000 LOC source, ~7,500 LOC tests, 489 passing tests, 127 benchmarks.
 
-**Full detailed review:** See `sharc-deep-review.md` for file-level analysis with code excerpts and line numbers.
+**Full detailed review:** See `deepReviewPhase1.md` for file-level analysis with code excerpts and line numbers.
 
 ## Architecture Assessment
 
