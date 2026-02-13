@@ -15,6 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Buffers;
 using Sharc.Core;
 using Sharc.Core.Records;
 using Sharc.Graph.Model;
@@ -118,9 +119,16 @@ internal sealed class ConceptStore
                 using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
                 if (tableCursor.Seek(rowId))
                 {
-                    var buffer = new ColumnValue[_columnCount];
-                    _decoder.DecodeRecord(tableCursor.Payload, buffer);
-                    return MapToRecord(buffer, key);
+                    var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+                    try
+                    {
+                        _decoder.DecodeRecord(tableCursor.Payload, buffer);
+                        return MapToRecord(buffer, key);
+                    }
+                    finally
+                    {
+                        ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+                    }
                 }
                 return null;
             }
@@ -157,9 +165,16 @@ internal sealed class ConceptStore
                 using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
                 if (tableCursor.Seek(rowId))
                 {
-                    var buffer = new ColumnValue[_columnCount];
-                    _decoder.DecodeRecord(tableCursor.Payload, buffer);
-                    return MapToRecord(buffer);
+                    var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+                    try
+                    {
+                        _decoder.DecodeRecord(tableCursor.Payload, buffer);
+                        return MapToRecord(buffer);
+                    }
+                    finally
+                    {
+                        ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+                    }
                 }
                 return null;
             }
@@ -172,29 +187,43 @@ internal sealed class ConceptStore
     private GraphRecord? GetViaIdTableScan(string id)
     {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
-        var buffer = new ColumnValue[_columnCount];
-        while (cursor.MoveNext())
+        var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+        try
         {
-            _decoder.DecodeRecord(cursor.Payload, buffer);
-            string rowIdStr = _colId >= 0 && _colId < buffer.Length ? buffer[_colId].AsString() : "";
-            if (!rowIdStr.Equals(id, StringComparison.OrdinalIgnoreCase)) continue;
-            return MapToRecord(buffer);
+            while (cursor.MoveNext())
+            {
+                _decoder.DecodeRecord(cursor.Payload, buffer);
+                string rowIdStr = _colId >= 0 && _colId < _columnCount ? buffer[_colId].AsString() : "";
+                if (!rowIdStr.Equals(id, StringComparison.OrdinalIgnoreCase)) continue;
+                return MapToRecord(buffer);
+            }
+            return null;
         }
-        return null;
+        finally
+        {
+            ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+        }
     }
 
     private GraphRecord? GetViaTableScan(NodeKey key)
     {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
-        var buffer = new ColumnValue[_columnCount];
-        while (cursor.MoveNext())
+        var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
+        try
         {
-            _decoder.DecodeRecord(cursor.Payload, buffer);
-            long barId = _colKey >= 0 && _colKey < buffer.Length ? buffer[_colKey].AsInt64() : 0;
-            if (barId != key.Value) continue;
-            return MapToRecord(buffer, key);
+            while (cursor.MoveNext())
+            {
+                _decoder.DecodeRecord(cursor.Payload, buffer);
+                long barId = _colKey >= 0 && _colKey < _columnCount ? buffer[_colKey].AsInt64() : 0;
+                if (barId != key.Value) continue;
+                return MapToRecord(buffer, key);
+            }
+            return null;
         }
-        return null;
+        finally
+        {
+            ArrayPool<ColumnValue>.Shared.Return(buffer, clearArray: true);
+        }
     }
 
     private GraphRecord MapToRecord(ColumnValue[] columns, NodeKey? keyOverride = null)
