@@ -354,4 +354,310 @@ public class IndexBTreeCursorTests
         Assert.Equal(record.Length, cursor.PayloadSize);
         Assert.Equal(cursor.PayloadSize, cursor.Payload.Length);
     }
+
+    // ---- SeekFirst tests ----
+
+    [Fact]
+    public void SeekFirst_ExactMatch_ReturnsTrueAndPositions()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+        var r3 = MakeIndexRecord(30, 3);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2, r3]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        var found = cursor.SeekFirst(20);
+
+        Assert.True(found);
+        Assert.Equal(r2, cursor.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SeekFirst_NoMatch_ReturnsFalseAndPositionsAtNext()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(30, 3);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Seek for key=20 which doesn't exist; should position at key=30
+        var found = cursor.SeekFirst(20);
+
+        Assert.False(found);
+        Assert.Equal(r2, cursor.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SeekFirst_KeyBeyondAll_ExhaustedCursor()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Key 99 is beyond all entries
+        var found = cursor.SeekFirst(99);
+
+        Assert.False(found);
+        // Cursor should be exhausted — MoveNext returns false
+        Assert.False(cursor.MoveNext());
+    }
+
+    [Fact]
+    public void SeekFirst_KeyBeforeAll_PositionsAtFirst()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Seek for key=5 (before all entries)
+        var found = cursor.SeekFirst(5);
+
+        Assert.False(found);
+        Assert.Equal(r1, cursor.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SeekFirst_ThenMoveNext_ContinuesFromSeekPosition()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+        var r3 = MakeIndexRecord(30, 3);
+        var r4 = MakeIndexRecord(40, 4);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2, r3, r4]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        cursor.SeekFirst(20);
+
+        // Collect remaining entries from seek position
+        var payloads = new List<byte[]>();
+        payloads.Add(cursor.Payload.ToArray()); // current (key=20)
+        while (cursor.MoveNext())
+            payloads.Add(cursor.Payload.ToArray());
+
+        Assert.Equal(3, payloads.Count); // key=20, 30, 40
+        Assert.Equal(r2, payloads[0]);
+        Assert.Equal(r3, payloads[1]);
+        Assert.Equal(r4, payloads[2]);
+    }
+
+    [Fact]
+    public void SeekFirst_MultiLevel_SeeksToCorrectLeaf()
+    {
+        // Three-level tree: interior → two leaf pages
+        // Page 2: interior with divider key=20, left child=page 3, right child=page 4
+        // Page 3: leaf with keys 10, 20
+        // Page 4: leaf with keys 30, 40
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+        var r3 = MakeIndexRecord(30, 3);
+        var r4 = MakeIndexRecord(40, 4);
+        var divider = MakeIndexRecord(20, 2);
+
+        var db = CreateDatabase(4, (data, ps) =>
+        {
+            WriteInteriorIndexPage(data, ps,
+                cells: [(3, divider)],
+                rightChild: 4);
+
+            WriteLeafIndexPage(data, 2 * ps, [r1, r2]);
+            WriteLeafIndexPage(data, 3 * ps, [r3, r4]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Seek for key=30 which is in the right leaf (page 4)
+        var found = cursor.SeekFirst(30);
+
+        Assert.True(found);
+        Assert.Equal(r3, cursor.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SeekFirst_MultiLevel_ThenMoveNextCrossesLeafBoundary()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+        var r3 = MakeIndexRecord(30, 3);
+        var r4 = MakeIndexRecord(40, 4);
+        var divider = MakeIndexRecord(20, 2);
+
+        var db = CreateDatabase(4, (data, ps) =>
+        {
+            WriteInteriorIndexPage(data, ps,
+                cells: [(3, divider)],
+                rightChild: 4);
+
+            WriteLeafIndexPage(data, 2 * ps, [r1, r2]);
+            WriteLeafIndexPage(data, 3 * ps, [r3, r4]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Seek to key=20 (last entry in left leaf)
+        cursor.SeekFirst(20);
+
+        var payloads = new List<byte[]>();
+        payloads.Add(cursor.Payload.ToArray());
+        while (cursor.MoveNext())
+            payloads.Add(cursor.Payload.ToArray());
+
+        // Should continue from key=20 through key=30, 40
+        Assert.Equal(3, payloads.Count);
+        Assert.Equal(r2, payloads[0]);
+        Assert.Equal(r3, payloads[1]);
+        Assert.Equal(r4, payloads[2]);
+    }
+
+    [Fact]
+    public void SeekFirst_Int32Keys_ExactMatch()
+    {
+        var r1 = MakeIndexRecord32(100, 1);
+        var r2 = MakeIndexRecord32(200, 2);
+        var r3 = MakeIndexRecord32(300, 3);
+        var r4 = MakeIndexRecord32(400, 4);
+
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [r1, r2, r3, r4]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        var found = cursor.SeekFirst(300);
+
+        Assert.True(found);
+        Assert.Equal(r3, cursor.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SeekFirst_EmptyLeaf_ReturnsFalse()
+    {
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, []);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        var found = cursor.SeekFirst(42);
+
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void SeekFirst_AfterDispose_ThrowsObjectDisposed()
+    {
+        var record = MakeIndexRecord(10, 1);
+        var db = CreateDatabase(2, (data, ps) =>
+        {
+            WriteLeafIndexPage(data, ps, [record]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        var cursor = reader.CreateIndexCursor(2);
+        cursor.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => cursor.SeekFirst(10));
+    }
+
+    [Fact]
+    public void SeekFirst_ThreeLeafPages_SeeksToMiddle()
+    {
+        var r1 = MakeIndexRecord(10, 1);
+        var r2 = MakeIndexRecord(20, 2);
+        var r3 = MakeIndexRecord(30, 3);
+        var r4 = MakeIndexRecord(40, 4);
+        var r5 = MakeIndexRecord(50, 5);
+        var r6 = MakeIndexRecord(60, 6);
+
+        var div1 = MakeIndexRecord(20, 2);
+        var div2 = MakeIndexRecord(40, 4);
+
+        var db = CreateDatabase(5, (data, ps) =>
+        {
+            WriteInteriorIndexPage(data, ps,
+                cells: [(3, div1), (4, div2)],
+                rightChild: 5);
+
+            WriteLeafIndexPage(data, 2 * ps, [r1, r2]);
+            WriteLeafIndexPage(data, 3 * ps, [r3, r4]);
+            WriteLeafIndexPage(data, 4 * ps, [r5, r6]);
+        });
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateIndexCursor(2);
+
+        // Seek to key=40 in the middle leaf
+        var found = cursor.SeekFirst(40);
+
+        Assert.True(found);
+        Assert.Equal(r4, cursor.Payload.ToArray());
+
+        // MoveNext should continue to key=50, 60
+        var remaining = new List<byte[]>();
+        while (cursor.MoveNext())
+            remaining.Add(cursor.Payload.ToArray());
+
+        Assert.Equal(2, remaining.Count);
+        Assert.Equal(r5, remaining[0]);
+        Assert.Equal(r6, remaining[1]);
+    }
 }

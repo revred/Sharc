@@ -37,7 +37,9 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     private readonly SqliteEngine _sqliteEngine;
     private readonly IndexedDbEngine _indexedDbEngine;
     private readonly ReferenceEngine _referenceEngine;
+    private readonly DataGenerator _dataGenerator = new();
 
+    private byte[]? _dbBytes;
     private int _lastUserCount;
     private int _lastNodeCount;
 
@@ -57,7 +59,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         SlideDefinition slide, double scale, CancellationToken cancellationToken = default)
     {
         Console.WriteLine($"[Runner] Running slide: {slide.Id} (scale: {scale})");
-        
+
         // Get reference results (used for SurrealDB which stays on reference data)
         var referenceResults = await _referenceEngine.RunSlideAsync(slide, scale, cancellationToken);
 
@@ -66,8 +68,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         var nodeCount = ScaleToNodeCount(slide, scale);
 
         Console.WriteLine($"[Runner] Initializing engines with {userCount} users, {nodeCount} nodes");
-        EnsureNativeEnginesInitialized(userCount, nodeCount);
-        await _indexedDbEngine.EnsureInitialized(userCount, nodeCount);
+        await EnsureAllEnginesInitialized(userCount, nodeCount);
 
         // Run Tier 1 engines (sync, same .NET runtime)
         var sharcResult = RunSharcSlide(slide.Id, scale);
@@ -94,19 +95,28 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         return merged;
     }
 
-    private void EnsureNativeEnginesInitialized(int userCount, int nodeCount)
+    /// <summary>
+    /// Generates the canonical database byte[] ONCE and shares it across all engines.
+    /// Eliminates 3× redundant DataGenerator runs (was: each engine generated its own copy).
+    /// </summary>
+    private async Task EnsureAllEnginesInitialized(int userCount, int nodeCount)
     {
         if (userCount != _lastUserCount || nodeCount != _lastNodeCount)
         {
+            // Single generation — deterministic seed=42, identical for all engines
+            _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
+
             _sharcEngine.Reset();
-            _sharcEngine.EnsureInitialized(userCount, nodeCount);
+            _sharcEngine.EnsureInitialized(_dbBytes);
 
             _sqliteEngine.Reset();
-            _sqliteEngine.EnsureInitialized(userCount, nodeCount);
+            _sqliteEngine.EnsureInitialized(_dbBytes);
 
             _lastUserCount = userCount;
             _lastNodeCount = nodeCount;
         }
+
+        await _indexedDbEngine.EnsureInitialized(_dbBytes!, userCount, nodeCount);
     }
 
     private EngineBaseResult RunSharcSlide(string slideId, double scale) =>
