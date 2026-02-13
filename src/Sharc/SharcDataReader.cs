@@ -17,6 +17,7 @@
 
 using System.Buffers;
 using Sharc.Core;
+using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
 namespace Sharc;
@@ -52,8 +53,12 @@ public sealed class SharcDataReader : IDisposable
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
 
-    // Row-level filter support
+    // Row-level filter support (legacy path)
     private readonly ResolvedFilter[]? _filters;
+
+    // Byte-level filter support (FilterStar path)
+    private readonly IFilterNode? _filterNode;
+    private readonly long[]? _filterSerialTypes;
 
     // Lazy decode support for projection path — avoids decoding TEXT/BLOB
     // body data until the caller actually requests the value.
@@ -65,7 +70,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
         IReadOnlyList<ColumnInfo> columns, int[]? projection,
         IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null,
-        ResolvedFilter[]? filters = null)
+        ResolvedFilter[]? filters = null, IFilterNode? filterNode = null)
     {
         _cursor = cursor;
         _recordDecoder = recordDecoder;
@@ -74,6 +79,7 @@ public sealed class SharcDataReader : IDisposable
         _bTreeReader = bTreeReader;
         _tableIndexes = tableIndexes;
         _filters = filters;
+        _filterNode = filterNode;
         _columnCount = columns.Count;
 
         // Rent a reusable buffer from ArrayPool — returned in Dispose()
@@ -85,6 +91,10 @@ public sealed class SharcDataReader : IDisposable
             _serialTypes = new long[columns.Count];
             _decodedGenerations = new int[columns.Count];
         }
+
+        // Allocate serial type buffer for byte-level filter evaluation
+        if (filterNode != null)
+            _filterSerialTypes = new long[columns.Count];
 
         // Detect INTEGER PRIMARY KEY (rowid alias) â€” SQLite stores NULL in the record
         // for this column; the real value is the b-tree key (rowid).
@@ -247,6 +257,23 @@ public sealed class SharcDataReader : IDisposable
 
         while (_cursor.MoveNext())
         {
+            // ── FilterStar byte-level path: evaluate raw record before decoding ──
+            if (_filterNode != null)
+            {
+                int colCount = _recordDecoder.ReadSerialTypes(_cursor.Payload, _filterSerialTypes!);
+                VarintDecoder.Read(_cursor.Payload, out long headerSize);
+                int bodyOffset = (int)headerSize;
+                int stCount = Math.Min(colCount, _filterSerialTypes!.Length);
+
+                if (!_filterNode.Evaluate(_cursor.Payload,
+                    _filterSerialTypes.AsSpan(0, stCount), bodyOffset, _cursor.RowId))
+                    continue;
+
+                DecodeCurrentRow();
+                return true;
+            }
+
+            // ── Legacy SharcFilter path ──
             DecodeCurrentRow();
 
             if (_filters is null || EvaluateFilters())

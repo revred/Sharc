@@ -23,17 +23,55 @@ namespace Sharc.Benchmarks;
 /// Benchmark suite entry point.
 /// Run with: dotnet run -c Release --project bench/Sharc.Benchmarks
 ///
+/// Tier examples (fastest to slowest):
+///   -- --tier micro                   6 benchmarks,   ~1.5 min  Quick sanity check
+///   -- --tier mini                    14 benchmarks,  ~4 min    PR validation
+///   -- --tier standard                76 benchmarks,  ~20 min   All Sharc vs SQLite
+///   -- --tier mega                    205 benchmarks, ~50 min   Full suite
+///   -- --tier full                    (same as mega)
+///
 /// Filter examples:
-///   --filter *Micro*                  All micro-benchmarks
-///   --filter *Comparative*            All comparative benchmarks (Sharc vs SQLite)
-///   --filter *VarintBenchmarks*       Specific class
-///   --filter *VarintBenchmarks.Read*  Specific method pattern
-///   --list flat                       List all benchmarks without running
+///   -- --filter *Micro*               All micro-benchmarks
+///   -- --filter *Comparative*         All comparative benchmarks (Sharc vs SQLite)
+///   -- --filter *VarintBenchmarks*    Specific class
+///   -- --list flat                    List all benchmarks without running
+///
+/// Combine tier with other flags:
+///   -- --tier mini --exporters json
 /// </summary>
 public static class Program
 {
     public static void Main(string[] args)
     {
+        args = ResolveTier(args);
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+    }
+
+    private static string[] ResolveTier(string[] args)
+    {
+        int idx = Array.IndexOf(args, "--tier");
+        if (idx < 0 || idx + 1 >= args.Length)
+            return args;
+
+        string tierName = args[idx + 1];
+
+        if (!BenchmarkTiers.IsKnown(tierName))
+        {
+            Console.WriteLine($"Unknown tier '{tierName}'. Available: micro, mini, standard, mega, full");
+            return args;
+        }
+
+        string[]? filters = BenchmarkTiers.GetFilters(tierName);
+        if (filters is null)
+        {
+            // "full" — remove --tier arg, pass everything else through
+            return args.Where((_, i) => i != idx && i != idx + 1).ToArray();
+        }
+
+        // Replace --tier with --filter patterns
+        var result = new List<string> { "--filter" };
+        result.AddRange(filters);
+        result.AddRange(args.Where((_, i) => i != idx && i != idx + 1));
+        return result.ToArray();
     }
 }
