@@ -56,6 +56,8 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     public async Task<IReadOnlyDictionary<string, EngineBaseResult>> RunSlideAsync(
         SlideDefinition slide, double scale, CancellationToken cancellationToken = default)
     {
+        Console.WriteLine($"[Runner] Running slide: {slide.Id} (scale: {scale})");
+        
         // Get reference results (used for SurrealDB which stays on reference data)
         var referenceResults = await _referenceEngine.RunSlideAsync(slide, scale, cancellationToken);
 
@@ -63,7 +65,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         var userCount = ScaleToUserCount(slide, scale);
         var nodeCount = ScaleToNodeCount(slide, scale);
 
-        // Ensure all engines are initialized at current scale
+        Console.WriteLine($"[Runner] Initializing engines with {userCount} users, {nodeCount} nodes");
         EnsureNativeEnginesInitialized(userCount, nodeCount);
         await _indexedDbEngine.EnsureInitialized(userCount, nodeCount);
 

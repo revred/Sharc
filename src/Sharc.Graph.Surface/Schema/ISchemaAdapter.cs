@@ -66,6 +66,9 @@ public interface ISchemaAdapter
     /// <summary>Column for Node Alias (interned concepts).</summary>
     string? NodeAliasColumn { get; }
 
+    /// <summary>Column for estimated token count (CSE optimization).</summary>
+    string? NodeTokensColumn { get; }
+
     // --- Edge Columns ---
 
     /// <summary>Column for the edge GUID.</summary>
@@ -93,6 +96,9 @@ public interface ISchemaAdapter
     
     /// <summary>Column for Edge Sync Status.</summary>
     string? EdgeSyncColumn { get; }
+
+    /// <summary>Column for edge relevance weight (0.0 - 1.0).</summary>
+    string? EdgeWeightColumn { get; }
 
     /// <summary>
     /// Registry mapping integer TypeIDs to human-readable names.

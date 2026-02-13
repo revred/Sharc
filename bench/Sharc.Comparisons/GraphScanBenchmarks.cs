@@ -95,9 +95,9 @@ public class GraphScanBenchmarks
         while (reader.Read())
         {
             _ = reader.GetString(0);  // id
-            _ = reader.GetInt64(1);   // origin
+            _ = reader.GetInt64(1);   // source_key
             _ = reader.GetInt64(2);   // kind
-            _ = reader.GetInt64(3);   // target
+            _ = reader.GetInt64(3);   // target_key
             count++;
         }
         return count;
@@ -108,7 +108,7 @@ public class GraphScanBenchmarks
     public long SQLite_ScanAllEdges()
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT id, origin, kind, target FROM _relations";
+        cmd.CommandText = "SELECT id, source_key, kind, target_key FROM _relations";
         long count = 0;
         using var reader = cmd.ExecuteReader();
         while (reader.Read())

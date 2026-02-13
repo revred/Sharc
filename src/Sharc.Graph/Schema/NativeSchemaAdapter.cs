@@ -56,6 +56,8 @@ public sealed class NativeSchemaAdapter : ISchemaAdapter
     
     /// <inheritdoc/>
     public string? NodeAliasColumn => "alias";
+    /// <inheritdoc/>
+    public string? NodeTokensColumn => "tokens";
 
     // --- Edge Columns ---
     /// <inheritdoc/>
@@ -74,6 +76,8 @@ public sealed class NativeSchemaAdapter : ISchemaAdapter
     public string? EdgeLvnColumn => "lvn";
     /// <inheritdoc/>
     public string? EdgeSyncColumn => "sync_status";
+    /// <inheritdoc/>
+    public string? EdgeWeightColumn => "weight";
 
     // --- Type Registry ---
     /// <inheritdoc/>

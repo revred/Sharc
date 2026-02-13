@@ -31,8 +31,6 @@ public static class SlideData
     [
         new() { Id = "sqlite",    Name = "SQLite",      Subtitle = "C \u2192 WASM P/Invoke", Color = "#3B82F6", Icon = "\u26A1",     Footprint = "~1.5 MB",  Tier = EngineTier.NativeDotNet },
         new() { Id = "indexeddb", Name = "IndexedDB",   Subtitle = "Browser-native",     Color = "#F59E0B", Icon = "\uD83D\uDDC4\uFE0F", Footprint = "Built-in", Tier = EngineTier.JsInterop },
-        new() { Id = "surrealdb", Name = "SurrealDB",   Subtitle = "Multi-model WASM",   Color = "#A855F7", Icon = "\uD83D\uDD2E",       Footprint = "~8 MB",    Tier = EngineTier.Deferred },
-        new() { Id = "arangodb",  Name = "ArangoDB",    Subtitle = "Multi-model C++",    Color = "#EF4444", Icon = "\uD83D\uDD3A",       Footprint = "~10 MB",   Tier = EngineTier.Deferred },
         new() { Id = "sharc",     Name = "Sharc",       Subtitle = "Zero-alloc C#",      Color = "#10B981", Icon = "\uD83E\uDD88",       Footprint = "~50 KB",   Tier = EngineTier.NativeDotNet },
     ];
 
@@ -59,7 +57,7 @@ public static class SlideData
 
     public static readonly IReadOnlyList<DensityTier> StandardDensityTiers =
     [
-        new() { Id = "xs", Label = "100",  Rows = 100,    Scale = 0.01 },
+        new() { Id = "xs", Label = "500",  Rows = 500,    Scale = 0.01 },
         new() { Id = "sm", Label = "1K",   Rows = 1000,   Scale = 0.1 },
         new() { Id = "md", Label = "5K",   Rows = 5000,   Scale = 1 },
         new() { Id = "lg", Label = "10K",  Rows = 10000,  Scale = 2 },
@@ -249,7 +247,7 @@ public static class SlideData
             Subtitle = "Full _relations table scan (RelationStore)",
             Icon = "\uD83D\uDD17", Unit = "\u03BCs", CategoryId = "graph",
             DensityTiers = GraphDensityTiers, DefaultDensity = "md", ScaleMode = "linear",
-            Methodology = "Scan N edges in _relations (origin, target, kind, data). Tests RelationStore performance.",
+            Methodology = "Scan N edges in _relations (source_key, target_key, kind, data). Tests RelationStore performance.",
             BaseResults = new Dictionary<string, EngineBaseResult>
             {
                 ["sqlite"]    = new() { Value = 7673, Allocation = "1.4 MB", Note = "Raw SQL \u2014 no graph model" },

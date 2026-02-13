@@ -99,13 +99,16 @@ public sealed class DataGenerator
             );
 
             CREATE TABLE _relations (
-                id     TEXT NOT NULL,
-                origin INTEGER NOT NULL,
-                target INTEGER NOT NULL,
-                kind   INTEGER NOT NULL,
-                weight REAL NOT NULL,
-                data   TEXT NOT NULL
+                id         TEXT NOT NULL,
+                source_key INTEGER NOT NULL,
+                target_key INTEGER NOT NULL,
+                kind       INTEGER NOT NULL,
+                weight     REAL NOT NULL,
+                data       TEXT NOT NULL
             );
+
+            CREATE INDEX idx_relations_source_kind ON _relations(source_key, kind, target_key);
+            CREATE INDEX idx_relations_target_kind ON _relations(target_key, kind, source_key);
             """;
         cmd.ExecuteNonQuery();
     }
@@ -205,11 +208,11 @@ public sealed class DataGenerator
         using var tx = connection.BeginTransaction();
         using var cmd = connection.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "INSERT INTO _relations (id, origin, target, kind, weight, data) VALUES ($id, $origin, $target, $kind, $weight, $data)";
+        cmd.CommandText = "INSERT INTO _relations (id, source_key, target_key, kind, weight, data) VALUES ($id, $sKey, $tKey, $kind, $weight, $data)";
 
         var pId = cmd.Parameters.Add("$id", SqliteType.Text);
-        var pOrigin = cmd.Parameters.Add("$origin", SqliteType.Integer);
-        var pTarget = cmd.Parameters.Add("$target", SqliteType.Integer);
+        var pOrigin = cmd.Parameters.Add("$sKey", SqliteType.Integer);
+        var pTarget = cmd.Parameters.Add("$tKey", SqliteType.Integer);
         var pKind = cmd.Parameters.Add("$kind", SqliteType.Integer);
         var pWeight = cmd.Parameters.Add("$weight", SqliteType.Real);
         var pData = cmd.Parameters.Add("$data", SqliteType.Text);

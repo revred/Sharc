@@ -50,6 +50,9 @@ public sealed class GraphRecord
     /// <summary>Last update timestamp.</summary>
     public DateTimeOffset UpdatedAt { get; init; }
 
+    /// <summary>Estimated token count (for CSE budgeting).</summary>
+    public int Tokens { get; init; }
+
     /// <summary>
     /// Creates a new GraphRecord.
     /// </summary>

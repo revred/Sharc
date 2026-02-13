@@ -541,8 +541,8 @@ public sealed class SqliteEngine : IDisposable
         var hop1Targets = new HashSet<long>();
         using (var cmd = _connection!.CreateCommand())
         {
-            cmd.CommandText = "SELECT target FROM _relations WHERE origin = $origin";
-            cmd.Parameters.AddWithValue("$origin", startKey);
+            cmd.CommandText = "SELECT target_key FROM _relations WHERE source_key = $sourceKey";
+            cmd.Parameters.AddWithValue("$sourceKey", startKey);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
                 hop1Targets.Add(reader.GetInt64(0));
@@ -552,13 +552,13 @@ public sealed class SqliteEngine : IDisposable
         var hop2Count = 0;
         using (var cmd = _connection!.CreateCommand())
         {
-            cmd.CommandText = "SELECT COUNT(*) FROM _relations WHERE origin = $origin";
-            var pOrigin = cmd.Parameters.Add("$origin", SqliteType.Integer);
+            cmd.CommandText = "SELECT COUNT(*) FROM _relations WHERE source_key = $sourceKey";
+            var pSourceKey = cmd.Parameters.Add("$sourceKey", SqliteType.Integer);
             cmd.Prepare();
 
             foreach (var target in hop1Targets)
             {
-                pOrigin.Value = target;
+                pSourceKey.Value = target;
                 hop2Count += Convert.ToInt32(cmd.ExecuteScalar());
             }
         }

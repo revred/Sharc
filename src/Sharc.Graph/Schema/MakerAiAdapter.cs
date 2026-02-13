@@ -50,6 +50,8 @@ public sealed class MakerAiAdapter : ISchemaAdapter
     public string? NodeUpdatedColumn => "LastUpdatedUTC";
     /// <inheritdoc/>
     public string? NodeAliasColumn => null;
+    /// <inheritdoc/>
+    public string? NodeTokensColumn => null;
 
     // --- Edge Columns ---
     /// <inheritdoc/>
@@ -68,6 +70,8 @@ public sealed class MakerAiAdapter : ISchemaAdapter
     public string? EdgeLvnColumn => "LVN";
     /// <inheritdoc/>
     public string? EdgeSyncColumn => "SyncStatus";
+    /// <inheritdoc/>
+    public string? EdgeWeightColumn => null;
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<int, string> TypeNames { get; } = new Dictionary<int, string>

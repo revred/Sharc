@@ -205,6 +205,7 @@ public class RelationStoreTests
         public string? NodeSyncColumn => null;
         public string? NodeUpdatedColumn => null;
         public string? NodeAliasColumn => null;
+        public string? NodeTokensColumn => null;
         public string EdgeIdColumn => "id";
         public string EdgeOriginColumn => "origin";
         public string EdgeTargetColumn => "target";
@@ -213,6 +214,7 @@ public class RelationStoreTests
         public string? EdgeCvnColumn => null;
         public string? EdgeLvnColumn => null;
         public string? EdgeSyncColumn => null;
+        public string? EdgeWeightColumn => null;
         public IReadOnlyDictionary<int, string> TypeNames { get; } = new Dictionary<int, string>();
         public IReadOnlyList<string> RequiredIndexDDL { get; } = [];
     }

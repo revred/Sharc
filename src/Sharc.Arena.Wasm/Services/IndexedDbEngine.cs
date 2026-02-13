@@ -276,9 +276,9 @@ public sealed class IndexedDbEngine
     private async Task<EngineBaseResult> RunGraphTraverse()
     {
         // Warm-up
-        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "origin", "target");
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "source_key", "target_key");
 
-        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "origin", "target");
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "source_key", "target_key");
         var ms = result.GetProperty("ms").GetDouble();
         var hop1Count = result.GetProperty("hop1Count").GetInt32();
         var hop2Count = result.GetProperty("hop2Count").GetInt32();
