@@ -346,6 +346,203 @@ public class BTreeCursorTests
         Assert.Equal(new long[] { 1, 2, 3, 4, 5, 6 }, rowIds.ToArray());
     }
 
+    // --- Overflow payload assembly ---
+
+    [Fact]
+    public void MoveNext_OverflowPayload_AssemblesCorrectly()
+    {
+        // Create a payload large enough to overflow.
+        // For usablePageSize 4096: inline threshold X = 4096 - 35 = 4061.
+        // M = ((4096-12)*32/255)-23 = 489
+        // Use a 5000-byte payload → inline = CalculateInlinePayloadSize(5000, 4096) = 908
+        // Remaining 4092 bytes go to an overflow page.
+        int totalPayload = 5000;
+        var fullPayload = new byte[totalPayload];
+        for (int i = 0; i < totalPayload; i++)
+            fullPayload[i] = (byte)(i & 0xFF);
+
+        int usable = PageSize; // no reserved
+        int inlineSize = CellParser.CalculateInlinePayloadSize(totalPayload, usable);
+        int overflowDataSize = usable - 4; // 4092 bytes of data per overflow page
+
+        // Build the database: page 1 = header, page 2 = leaf, page 3 = overflow
+        var db = new byte[PageSize * 3];
+        WriteHeader(db, PageSize, 3);
+
+        // --- Build the cell manually on page 2 ---
+        int pageOffset = PageSize;
+        db[pageOffset] = 0x0D; // Leaf table
+
+        var cellBuf = new byte[18 + inlineSize + 4]; // varints + inline + overflow ptr
+        int off = VarintDecoder.Write(cellBuf, totalPayload);
+        off += VarintDecoder.Write(cellBuf.AsSpan(off), 1L); // rowId = 1
+        // Copy inline portion of payload
+        Array.Copy(fullPayload, 0, cellBuf, off, inlineSize);
+        off += inlineSize;
+        // Write overflow page pointer (page 3)
+        BinaryPrimitives.WriteUInt32BigEndian(cellBuf.AsSpan(off), 3);
+        off += 4;
+        var cellData = cellBuf[..off];
+
+        // Place cell at end of page
+        int cellStart = PageSize - cellData.Length;
+        cellData.CopyTo(db, pageOffset + cellStart);
+
+        // Write page 2 header fields
+        db[pageOffset + 3] = 0; db[pageOffset + 4] = 1; // 1 cell
+        db[pageOffset + 5] = (byte)(cellStart >> 8);
+        db[pageOffset + 6] = (byte)(cellStart & 0xFF);
+        db[pageOffset + 8] = (byte)(cellStart >> 8);
+        db[pageOffset + 9] = (byte)(cellStart & 0xFF);
+
+        // --- Build overflow page (page 3) ---
+        int ovfOffset = PageSize * 2;
+        // Next overflow page = 0 (no more)
+        BinaryPrimitives.WriteUInt32BigEndian(db.AsSpan(ovfOffset), 0);
+        // Copy remaining payload data
+        int remaining = totalPayload - inlineSize;
+        Array.Copy(fullPayload, inlineSize, db, ovfOffset + 4, remaining);
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateCursor(2);
+
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(1L, cursor.RowId);
+        Assert.Equal(totalPayload, cursor.PayloadSize);
+
+        // Verify full payload was assembled correctly
+        var assembledPayload = cursor.Payload.ToArray();
+        Assert.Equal(fullPayload, assembledPayload);
+    }
+
+    [Fact]
+    public void MoveNext_OverflowCycleDetected_ThrowsCorruptPageException()
+    {
+        // Payload must need 2+ overflow pages so the cycle on page 3 → page 3 triggers.
+        // For pageSize 4096: overflowDataSize = 4092, inlineSize ≈ 908.
+        // 10000 - 908 = 9092, needs ⌈9092/4092⌉ = 3 overflow pages.
+        // But page 3 points back to itself, so on second visit → cycle detected.
+        int totalPayload = 10000;
+        var fullPayload = new byte[totalPayload];
+        int usable = PageSize;
+        int inlineSize = CellParser.CalculateInlinePayloadSize(totalPayload, usable);
+
+        var db = new byte[PageSize * 3];
+        WriteHeader(db, PageSize, 3);
+
+        int pageOffset = PageSize;
+        db[pageOffset] = 0x0D;
+
+        var cellBuf = new byte[18 + inlineSize + 4];
+        int off = VarintDecoder.Write(cellBuf, totalPayload);
+        off += VarintDecoder.Write(cellBuf.AsSpan(off), 1L);
+        Array.Copy(fullPayload, 0, cellBuf, off, inlineSize);
+        off += inlineSize;
+        BinaryPrimitives.WriteUInt32BigEndian(cellBuf.AsSpan(off), 3); // overflow → page 3
+        off += 4;
+        var cellData = cellBuf[..off];
+
+        int cellStart = PageSize - cellData.Length;
+        cellData.CopyTo(db, pageOffset + cellStart);
+
+        db[pageOffset + 3] = 0; db[pageOffset + 4] = 1;
+        db[pageOffset + 5] = (byte)(cellStart >> 8);
+        db[pageOffset + 6] = (byte)(cellStart & 0xFF);
+        db[pageOffset + 8] = (byte)(cellStart >> 8);
+        db[pageOffset + 9] = (byte)(cellStart & 0xFF);
+
+        // Overflow page 3 points back to itself → cycle on second visit
+        int ovfOffset = PageSize * 2;
+        BinaryPrimitives.WriteUInt32BigEndian(db.AsSpan(ovfOffset), 3); // cycle!
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateCursor(2);
+
+        Assert.Throws<CorruptPageException>(() => cursor.MoveNext());
+    }
+
+    [Fact]
+    public void MoveNext_MultiCellWithOverflow_PayloadCorrectPerCell()
+    {
+        // Two cells: first is small (inline), second overflows
+        var smallRecord = MakeSimpleRecord();
+        int totalPayload = 5000;
+        var largePayload = new byte[totalPayload];
+        for (int i = 0; i < totalPayload; i++)
+            largePayload[i] = (byte)((i + 0x42) & 0xFF);
+
+        int usable = PageSize;
+        int inlineSize = CellParser.CalculateInlinePayloadSize(totalPayload, usable);
+
+        // page 1 = header, page 2 = leaf, page 3 = overflow
+        var db = new byte[PageSize * 3];
+        WriteHeader(db, PageSize, 3);
+
+        int pageOffset = PageSize;
+        db[pageOffset] = 0x0D;
+
+        // Build cell 1 (small, inline)
+        var cell1Buf = new byte[18 + smallRecord.Length];
+        int off1 = VarintDecoder.Write(cell1Buf, smallRecord.Length);
+        off1 += VarintDecoder.Write(cell1Buf.AsSpan(off1), 1L);
+        smallRecord.CopyTo(cell1Buf, off1);
+        off1 += smallRecord.Length;
+        var cell1 = cell1Buf[..off1];
+
+        // Build cell 2 (overflow)
+        var cell2Buf = new byte[18 + inlineSize + 4];
+        int off2 = VarintDecoder.Write(cell2Buf, totalPayload);
+        off2 += VarintDecoder.Write(cell2Buf.AsSpan(off2), 2L);
+        Array.Copy(largePayload, 0, cell2Buf, off2, inlineSize);
+        off2 += inlineSize;
+        BinaryPrimitives.WriteUInt32BigEndian(cell2Buf.AsSpan(off2), 3);
+        off2 += 4;
+        var cell2 = cell2Buf[..off2];
+
+        // Place cells from end of page
+        int cell2Start = PageSize - cell2.Length;
+        cell2.CopyTo(db, pageOffset + cell2Start);
+        int cell1Start = cell2Start - cell1.Length;
+        cell1.CopyTo(db, pageOffset + cell1Start);
+
+        // Header fields
+        db[pageOffset + 3] = 0; db[pageOffset + 4] = 2; // 2 cells
+        db[pageOffset + 5] = (byte)(cell1Start >> 8);
+        db[pageOffset + 6] = (byte)(cell1Start & 0xFF);
+        // Cell pointers
+        db[pageOffset + 8] = (byte)(cell1Start >> 8);
+        db[pageOffset + 9] = (byte)(cell1Start & 0xFF);
+        db[pageOffset + 10] = (byte)(cell2Start >> 8);
+        db[pageOffset + 11] = (byte)(cell2Start & 0xFF);
+
+        // Overflow page 3
+        int ovfOffset = PageSize * 2;
+        BinaryPrimitives.WriteUInt32BigEndian(db.AsSpan(ovfOffset), 0);
+        int remaining = totalPayload - inlineSize;
+        Array.Copy(largePayload, inlineSize, db, ovfOffset + 4, remaining);
+
+        using var source = new MemoryPageSource(db);
+        var header = DatabaseHeader.Parse(db);
+        var reader = new BTreeReader(source, header);
+        using var cursor = reader.CreateCursor(2);
+
+        // Cell 1: small inline
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(1L, cursor.RowId);
+        Assert.Equal(smallRecord.Length, cursor.PayloadSize);
+        Assert.True(cursor.Payload.SequenceEqual(smallRecord));
+
+        // Cell 2: overflow assembled
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(2L, cursor.RowId);
+        Assert.Equal(totalPayload, cursor.PayloadSize);
+        Assert.Equal(largePayload, cursor.Payload.ToArray());
+    }
+
     [Fact]
     public void Dispose_IsIdempotent()
     {
