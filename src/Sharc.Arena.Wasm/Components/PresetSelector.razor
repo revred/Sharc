@@ -1,0 +1,20 @@
+@* Workload preset buttons *@
+
+<div class="preset-selector">
+    @foreach (var p in Presets)
+    {
+        var isActive = ActivePreset == p.Id;
+        <button class="preset-btn @(isActive ? "active" : "") @(Disabled ? "disabled" : "")"
+                @onclick="@(() => { if (!Disabled) OnChange.InvokeAsync(p.Id); })">
+            <div class="preset-label">@p.Label</div>
+            <div class="preset-desc">@p.Description</div>
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter] public required string ActivePreset { get; set; }
+    [Parameter] public required IReadOnlyList<Preset> Presets { get; set; }
+    [Parameter] public required EventCallback<string> OnChange { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+}

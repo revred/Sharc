@@ -15,6 +15,10 @@
     <!-- SQLite (comparison baseline) -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.4" />
 
+    <!-- Blazor WASM Arena -->
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" />
+
     <!-- Tools -->
     <PackageVersion Include="ModelContextProtocol" Version="0.8.0-preview.1" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />

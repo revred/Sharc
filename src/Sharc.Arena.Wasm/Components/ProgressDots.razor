@@ -1,0 +1,17 @@
+@* Mobile progress dots indicator *@
+
+<div class="progress-dots">
+    @for (var i = 0; i < Slides.Count; i++)
+    {
+        var slide = Slides[i];
+        var isCurrent = CurrentIndex == i;
+        var isDone = DoneSlides.Contains(slide.Id);
+        <div class="progress-dot @(isCurrent ? "current" : isDone ? "done" : "")"></div>
+    }
+</div>
+
+@code {
+    [Parameter] public required IReadOnlyList<SlideDefinition> Slides { get; set; }
+    [Parameter] public int CurrentIndex { get; set; }
+    [Parameter] public required HashSet<string> DoneSlides { get; set; }
+}

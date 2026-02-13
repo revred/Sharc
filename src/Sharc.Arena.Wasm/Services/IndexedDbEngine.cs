@@ -1,0 +1,405 @@
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message — or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License — free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Microsoft.JSInterop;
+using Sharc.Arena.Wasm.Models;
+
+namespace Sharc.Arena.Wasm.Services;
+
+/// <summary>
+/// Tier 2 live engine: runs IndexedDB via IJSRuntime interop (browser-native API).
+/// Timed with performance.now() inside JavaScript (excludes interop overhead).
+/// IndexedDB is a browser API — JS interop is the only option.
+/// </summary>
+public sealed class IndexedDbEngine
+{
+    private readonly IJSRuntime _js;
+    private readonly DataGenerator _dataGenerator = new();
+
+    private bool _initialized;
+    private int _lastUserCount;
+    private int _lastNodeCount;
+
+    public IndexedDbEngine(IJSRuntime jsRuntime)
+    {
+        _js = jsRuntime;
+    }
+
+    /// <summary>
+    /// Ensures IndexedDB is initialized with data at the given scale.
+    /// Extracts rows from the SQLite byte[] and pushes to IndexedDB object stores.
+    /// </summary>
+    public async Task EnsureInitialized(int userCount, int nodeCount)
+    {
+        if (userCount == _lastUserCount && nodeCount == _lastNodeCount && _initialized)
+            return;
+
+        // Generate the canonical SQLite database
+        var dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
+
+        // Initialize IndexedDB (deletes existing, opens fresh)
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.init");
+
+        // Extract rows from SQLite and push to IndexedDB stores
+        var storeConfigs = ExtractStoreConfigs(dbBytes);
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.createStores", new object[] { storeConfigs });
+
+        _initialized = true;
+        _lastUserCount = userCount;
+        _lastNodeCount = nodeCount;
+    }
+
+    public async Task<EngineBaseResult> RunSlide(string slideId, double scale)
+    {
+        return slideId switch
+        {
+            "engine-load"      => await RunEngineLoad(scale),
+            "schema-read"      => await RunSchemaRead(),
+            "sequential-scan"  => await RunSequentialScan(),
+            "point-lookup"     => await RunPointLookup(),
+            "batch-lookup"     => await RunBatchLookup(scale),
+            "type-decode"      => await RunTypeDecode(),
+            "null-scan"        => await RunNullScan(),
+            "where-filter"     => RunWhereFilter(),
+            "graph-node-scan"  => await RunGraphNodeScan(),
+            "graph-edge-scan"  => await RunGraphEdgeScan(),
+            "graph-seek"       => await RunGraphSeek(),
+            "graph-traverse"   => await RunGraphTraverse(),
+            "gc-pressure"      => await RunGcPressure(),
+            "encryption"       => RunEncryption(),
+            "memory-footprint" => await RunMemoryFootprint(),
+            "primitives"       => RunPrimitives(),
+            _                  => new EngineBaseResult { Value = null, Note = "Unknown slide" },
+        };
+    }
+
+    private async Task<EngineBaseResult> RunEngineLoad(double scale)
+    {
+        // Force re-init: destroy + init + createStores
+        await _js.InvokeVoidAsync("indexedDbAdapter.destroy");
+        _initialized = false;
+
+        var dbBytes = _dataGenerator.GenerateDatabase(_lastUserCount, _lastNodeCount);
+
+        var initResult = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.init");
+        var initMs = initResult.GetProperty("ms").GetDouble();
+
+        var storeConfigs = ExtractStoreConfigs(dbBytes);
+        var loadResult = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.createStores", new object[] { storeConfigs });
+        var loadMs = loadResult.GetProperty("ms").GetDouble();
+
+        _initialized = true;
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(initMs + loadMs, 2),
+            Note = $"IDB open: {initMs:F0}ms + populate: {loadMs:F0}ms",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunSchemaRead()
+    {
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.schemaRead");
+        var ms = result.GetProperty("ms").GetDouble();
+        var storeCount = result.GetProperty("storeCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1000, 1), // microseconds
+            Note = $"{storeCount} object stores",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunSequentialScan()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "users");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "users");
+        var ms = result.GetProperty("ms").GetDouble();
+        var rowCount = result.GetProperty("rowCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms, 2),
+            Note = $"{rowCount} rows (cursor scan)",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunPointLookup()
+    {
+        var rowCount = await _js.InvokeAsync<int>("indexedDbAdapter.getRowCount", "users");
+        var targetKey = Math.Max(1, rowCount / 2);
+
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.pointLookup", "users", targetKey);
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.pointLookup", "users", targetKey);
+        var ms = result.GetProperty("ms").GetDouble();
+        var found = result.GetProperty("found").GetBoolean();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1_000_000, 0), // nanoseconds
+            Note = $"key={targetKey}, found={found}",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunBatchLookup(double scale)
+    {
+        var rowCount = await _js.InvokeAsync<int>("indexedDbAdapter.getRowCount", "users");
+        var lookupCount = Math.Max(1, (int)(6 * scale));
+        var rng = new Random(42);
+        var keys = Enumerable.Range(0, lookupCount).Select(_ => (int)rng.NextInt64(1, rowCount + 1)).ToArray();
+
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.batchLookup", "users", keys);
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.batchLookup", "users", keys);
+        var ms = result.GetProperty("ms").GetDouble();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1_000_000, 0), // nanoseconds total
+            Note = $"{lookupCount} gets in one transaction",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunTypeDecode()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.typeDecode", "users", "id");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.typeDecode", "users", "id");
+        var ms = result.GetProperty("ms").GetDouble();
+        var rowCount = result.GetProperty("rowCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms, 2),
+            Note = $"{rowCount} integers (cursor + property access)",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunNullScan()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.nullScan", "users", "bio");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.nullScan", "users", "bio");
+        var ms = result.GetProperty("ms").GetDouble();
+        var nullCount = result.GetProperty("nullCount").GetInt32();
+        var totalCount = result.GetProperty("totalCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1000, 0), // microseconds
+            Note = $"{nullCount}/{totalCount} nulls (bio property)",
+        };
+    }
+
+    private static EngineBaseResult RunWhereFilter()
+    {
+        return new EngineBaseResult
+        {
+            NotSupported = true,
+            Note = "IndexedDB has no query language",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunGraphNodeScan()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "_concepts");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "_concepts");
+        var ms = result.GetProperty("ms").GetDouble();
+        var rowCount = result.GetProperty("rowCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1000, 0), // microseconds
+            Note = $"{rowCount} nodes (cursor scan)",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunGraphEdgeScan()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "_relations");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.sequentialScan", "_relations");
+        var ms = result.GetProperty("ms").GetDouble();
+        var rowCount = result.GetProperty("rowCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1000, 0), // microseconds
+            Note = $"{rowCount} edges (cursor scan)",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunGraphSeek()
+    {
+        var rowCount = await _js.InvokeAsync<int>("indexedDbAdapter.getRowCount", "_concepts");
+        var targetKey = Math.Max(1, rowCount / 2);
+
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.pointLookup", "_concepts", targetKey);
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.pointLookup", "_concepts", targetKey);
+        var ms = result.GetProperty("ms").GetDouble();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1_000_000, 0), // nanoseconds
+            Note = $"IDB get(key={targetKey})",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunGraphTraverse()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "origin", "target");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.graphTraverse", "_relations", 1, "origin", "target");
+        var ms = result.GetProperty("ms").GetDouble();
+        var hop1Count = result.GetProperty("hop1Count").GetInt32();
+        var hop2Count = result.GetProperty("hop2Count").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms * 1000, 0), // microseconds
+            Note = $"2-hop BFS: {hop1Count} + {hop2Count} (cursor scan + JS filter)",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunGcPressure()
+    {
+        // Warm-up
+        await _js.InvokeAsync<JsonElement>("indexedDbAdapter.typeDecode", "users", "id");
+
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.typeDecode", "users", "id");
+        var ms = result.GetProperty("ms").GetDouble();
+        var rowCount = result.GetProperty("rowCount").GetInt32();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(ms, 1),
+            Note = $"{rowCount} rows, sustained cursor scan (JS)",
+        };
+    }
+
+    private static EngineBaseResult RunEncryption()
+    {
+        return new EngineBaseResult
+        {
+            NotSupported = true,
+            Note = "IndexedDB does not support encryption",
+        };
+    }
+
+    private async Task<EngineBaseResult> RunMemoryFootprint()
+    {
+        var result = await _js.InvokeAsync<JsonElement>("indexedDbAdapter.getMemory");
+        var usedKb = result.GetProperty("usedKB").GetDouble();
+
+        return new EngineBaseResult
+        {
+            Value = usedKb > 0 ? Math.Round(usedKb, 0) : 0,
+            Allocation = usedKb > 0 ? $"{usedKb:F0} KB" : "N/A",
+            Note = "Browser-managed storage (performance.memory)",
+        };
+    }
+
+    private static EngineBaseResult RunPrimitives()
+    {
+        return new EngineBaseResult
+        {
+            NotSupported = true,
+            Note = "No raw primitive parsing in key-value store",
+        };
+    }
+
+    /// <summary>Destroys the IndexedDB database and resets state for re-init.</summary>
+    public async Task Reset()
+    {
+        if (_initialized)
+        {
+            await _js.InvokeVoidAsync("indexedDbAdapter.destroy");
+        }
+        _initialized = false;
+        _lastUserCount = 0;
+        _lastNodeCount = 0;
+    }
+
+    /// <summary>
+    /// Extracts rows from the SQLite byte[] and builds IndexedDB store config objects.
+    /// </summary>
+    private static object[] ExtractStoreConfigs(byte[] dbBytes)
+    {
+        var tempPath = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(tempPath, dbBytes);
+            using var connection = new SqliteConnection($"Data Source={tempPath};Mode=ReadOnly");
+            connection.Open();
+
+            return
+            [
+                new { name = "users", keyPath = "id", data = ReadTableRows(connection, "users") },
+                new { name = "events", keyPath = "id", data = ReadTableRows(connection, "events") },
+                new { name = "_concepts", keyPath = "key", data = ReadTableRows(connection, "_concepts") },
+                new { name = "_relations", keyPath = "id", data = ReadTableRows(connection, "_relations") },
+            ];
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { /* ignore */ }
+        }
+    }
+
+    /// <summary>
+    /// Reads all rows from a table as List of Dictionary (JSON-serializable for IJSRuntime).
+    /// </summary>
+    private static List<Dictionary<string, object?>> ReadTableRows(SqliteConnection connection, string tableName)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT * FROM [{tableName}]";
+        using var reader = cmd.ExecuteReader();
+
+        var columnCount = reader.FieldCount;
+        var columnNames = new string[columnCount];
+        for (int i = 0; i < columnCount; i++)
+            columnNames[i] = reader.GetName(i);
+
+        var rows = new List<Dictionary<string, object?>>();
+        while (reader.Read())
+        {
+            var row = new Dictionary<string, object?>(columnCount);
+            for (int i = 0; i < columnCount; i++)
+            {
+                row[columnNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            }
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+}
