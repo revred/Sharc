@@ -339,5 +339,15 @@ public class SchemaReaderTests
             bodyOffset = 0;
             throw new NotSupportedException();
         }
+
+        public void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination, ReadOnlySpan<long> serialTypes, int bodyOffset)
+        {
+            DecodeRecord(payload, destination);
+        }
+
+        public ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
+        {
+            return DecodeColumn(payload, columnIndex);
+        }
     }
 }

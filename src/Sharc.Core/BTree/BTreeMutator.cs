@@ -252,37 +252,61 @@ internal sealed class BTreeMutator
             WritePageBuffer(newPageNum, rightBuf);
         }
 
-        // ── Promote median to parent ──────────────────────────────
+
 
         if (pathIndex == 0)
         {
-            // We just split the root — create a new root
-            uint newRootPage = AllocateNewPage();
+            // Root split with retention:
+            // The root (pageNum) is full. instead of allocating a new root and returning it (moving the root),
+            // we allocate a NEW left child (newLeftPage) and move the left-half content there.
+            // The right-half content goes to newNewPage (allocated above at line 220, let's call it newRightPage).
+            // The root page is then CLEARED and rewritten as an Interior Node containing the median and pointers to newLeft and newRight.
+
+            // 1. We already have 'newPageNum' (allocated at line 220) which is currently holding the "Right" half.
+            //    BUT, the earlier logic (lines 222-253) overwrote 'pageNum' (the root) with the LEFT half.
+            //    We need to move that left half to a new page.
+
+            // Allocate a new page for the Left Half
+            uint newLeftPage = AllocateNewPage();
+
+            // Copy the content of 'pageNum' (which currently holds TableLeaf[Left]) to 'newLeftPage'
+            var leftContent = ReadPageBuffer(pageNum);
+            WritePageBuffer(newLeftPage, leftContent);
+
+            // 2. Now 'pageNum' (Root) can be overwritten as the new Interior Root.
+            //    It needs to point to newLeftPage (Left Child) and newPageNum (Right Child).
+            //    And contain the Median Key.
+
             var rootBuf = new byte[_source.PageSize];
 
-            // Build interior cell: leftChild=pageNum, rowId=medianRowId
+            // Build interior cell: leftChild=newLeftPage, rowId=medianRowId
             Span<byte> interiorCell = stackalloc byte[16]; // max interior cell size
-            int interiorSize = CellBuilder.BuildTableInteriorCell(pageNum, medianRowId, interiorCell);
+            int interiorSize = CellBuilder.BuildTableInteriorCell(newLeftPage, medianRowId, interiorCell);
 
             var newRootHdr = new BTreePageHeader(
                 BTreePageType.InteriorTable,
                 0, 1, // 1 cell
                 (ushort)(_usablePageSize - interiorSize),
                 0,
-                newPageNum // right child = new sibling
+                newPageNum // right child = newRightPage
             );
 
-            int rootHdrOff = 0;
+            int rootHdrOff = pageNum == 1 ? 100 : 0;
             BTreePageHeader.Write(rootBuf.AsSpan(rootHdrOff), newRootHdr);
+
             // Write cell pointer
             int cellPtrOff = rootHdrOff + InteriorHeaderSize;
             ushort cellContentOff = (ushort)(_usablePageSize - interiorSize);
             BinaryPrimitives.WriteUInt16BigEndian(rootBuf.AsSpan(cellPtrOff), cellContentOff);
+            
             // Write cell content
             interiorCell[..interiorSize].CopyTo(rootBuf.AsSpan(cellContentOff));
 
-            WritePageBuffer(newRootPage, rootBuf);
-            return newRootPage; // new root
+            // Write the new Root Page
+            WritePageBuffer(pageNum, rootBuf);
+
+            // Return the SAME root page number
+            return currentRoot;
         }
         else
         {
@@ -400,25 +424,23 @@ internal sealed class BTreeMutator
         var cells = new List<byte[]>(hdr.CellCount + 1);
         var pageSpan = pageBuf.AsSpan();
 
-        for (int i = 0; i <= hdr.CellCount; i++)
+        // 1. Existing items before insertion point
+        for (int i = 0; i < insertIdx; i++)
         {
-            if (i == insertIdx)
-            {
-                cells.Add(newCell.ToArray());
-            }
-            int srcIdx = i < insertIdx ? i : i - 1;
-            if (srcIdx >= 0 && srcIdx < hdr.CellCount)
-            {
-                int cellPtr = hdr.GetCellPointer(pageSpan[hdrOff..], srcIdx);
-                int cellLen = MeasureCell(pageSpan[cellPtr..], hdr.IsLeaf);
-                cells.Add(pageSpan.Slice(cellPtr, cellLen).ToArray());
-            }
+            int cellPtr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
+            int cellLen = MeasureCell(pageSpan[cellPtr..], hdr.IsLeaf);
+            cells.Add(pageSpan.Slice(cellPtr, cellLen).ToArray());
         }
 
-        // If insertIdx == cellCount, the new cell goes at the end
-        if (insertIdx >= hdr.CellCount)
+        // 2. The new item
+        cells.Add(newCell.ToArray());
+
+        // 3. Existing items after insertion point
+        for (int i = insertIdx; i < hdr.CellCount; i++)
         {
-            cells.Add(newCell.ToArray());
+            int cellPtr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
+            int cellLen = MeasureCell(pageSpan[cellPtr..], hdr.IsLeaf);
+            cells.Add(pageSpan.Slice(cellPtr, cellLen).ToArray());
         }
 
         return cells;

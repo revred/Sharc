@@ -32,6 +32,10 @@ internal static class RollbackJournal
         Span<byte> frameHeader = stackalloc byte[4];
         foreach (var pageNum in dirtyPageNumbers)
         {
+            // Skip pages that are newly allocated and don't exist in the base file yet.
+            // Rolling back will simply truncate the file to the original size.
+            if (pageNum > baseSource.PageCount) continue;
+
             BinaryPrimitives.WriteUInt32BigEndian(frameHeader, pageNum);
             fs.Write(frameHeader);
             fs.Write(baseSource.GetPage(pageNum));

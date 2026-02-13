@@ -34,117 +34,73 @@ public sealed class LedgerManager
     /// </summary>
     /// <param name="contextPayload">The payload to append.</param>
     /// <param name="signer">The signer to use for attribution.</param>
-    public void Append(string contextPayload, ISharcSigner signer)
+    /// <param name="transaction">Optional active transaction. If null, a new one is created and committed.</param>
+    public void Append(string contextPayload, ISharcSigner signer, Transaction? transaction = null)
     {
         var table = _db.Schema.GetTable(LedgerTableName);
-        var lastEntry = GetLastEntry(table.RootPage);
-
-        long nextSequence = (lastEntry?.SequenceNumber ?? 0) + 1;
-        byte[] prevHash = lastEntry?.PayloadHash ?? new byte[32];
-        byte[] payloadData = System.Text.Encoding.UTF8.GetBytes(contextPayload);
-        byte[] payloadHash = SharcHash.Compute(payloadData);
-
-        byte[] dataToSign = new byte[prevHash.Length + payloadHash.Length + 8];
-        prevHash.CopyTo(dataToSign, 0);
-        payloadHash.CopyTo(dataToSign, prevHash.Length);
-        BinaryPrimitives.WriteInt64BigEndian(dataToSign.AsSpan(prevHash.Length + payloadHash.Length), nextSequence);
         
-        byte[] signature = signer.Sign(dataToSign);
-
-        var entry = new LedgerEntry(
-            nextSequence,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            signer.AgentId,
-            payloadHash,
-            prevHash,
-            signature);
-
-        var columns = new[]
+        bool ownsTransaction = transaction == null;
+        var tx = transaction ?? _db.BeginTransaction();
+        
+        try
         {
-            ColumnValue.FromInt64(1, entry.SequenceNumber),
-            ColumnValue.FromInt64(2, entry.Timestamp),
-            ColumnValue.Text(entry.SequenceNumber, System.Text.Encoding.UTF8.GetBytes(entry.AgentId)),
-            ColumnValue.Blob(entry.SequenceNumber, entry.PayloadHash),
-            ColumnValue.Blob(entry.SequenceNumber, entry.PreviousHash),
-            ColumnValue.Blob(entry.SequenceNumber, entry.Signature)
-        };
-
-        int recordSize = RecordEncoder.ComputeEncodedSize(columns);
-        byte[] recordBuffer = new byte[recordSize];
-        RecordEncoder.EncodeRecord(columns, recordBuffer);
-
-        WriteToLedgerBTree(table.RootPage, entry.SequenceNumber, recordBuffer);
-    }
-
-    private LedgerEntry? GetLastEntry(int rootPage)
-    {
-        uint pageNum = (uint)rootPage;
-        var page = _db.PageSource.GetPage(pageNum);
-        var header = BTreePageHeader.Parse(page.Slice(pageNum == 1 ? 100 : 0));
-        
-        if (header.CellCount == 0) return null;
-
-        int headerOffset = (pageNum == 1) ? 100 : 0;
-        int cellPtrOffset = headerOffset + header.HeaderSize + (header.CellCount - 1) * 2;
-        ushort cellOffset = BinaryPrimitives.ReadUInt16BigEndian(page.Slice(cellPtrOffset));
-        
-        int cellHeaderSize = CellParser.ParseTableLeafCell(page.Slice(cellOffset), out int payloadSize, out long rowId);
-        
-        var payload = page.Slice(cellOffset + cellHeaderSize, payloadSize);
-        var decoded = _db.RecordDecoder.DecodeRecord(payload);
-
-        return new LedgerEntry(
-            decoded[0].AsInt64(),
-            decoded[1].AsInt64(),
-            decoded[2].AsString(),
-            decoded[3].AsBytes().ToArray(),
-            decoded[4].AsBytes().ToArray(),
-            decoded[5].AsBytes().ToArray()
-        );
-    }
-
-    private void WriteToLedgerBTree(int rootPage, long rowId, byte[] payload)
-    {
-        using var tx = _db.BeginTransaction();
-        var source = tx.GetShadowSource();
-        int pageSize = source.PageSize;
-
-        uint pageNum = (uint)rootPage;
-        byte[] pageData = new byte[pageSize];
-        source.ReadPage(pageNum, pageData);
-
-        var header = BTreePageHeader.Parse(pageData.AsSpan(pageNum == 1 ? 100 : 0));
-        
-        int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, payload.Length, _db.Header.UsablePageSize);
-        int headerOffset = (pageNum == 1) ? SQLiteLayout.DatabaseHeaderSize : 0;
-        int btreeHeaderOffset = headerOffset;
-        int cellPointerOffset = btreeHeaderOffset + header.HeaderSize;
-        int endOfCellPointers = cellPointerOffset + (header.CellCount * 2);
-        int freeSpace = header.CellContentOffset - endOfCellPointers;
-
-        if (cellSize + 2 > freeSpace)
-        {
-             throw new InvalidOperationException("Ledger leaf page is full. Splits are not yet implemented.");
+            // Use the transaction's shadow source for writes
+            var source = tx.GetShadowSource();
+            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
+            
+            // Get last entry to link the hash chain
+            // Note: We scan the tree via the *current* transaction view to see uncommitted changes if any
+            // But GetLastEntry uses _db.PageSource which is redirected to tx by BeginTransaction/ProxySource.
+            // So simply calling GetLastEntry is correct.
+            var lastEntry = GetLastEntry(table.RootPage);
+    
+            long nextSequence = (lastEntry?.SequenceNumber ?? 0) + 1;
+            byte[] prevHash = lastEntry?.PayloadHash ?? new byte[32];
+            byte[] payloadData = System.Text.Encoding.UTF8.GetBytes(contextPayload);
+            byte[] payloadHash = SharcHash.Compute(payloadData);
+    
+            // F6: Use Microseconds for higher precision
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000; 
+    
+            byte[] dataToSign = new byte[prevHash.Length + payloadHash.Length + 8];
+            prevHash.CopyTo(dataToSign, 0);
+            payloadHash.CopyTo(dataToSign, prevHash.Length);
+            BinaryPrimitives.WriteInt64BigEndian(dataToSign.AsSpan(prevHash.Length + payloadHash.Length), nextSequence);
+            
+            byte[] signature = signer.Sign(dataToSign);
+    
+            var entry = new LedgerEntry(
+                nextSequence,
+                timestamp,
+                signer.AgentId,
+                payloadHash,
+                prevHash,
+                signature);
+    
+            var columns = new[]
+            {
+                ColumnValue.FromInt64(1, entry.SequenceNumber),
+                ColumnValue.FromInt64(2, entry.Timestamp),
+                ColumnValue.Text(entry.SequenceNumber, System.Text.Encoding.UTF8.GetBytes(entry.AgentId)),
+                ColumnValue.Blob(entry.SequenceNumber, entry.PayloadHash),
+                ColumnValue.Blob(entry.SequenceNumber, entry.PreviousHash),
+                ColumnValue.Blob(entry.SequenceNumber, entry.Signature)
+            };
+    
+            int recordSize = RecordEncoder.ComputeEncodedSize(columns);
+            byte[] recordBuffer = new byte[recordSize];
+            RecordEncoder.EncodeRecord(columns, recordBuffer);
+    
+            // F1: Use BTreeMutator to handle page splits
+            // F4: Removed custom page split logic duplication
+            mutator.Insert((uint)table.RootPage, entry.SequenceNumber, recordBuffer);
+            
+            if (ownsTransaction) tx.Commit();
         }
-
-        ushort newContentOffset = (ushort)(header.CellContentOffset - cellSize);
-        CellBuilder.BuildTableLeafCell(rowId, payload, pageData.AsSpan(newContentOffset), _db.Header.UsablePageSize);
-
-        int newPointerPos = cellPointerOffset + (header.CellCount * 2);
-        BinaryPrimitives.WriteUInt16BigEndian(pageData.AsSpan(newPointerPos), newContentOffset);
-
-        var updatedHeader = new BTreePageHeader(
-            header.PageType,
-            header.FirstFreeblockOffset,
-            (ushort)(header.CellCount + 1),
-            newContentOffset,
-            header.FragmentedFreeBytes,
-            header.RightChildPage);
-
-        BTreePageHeader.Write(pageData.AsSpan(btreeHeaderOffset), updatedHeader);
-
-        source.WritePage(pageNum, pageData);
-        tx.Commit();
+        finally
+        {
+            if (ownsTransaction) tx.Dispose();
+        }
     }
 
     /// <summary>
@@ -240,49 +196,107 @@ public sealed class LedgerManager
     /// Imports ledger deltas into the local ledger.
     /// </summary>
     /// <param name="deltas">The raw record bytes to import.</param>
-    public void ImportDeltas(IEnumerable<byte[]> deltas)
+    /// <param name="transaction">Optional active transaction.</param>
+    public void ImportDeltas(IEnumerable<byte[]> deltas, Transaction? transaction = null)
     {
         var table = _db.Schema.GetTable(LedgerTableName);
         
-        foreach (var delta in deltas)
+        bool ownsTransaction = transaction == null;
+        var tx = transaction ?? _db.BeginTransaction();
+        
+        try
         {
-            var decoded = _db.RecordDecoder.DecodeRecord(delta);
-            long seq = decoded[0].AsInt64();
-            byte[] payloadHash = decoded[3].AsBytes().ToArray();
-            byte[] prevHash = decoded[4].AsBytes().ToArray();
-            byte[] signature = decoded[5].AsBytes().ToArray();
-            string agentId = decoded[2].AsString();
+            var source = tx.GetShadowSource();
+            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
 
-            var lastEntry = GetLastEntry(table.RootPage);
-            if (lastEntry != null)
+            foreach (var delta in deltas)
             {
-                if (seq != lastEntry.SequenceNumber + 1)
-                    throw new InvalidOperationException($"Out of sequence delta: expected {lastEntry.SequenceNumber + 1}, got {seq}");
-                if (!prevHash.AsSpan().SequenceEqual(lastEntry.PayloadHash))
-                    throw new InvalidOperationException($"Hash chain break in delta at sequence {seq}");
+                var decoded = _db.RecordDecoder.DecodeRecord(delta);
+                long seq = decoded[0].AsInt64();
+                byte[] payloadHash = decoded[3].AsBytes().ToArray();
+                byte[] prevHash = decoded[4].AsBytes().ToArray();
+                byte[] signature = decoded[5].AsBytes().ToArray();
+                string agentId = decoded[2].AsString();
+    
+                var lastEntry = GetLastEntry(table.RootPage);
+                if (lastEntry != null)
+                {
+                    if (seq != lastEntry.SequenceNumber + 1)
+                        throw new InvalidOperationException($"Out of sequence delta: expected {lastEntry.SequenceNumber + 1}, got {seq}");
+                    if (!prevHash.AsSpan().SequenceEqual(lastEntry.PayloadHash))
+                        throw new InvalidOperationException($"Hash chain break in delta at sequence {seq}");
+                }
+                else if (seq != 1)
+                {
+                    throw new InvalidOperationException("First imported delta must have sequence 1");
+                }
+    
+                byte[] dataToVerify = new byte[prevHash.Length + payloadHash.Length + 8];
+                prevHash.CopyTo(dataToVerify, 0);
+                payloadHash.CopyTo(dataToVerify, prevHash.Length);
+                BinaryPrimitives.WriteInt64BigEndian(dataToVerify.AsSpan(prevHash.Length + payloadHash.Length), seq);
+    
+                var agent = _registry.GetAgent(agentId);
+                if (agent == null)
+                {
+                     throw new InvalidOperationException($"Unknown agent in delta: {agentId}");
+                }
+    
+                if (!SharcSigner.Verify(dataToVerify, signature, agent.PublicKey))
+                {
+                    throw new InvalidOperationException($"Invalid signature in delta at sequence {seq}");
+                }
+    
+                // F1: Use BTreeMutator
+                mutator.Insert((uint)table.RootPage, seq, delta);
             }
-            else if (seq != 1)
+            
+            if (ownsTransaction) tx.Commit();
+        }
+        finally
+        {
+            if (ownsTransaction) tx.Dispose();
+        }
+    }
+
+    private LedgerEntry? GetLastEntry(int rootPage)
+    {
+        uint pageNum = (uint)rootPage;
+        
+        while (true)
+        {
+            // Use PageSource from DB (proxied to active transaction if any)
+            var page = _db.PageSource.GetPage(pageNum);
+            int headerOffset = (pageNum == 1) ? 100 : 0;
+            var header = BTreePageHeader.Parse(page.Slice(headerOffset));
+            
+            if (header.IsLeaf)
             {
-                throw new InvalidOperationException("First imported delta must have sequence 1");
+                if (header.CellCount == 0) return null;
+    
+                int cellPtrOffset = headerOffset + header.HeaderSize + (header.CellCount - 1) * 2;
+                ushort cellOffset = BinaryPrimitives.ReadUInt16BigEndian(page.Slice(cellPtrOffset));
+                
+                int cellHeaderSize = CellParser.ParseTableLeafCell(page.Slice(cellOffset), out int payloadSize, out long rowId);
+                
+                var payload = page.Slice(cellOffset + cellHeaderSize, payloadSize);
+                var decoded = _db.RecordDecoder.DecodeRecord(payload);
+    
+                return new LedgerEntry(
+                    decoded[0].AsInt64(),
+                    decoded[1].AsInt64(),
+                    decoded[2].AsString(),
+                    decoded[3].AsBytes().ToArray(),
+                    decoded[4].AsBytes().ToArray(),
+                    decoded[5].AsBytes().ToArray()
+                );
             }
-
-            byte[] dataToVerify = new byte[prevHash.Length + payloadHash.Length + 8];
-            prevHash.CopyTo(dataToVerify, 0);
-            payloadHash.CopyTo(dataToVerify, prevHash.Length);
-            BinaryPrimitives.WriteInt64BigEndian(dataToVerify.AsSpan(prevHash.Length + payloadHash.Length), seq);
-
-            var agent = _registry.GetAgent(agentId);
-            if (agent == null)
+            else
             {
-                 throw new InvalidOperationException($"Unknown agent in delta: {agentId}");
+                // Interior node: follow the right-most child
+                // The right-most child is stored in the header's RightChildPage field
+                pageNum = header.RightChildPage;
             }
-
-            if (!SharcSigner.Verify(dataToVerify, signature, agent.PublicKey))
-            {
-                throw new InvalidOperationException($"Invalid signature in delta at sequence {seq}");
-            }
-
-            WriteToLedgerBTree(table.RootPage, seq, delta);
         }
     }
 }
