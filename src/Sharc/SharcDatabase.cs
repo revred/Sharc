@@ -402,6 +402,52 @@ public sealed class SharcDatabase : IDisposable
             _bTreeReader, tableIndexes, resolved);
     }
 
+    /// <summary>
+    /// Creates a reader with byte-level row filtering using the FilterStar expression tree.
+    /// Rows that do not match the filter are skipped without full record decoding.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="filter">FilterStar expression tree.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, IFilterStar filter)
+    {
+        return CreateReader(tableName, null, filter);
+    }
+
+    /// <summary>
+    /// Creates a reader with column projection and byte-level row filtering.
+    /// </summary>
+    /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
+    /// <param name="filter">FilterStar expression tree.</param>
+    /// <returns>A data reader positioned before the first matching row.</returns>
+    public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName);
+        var cursor = CreateTableCursor(table);
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                var col = table.Columns.FirstOrDefault(c =>
+                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
+                projection[i] = col?.Ordinal
+                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+            }
+        }
+
+        int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
+        var filterNode = FilterCompiler.Compile(filter, table.Columns, rowidAlias);
+        var tableIndexes = GetTableIndexes(schema, tableName);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
+            _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
+    }
+
     private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
     {
         if (filters is not { Length: > 0 })
