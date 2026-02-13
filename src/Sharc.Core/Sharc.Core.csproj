@@ -12,8 +12,9 @@
 
     <!-- Graph Extensions -->
     <InternalsVisibleTo Include="Sharc.Graph" />
-    <InternalsVisibleTo Include="Sharc.Graph.Abstractions" />
+    <InternalsVisibleTo Include="Sharc.Graph.Surface" />
     <InternalsVisibleTo Include="Sharc.Graph.Tests.Unit" />
     <InternalsVisibleTo Include="Sharc.Graph.Tests.Performance" />
+    <InternalsVisibleTo Include="Sharc.Arena.Wasm" />
   </ItemGroup>
 </Project>

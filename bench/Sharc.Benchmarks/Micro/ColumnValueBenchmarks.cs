@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -24,7 +24,7 @@ namespace Sharc.Benchmarks.Micro;
 /// Micro-benchmarks for ColumnValue struct creation and access.
 /// Created once per column per row during record decoding.
 /// Target: 0 bytes allocated for Integer, Float, and Null columns.
-/// Text/Blob reference existing byte[] memory — no per-column allocation.
+/// Text/Blob reference existing byte[] memory â€” no per-column allocation.
 /// AsString() allocates a new string (expected).
 /// </summary>
 [BenchmarkCategory("Micro", "Records", "ColumnValue")]
@@ -47,8 +47,8 @@ public class ColumnValueBenchmarks
         _blobBytes = new byte[64];
         new Random(42).NextBytes(_blobBytes);
 
-        _intValue = ColumnValue.Integer(4, 42);
-        _floatValue = ColumnValue.Float(3.14159);
+        _intValue = ColumnValue.FromInt64(4, 42);
+        _floatValue = ColumnValue.FromDouble(3.14159);
         _textValue = ColumnValue.Text(59, _textBytes);
         _blobValue = ColumnValue.Blob(140, _blobBytes);
         _nullValue = ColumnValue.Null();
@@ -62,11 +62,11 @@ public class ColumnValueBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("Create")]
-    public ColumnValue Create_Integer() => ColumnValue.Integer(4, 42);
+    public ColumnValue Create_Integer() => ColumnValue.FromInt64(4, 42);
 
     [Benchmark]
     [BenchmarkCategory("Create")]
-    public ColumnValue Create_Float() => ColumnValue.Float(3.14159);
+    public ColumnValue Create_Float() => ColumnValue.FromDouble(3.14159);
 
     [Benchmark]
     [BenchmarkCategory("Create")]
@@ -87,7 +87,7 @@ public class ColumnValueBenchmarks
     public double Access_Double() => _floatValue.AsDouble();
 
     /// <summary>
-    /// AsString() allocates a new string — this is expected and unavoidable.
+    /// AsString() allocates a new string â€” this is expected and unavoidable.
     /// This benchmark shows the cost of string materialization.
     /// </summary>
     [Benchmark]
@@ -95,7 +95,7 @@ public class ColumnValueBenchmarks
     public string Access_String() => _textValue.AsString();
 
     /// <summary>
-    /// AsBytes() returns ReadOnlyMemory wrapping existing array — 0 B allocated.
+    /// AsBytes() returns ReadOnlyMemory wrapping existing array â€” 0 B allocated.
     /// This is the preferred path for zero-alloc text access.
     /// </summary>
     [Benchmark]
@@ -123,16 +123,16 @@ public class ColumnValueBenchmarks
     /// <summary>
     /// Decode a typical 6-column row using only struct operations.
     /// Integer/Float/Null columns: 0 B. Text/Blob: reference existing bytes, 0 B.
-    /// Only AsInt64()/AsDouble() accessed — no string materialization.
+    /// Only AsInt64()/AsDouble() accessed â€” no string materialization.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Batch")]
     public long DecodeRow_6Columns()
     {
-        var c0 = ColumnValue.Integer(4, 1);
+        var c0 = ColumnValue.FromInt64(4, 1);
         var c1 = ColumnValue.Text(59, _textBytes);
-        var c2 = ColumnValue.Integer(4, 25);
-        var c3 = ColumnValue.Float(99.95);
+        var c2 = ColumnValue.FromInt64(4, 25);
+        var c3 = ColumnValue.FromDouble(99.95);
         var c4 = ColumnValue.Blob(140, _blobBytes);
         var c5 = ColumnValue.Null();
         return c0.AsInt64() + c2.AsInt64() + (c5.IsNull ? 0 : 1);
@@ -140,7 +140,7 @@ public class ColumnValueBenchmarks
 
     /// <summary>
     /// Decode 100 rows of 6 columns each, accessing integers only (no strings).
-    /// Expected: 0 B allocated — proves per-row zero-alloc for integer-only access.
+    /// Expected: 0 B allocated â€” proves per-row zero-alloc for integer-only access.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Batch")]
@@ -149,10 +149,10 @@ public class ColumnValueBenchmarks
         long sum = 0;
         for (int row = 0; row < 100; row++)
         {
-            var c0 = ColumnValue.Integer(4, row);
+            var c0 = ColumnValue.FromInt64(4, row);
             var c1 = ColumnValue.Text(59, _textBytes);
-            var c2 = ColumnValue.Integer(4, 25 + row);
-            var c3 = ColumnValue.Float(99.95 + row);
+            var c2 = ColumnValue.FromInt64(4, 25 + row);
+            var c3 = ColumnValue.FromDouble(99.95 + row);
             var c4 = ColumnValue.Blob(140, _blobBytes);
             var c5 = ColumnValue.Null();
             sum += c0.AsInt64() + c2.AsInt64();
@@ -171,10 +171,10 @@ public class ColumnValueBenchmarks
         int totalLen = 0;
         for (int row = 0; row < 100; row++)
         {
-            var c0 = ColumnValue.Integer(4, row);
+            var c0 = ColumnValue.FromInt64(4, row);
             var c1 = ColumnValue.Text(59, _textBytes);
-            var c2 = ColumnValue.Integer(4, 25 + row);
-            var c3 = ColumnValue.Float(99.95 + row);
+            var c2 = ColumnValue.FromInt64(4, 25 + row);
+            var c3 = ColumnValue.FromDouble(99.95 + row);
             var c4 = ColumnValue.Blob(140, _blobBytes);
             var c5 = ColumnValue.Null();
 
@@ -194,14 +194,14 @@ public class ColumnValueBenchmarks
         int totalLen = 0;
         for (int row = 0; row < 100; row++)
         {
-            var c0 = ColumnValue.Integer(4, row);
+            var c0 = ColumnValue.FromInt64(4, row);
             var c1 = ColumnValue.Text(59, _textBytes);
-            var c2 = ColumnValue.Integer(4, 25 + row);
-            var c3 = ColumnValue.Float(99.95 + row);
+            var c2 = ColumnValue.FromInt64(4, 25 + row);
+            var c3 = ColumnValue.FromDouble(99.95 + row);
             var c4 = ColumnValue.Blob(140, _blobBytes);
             var c5 = ColumnValue.Null();
 
-            totalLen += c1.AsBytes().Length; // 0 B — wraps existing array
+            totalLen += c1.AsBytes().Length; // 0 B â€” wraps existing array
         }
         return totalLen;
     }

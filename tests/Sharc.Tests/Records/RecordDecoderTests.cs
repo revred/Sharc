@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -93,7 +93,7 @@ public class RecordDecoderTests
         var columns = _decoder.DecodeRecord(record);
 
         Assert.Single(columns);
-        Assert.Equal(ColumnStorageClass.Integer, columns[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, columns[0].StorageClass);
         Assert.Equal(42L, columns[0].AsInt64());
     }
 
@@ -218,7 +218,7 @@ public class RecordDecoderTests
 
         var columns = _decoder.DecodeRecord(record);
 
-        Assert.Equal(ColumnStorageClass.Float, columns[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Real, columns[0].StorageClass);
         Assert.Equal(3.14159, columns[0].AsDouble(), 5);
     }
 
@@ -229,7 +229,7 @@ public class RecordDecoderTests
 
         var columns = _decoder.DecodeRecord(record);
 
-        Assert.Equal(ColumnStorageClass.Integer, columns[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, columns[0].StorageClass);
         Assert.Equal(0L, columns[0].AsInt64());
     }
 
@@ -240,7 +240,7 @@ public class RecordDecoderTests
 
         var columns = _decoder.DecodeRecord(record);
 
-        Assert.Equal(ColumnStorageClass.Integer, columns[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, columns[0].StorageClass);
         Assert.Equal(1L, columns[0].AsInt64());
     }
 
@@ -307,7 +307,7 @@ public class RecordDecoderTests
         var record = BuildRecord(
             (0, []),           // NULL
             (4, intBytes),     // INT32
-            (23, textBytes),   // TEXT (5 chars → serial type 23)
+            (23, textBytes),   // TEXT (5 chars â†’ serial type 23)
             (7, floatBytes)    // FLOAT
         );
 
@@ -341,7 +341,7 @@ public class RecordDecoderTests
         var record = BuildRecord(
             (0, []),
             (4, intBytes),
-            (21, textBytes) // 4-char text → (4*2)+13 = 21
+            (21, textBytes) // 4-char text â†’ (4*2)+13 = 21
         );
 
         var col1 = _decoder.DecodeColumn(record, 1);

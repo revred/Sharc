@@ -9,14 +9,14 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
-using Sharc.Schema;
+using Sharc.Core.Schema;
 
 namespace Sharc;
 
@@ -46,6 +46,13 @@ public sealed class SharcDataReader : IDisposable
     private ColumnValue[]? _reusableBuffer;
     private bool _disposed;
 
+    // Index seek support
+    private readonly IBTreeReader? _bTreeReader;
+    private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
+
+    // Row-level filter support
+    private readonly ResolvedFilter[]? _filters;
+
     // Lazy decode support for projection path — avoids decoding TEXT/BLOB
     // body data until the caller actually requests the value.
     private readonly long[]? _serialTypes;
@@ -54,14 +61,19 @@ public sealed class SharcDataReader : IDisposable
     private bool _lazyMode;
 
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
-        IReadOnlyList<ColumnInfo> columns, int[]? projection)
+        IReadOnlyList<ColumnInfo> columns, int[]? projection,
+        IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null,
+        ResolvedFilter[]? filters = null)
     {
         _cursor = cursor;
         _recordDecoder = recordDecoder;
         _columns = columns;
         _projection = projection;
+        _bTreeReader = bTreeReader;
+        _tableIndexes = tableIndexes;
+        _filters = filters;
 
-        // Pre-allocate a reusable buffer for decoding — avoids per-row ColumnValue[] allocation
+        // Pre-allocate a reusable buffer for decoding â€” avoids per-row ColumnValue[] allocation
         _reusableBuffer = new ColumnValue[columns.Count];
 
         // Allocate lazy-decode buffers when using projection
@@ -71,7 +83,7 @@ public sealed class SharcDataReader : IDisposable
             _decodedGenerations = new int[columns.Count];
         }
 
-        // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
+        // Detect INTEGER PRIMARY KEY (rowid alias) â€” SQLite stores NULL in the record
         // for this column; the real value is the b-tree key (rowid).
         _rowidAliasOrdinal = -1;
         for (int i = 0; i < columns.Count; i++)
@@ -123,6 +135,106 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Seeks to the first row matching the given index key values.
+    /// Scans the specified index B-tree for matching entries, extracts the table rowid,
+    /// then seeks the table cursor to that row.
+    /// </summary>
+    /// <param name="indexName">Name of the index to use.</param>
+    /// <param name="keyValues">Key values to match against the index columns (in index column order).</param>
+    /// <returns>True if a matching row was found; false otherwise.</returns>
+    /// <exception cref="ArgumentException">The index was not found or the reader was not created with index support.</exception>
+    public bool SeekIndex(string indexName, params object[] keyValues)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_bTreeReader == null || _tableIndexes == null)
+            throw new ArgumentException("Reader was not created with index support.");
+
+        var indexInfo = _tableIndexes.FirstOrDefault(i =>
+            i.Name.Equals(indexName, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"Index '{indexName}' not found.");
+
+        using var indexCursor = _bTreeReader.CreateIndexCursor((uint)indexInfo.RootPage);
+
+        // Determine sort direction for the first key column to enable early exit.
+        // Index entries are stored in sorted order, so once we've passed the target
+        // value we can stop scanning instead of reading the entire index.
+        bool firstColumnDescending = indexInfo.Columns.Count > 0 && indexInfo.Columns[0].IsDescending;
+
+        while (indexCursor.MoveNext())
+        {
+            var indexRecord = _recordDecoder.DecodeRecord(indexCursor.Payload);
+            if (indexRecord.Length < 2) continue; // Need at least one key column + rowid
+
+            // Compare key values against the first N columns of the index record
+            bool match = true;
+            for (int i = 0; i < keyValues.Length && i < indexRecord.Length - 1; i++)
+            {
+                if (!IndexKeyMatches(indexRecord[i], keyValues[i]))
+                {
+                    match = false;
+
+                    // Early exit: if the first key column is past the target value,
+                    // no subsequent entries can match (B-tree sorted order).
+                    if (i == 0 && IndexKeyIsPastTarget(indexRecord[0], keyValues[0], firstColumnDescending))
+                    {
+                        _currentRow = null;
+                        _lazyMode = false;
+                        return false;
+                    }
+
+                    break;
+                }
+            }
+
+            if (!match) continue;
+
+            // Last column in the index record is the table rowid
+            long rowId = indexRecord[^1].AsInt64();
+            return Seek(rowId);
+        }
+
+        _currentRow = null;
+        _lazyMode = false;
+        return false;
+    }
+
+    private static bool IndexKeyMatches(ColumnValue indexValue, object keyValue)
+    {
+        return keyValue switch
+        {
+            long l => !indexValue.IsNull && indexValue.AsInt64() == l,
+            int i => !indexValue.IsNull && indexValue.AsInt64() == i,
+            string s => !indexValue.IsNull && indexValue.AsString().Equals(s, StringComparison.Ordinal),
+            double d => !indexValue.IsNull && indexValue.AsDouble() == d,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Returns true if the index entry's key value is past the target in sort order,
+    /// meaning no further entries can match. NULLs sort first in SQLite (smallest),
+    /// so a NULL index value is never "past" the target.
+    /// </summary>
+    private static bool IndexKeyIsPastTarget(ColumnValue indexValue, object targetValue, bool isDescending)
+    {
+        if (indexValue.IsNull) return false;
+
+        int cmp = targetValue switch
+        {
+            long l => indexValue.AsInt64().CompareTo(l),
+            int i => indexValue.AsInt64().CompareTo((long)i),
+            string s => string.Compare(indexValue.AsString(), s, StringComparison.Ordinal),
+            double d => indexValue.AsDouble().CompareTo(d),
+            _ => 0
+        };
+
+        // For ASC: if index value > target, we've passed it
+        // For DESC: if index value < target, we've passed it
+        return isDescending ? cmp < 0 : cmp > 0;
+    }
+
+    /// <summary>
     /// Advances the reader to the next row.
     /// </summary>
     /// <returns>True if there is another row; false if the end has been reached.</returns>
@@ -130,15 +242,38 @@ public sealed class SharcDataReader : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_cursor.MoveNext())
+        while (_cursor.MoveNext())
         {
-            _currentRow = null;
-            _lazyMode = false;
-            return false;
+            DecodeCurrentRow();
+
+            if (_filters is null || EvaluateFilters())
+                return true;
         }
 
-        DecodeCurrentRow();
-        return true;
+        _currentRow = null;
+        _lazyMode = false;
+        return false;
+    }
+
+    private bool EvaluateFilters()
+    {
+        // Filters require full column values. When in lazy mode (projection),
+        // force a full decode so filter columns are available.
+        if (_lazyMode)
+        {
+            _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            _lazyMode = false;
+        }
+
+        // Resolve INTEGER PRIMARY KEY alias — the record stores NULL,
+        // but the real value is the b-tree rowid.
+        if (_rowidAliasOrdinal >= 0 && _reusableBuffer![_rowidAliasOrdinal].IsNull)
+        {
+            _reusableBuffer[_rowidAliasOrdinal] =
+                ColumnValue.FromInt64(4, _cursor.RowId);
+        }
+
+        return FilterEvaluator.MatchesAll(_filters!, _reusableBuffer!);
     }
 
     private void DecodeCurrentRow()
@@ -148,13 +283,13 @@ public sealed class SharcDataReader : IDisposable
             // Lazy decode: only read serial types (varint parsing, no body decode).
             // Actual column values are decoded on first access via GetColumnValue().
             _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!);
-            // Increment generation instead of Array.Clear — O(1) vs O(N)
+            // Increment generation instead of Array.Clear â€” O(1) vs O(N)
             _decodedGeneration++;
             _lazyMode = true;
         }
         else
         {
-            // Full decode — reuse the pre-allocated buffer
+            // Full decode â€” reuse the pre-allocated buffer
             _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
             _lazyMode = false;
         }
@@ -175,7 +310,7 @@ public sealed class SharcDataReader : IDisposable
         // Fast path: in lazy mode, check serial type directly (no body decode needed)
         if (_lazyMode)
         {
-            // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
+            // INTEGER PRIMARY KEY stores NULL in record; real value is rowid â€” not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;
             return _serialTypes![actualOrdinal] == 0;
@@ -252,8 +387,8 @@ public sealed class SharcDataReader : IDisposable
         return val.StorageClass switch
         {
             ColumnStorageClass.Null => SharcColumnType.Null,
-            ColumnStorageClass.Integer => SharcColumnType.Integer,
-            ColumnStorageClass.Float => SharcColumnType.Float,
+            ColumnStorageClass.Integral => SharcColumnType.Integral,
+            ColumnStorageClass.Real => SharcColumnType.Real,
             ColumnStorageClass.Text => SharcColumnType.Text,
             ColumnStorageClass.Blob => SharcColumnType.Blob,
             _ => SharcColumnType.Null
@@ -270,8 +405,8 @@ public sealed class SharcDataReader : IDisposable
         return val.StorageClass switch
         {
             ColumnStorageClass.Null => DBNull.Value,
-            ColumnStorageClass.Integer => val.AsInt64(),
-            ColumnStorageClass.Float => val.AsDouble(),
+            ColumnStorageClass.Integral => val.AsInt64(),
+            ColumnStorageClass.Real => val.AsDouble(),
             ColumnStorageClass.Text => val.AsString(),
             ColumnStorageClass.Blob => val.AsBytes().ToArray(),
             _ => DBNull.Value
@@ -300,7 +435,7 @@ public sealed class SharcDataReader : IDisposable
 
         // INTEGER PRIMARY KEY columns store NULL in the record; the real value is the rowid.
         if (actualOrdinal == _rowidAliasOrdinal && value.IsNull)
-            return ColumnValue.Integer(1, _cursor.RowId);
+            return ColumnValue.FromInt64(1, _cursor.RowId);
 
         return value;
     }
@@ -323,10 +458,10 @@ public enum SharcColumnType
     Null = 0,
 
     /// <summary>Signed integer (1, 2, 3, 4, 6, or 8 bytes).</summary>
-    Integer = 1,
+    Integral = 1,
 
     /// <summary>IEEE 754 64-bit float.</summary>
-    Float = 2,
+    Real = 2,
 
     /// <summary>UTF-8 text string.</summary>
     Text = 3,

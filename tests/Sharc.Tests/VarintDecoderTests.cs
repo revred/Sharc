@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.Primitives;
@@ -22,13 +22,13 @@ namespace Sharc.Tests;
 
 /// <summary>
 /// TDD tests for SQLite varint decoding.
-/// SQLite varints: 1–9 bytes, MSB continuation, big-endian payload.
+/// SQLite varints: 1â€“9 bytes, MSB continuation, big-endian payload.
 /// Bytes 1-8: high bit = more bytes follow, low 7 bits = data.
 /// Byte 9 (if reached): all 8 bits are data.
 /// </summary>
 public class VarintDecoderTests
 {
-    // --- Single-byte values (0x00–0x7F) ---
+    // --- Single-byte values (0x00â€“0x7F) ---
 
     [Fact]
     public void Read_SingleByteZero_ReturnsZeroAndConsumesOneByte()
@@ -63,8 +63,8 @@ public class VarintDecoderTests
     public void Read_TwoBytes_128_ReturnsCorrectValue()
     {
         // 128 = 0x80 in varint: first byte 0x81 (1 with continuation), second byte 0x00
-        // Actually: 128 → high 7 bits of first byte = 1, low 7 bits of second = 0
-        // 0x81, 0x00 → (1 << 7) | 0 = 128
+        // Actually: 128 â†’ high 7 bits of first byte = 1, low 7 bits of second = 0
+        // 0x81, 0x00 â†’ (1 << 7) | 0 = 128
         ReadOnlySpan<byte> data = [0x81, 0x00];
         var consumed = VarintDecoder.Read(data, out var value);
         Assert.Equal(128L, value);
@@ -74,7 +74,7 @@ public class VarintDecoderTests
     [Fact]
     public void Read_TwoBytes_16383_ReturnsCorrectValue()
     {
-        // Max 2-byte varint: 0xFF, 0x7F → ((0x7F) << 7) | 0x7F = 16383
+        // Max 2-byte varint: 0xFF, 0x7F â†’ ((0x7F) << 7) | 0x7F = 16383
         ReadOnlySpan<byte> data = [0xFF, 0x7F];
         var consumed = VarintDecoder.Read(data, out var value);
         Assert.Equal(16383L, value);

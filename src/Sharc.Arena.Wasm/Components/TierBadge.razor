@@ -1,0 +1,25 @@
+@* Visual badge for engine tier classification *@
+
+<span class="tier-badge @CssClass">
+    @Label
+</span>
+
+@code {
+    [Parameter] public required EngineTier Tier { get; set; }
+
+    private string CssClass => Tier switch
+    {
+        EngineTier.NativeDotNet => "tier-native",
+        EngineTier.JsInterop   => "tier-js",
+        EngineTier.Deferred    => "tier-deferred",
+        _                      => "tier-js",
+    };
+
+    private string Label => Tier switch
+    {
+        EngineTier.NativeDotNet => "Tier 1",
+        EngineTier.JsInterop   => "Tier 2",
+        EngineTier.Deferred    => "Deferred",
+        _                      => "Unknown",
+    };
+}

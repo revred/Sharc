@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc;
@@ -116,7 +116,7 @@ public class EdgeCaseTests
     // --- WITHOUT ROWID ---
 
     [Fact]
-    public void CreateReader_WithoutRowIdTable_ThrowsUnsupportedFeature()
+    public void CreateReader_WithoutRowIdTable_ReadsSuccessfully()
     {
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
@@ -126,9 +126,12 @@ public class EdgeCaseTests
         });
 
         using var db = SharcDatabase.OpenMemory(data);
+        using var reader = db.CreateReader("wr");
 
-        var ex = Assert.Throws<UnsupportedFeatureException>(() => db.CreateReader("wr"));
-        Assert.Contains("WITHOUT ROWID", ex.Message);
+        Assert.True(reader.Read());
+        Assert.Equal("a", reader.GetString(0));
+        Assert.Equal("b", reader.GetString(1));
+        Assert.False(reader.Read());
     }
 
     // --- PreloadToMemory option ---

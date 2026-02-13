@@ -1,0 +1,35 @@
+@* Sidebar navigation with draggable slide list *@
+
+<div class="sidenav">
+    <div class="sidenav-header">
+        Slides
+        @if (!Running)
+        {
+            <span class="sidenav-hint">&middot; click to jump</span>
+        }
+    </div>
+    @for (var i = 0; i < Slides.Count; i++)
+    {
+        var index = i;
+        var slide = Slides[i];
+        var isCurrent = CurrentIndex == i;
+        var isDone = DoneSlides.Contains(slide.Id);
+        var cat = SlideData.Categories.FirstOrDefault(c => c.Id == slide.CategoryId);
+
+        <div class="sidenav-item @(isCurrent ? "current" : "") @(isDone ? "done" : "")"
+             @onclick="@(() => { if (!Running) OnJump.InvokeAsync(index); })">
+            <span class="sidenav-dot @(isDone ? "done" : isCurrent ? "active" : "")"></span>
+            <span class="sidenav-icon">@slide.Icon</span>
+            <span class="sidenav-title">@slide.Title</span>
+            <span class="sidenav-cat-dot" style="background: @cat?.Color"></span>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public required IReadOnlyList<SlideDefinition> Slides { get; set; }
+    [Parameter] public int CurrentIndex { get; set; }
+    [Parameter] public required HashSet<string> DoneSlides { get; set; }
+    [Parameter] public bool Running { get; set; }
+    [Parameter] public required EventCallback<int> OnJump { get; set; }
+}

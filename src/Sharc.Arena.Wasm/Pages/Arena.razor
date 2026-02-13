@@ -1,0 +1,221 @@
+@page "/"
+@using System.Diagnostics
+@inject IBenchmarkEngine BenchmarkEngine
+
+<div class="arena-bg-gradient"></div>
+<div class="arena-bg-grid"></div>
+
+<div class="arena-container @(_isMobile ? "mobile" : "")">
+    @* ── Header ── *@
+    <ArenaHeader
+        Slides="@_slides"
+        Engines="@SlideData.Engines"
+        Preset="@_preset"
+        Presets="@SlideData.Presets"
+        State="@_state"
+        DoneCount="@_doneSlides.Count"
+        ElapsedMs="@_elapsedMs"
+        OnPresetChange="@ApplyPreset"
+        OnRun="@RunAll"
+        OnStop="@Stop" />
+
+    @* ── Mobile progress dots ── *@
+    @if (_isMobile && _state != BenchmarkState.Idle)
+    {
+        <ProgressDots Slides="@_slides" CurrentIndex="@_currentIndex" DoneSlides="@_doneSlides" />
+    }
+
+    @* ── Layout ── *@
+    <div class="arena-layout @(_showSidebar ? "with-sidebar" : "")">
+        @if (_showSidebar)
+        {
+            <aside class="arena-sidebar">
+                <SideNav
+                    Slides="@_slides"
+                    CurrentIndex="@_currentIndex"
+                    DoneSlides="@_doneSlides"
+                    Running="@(_state == BenchmarkState.Running)"
+                    OnJump="@JumpToSlide" />
+            </aside>
+        }
+
+        <main class="arena-main">
+            @for (var i = 0; i < _slides.Count; i++)
+            {
+                var index = i;
+                var slide = _slides[i];
+                <div id="slide-@slide.Id">
+                    <SlideCard
+                        Slide="@slide"
+                        Data="@GetSlideResults(slide.Id)"
+                        IsActive="@(_currentIndex == index)"
+                        IsDone="@_doneSlides.Contains(slide.Id)"
+                        Number="@(index + 1)"
+                        Total="@_slides.Count"
+                        IsMobile="@_isMobile"
+                        TileDensity="@GetTileDensity(slide.Id)"
+                        OnDensityChange="@(densityId => SetTileDensity(slide.Id, densityId))"
+                        Running="@(_state == BenchmarkState.Running)" />
+                </div>
+            }
+
+            @if (_state == BenchmarkState.Done)
+            {
+                <Scoreboard Results="@_results" Slides="@_slides" Engines="@SlideData.Engines" />
+
+                <div class="arena-cta">
+                    <div class="arena-cta-title">&#x1F988; Sharc reads SQLite at memory speed</div>
+                    <p class="arena-cta-text">
+                        Zero allocations &middot; 585ns B-tree seeks &middot; Graph ConceptStore + RelationStore &middot; AES-256-GCM &middot; 50KB footprint &middot; Pure .NET 10
+                    </p>
+                    <div class="arena-cta-links">
+                        <a href="https://github.com/revred/Sharc" target="_blank" rel="noopener noreferrer" class="btn-primary">&#x2605; Star on GitHub</a>
+                        <a href="https://www.linkedin.com/in/revodoc/" target="_blank" rel="noopener noreferrer" class="btn-secondary">Connect on LinkedIn</a>
+                    </div>
+                </div>
+            }
+        </main>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<SlideDefinition> _slides = SlideData.CreateSlides();
+    private string _preset = "quick";
+    private BenchmarkState _state = BenchmarkState.Idle;
+    private int _currentIndex = -1;
+    private HashSet<string> _doneSlides = new();
+    private Dictionary<string, IReadOnlyDictionary<string, EngineBaseResult>> _results = new();
+    private Dictionary<string, string> _tileDensities = new();
+    private double _elapsedMs;
+    private CancellationTokenSource? _cts;
+    private bool _isMobile;
+    private bool _showSidebar;
+
+    protected override void OnInitialized()
+    {
+        ApplyPreset("quick");
+        UpdateLayout();
+    }
+
+    private void UpdateLayout()
+    {
+        // Default to desktop for SSR; JS interop would update this in a real scenario
+        _isMobile = false;
+        _showSidebar = true;
+    }
+
+    private void ApplyPreset(string presetId)
+    {
+        if (_state == BenchmarkState.Running) return;
+        _preset = presetId;
+        var preset = SlideData.Presets.FirstOrDefault(p => p.Id == presetId);
+        if (preset is null) return;
+
+        var newDensities = new Dictionary<string, string>();
+        foreach (var slide in _slides)
+        {
+            var tiers = slide.DensityTiers;
+            if (tiers.Count <= 1)
+            {
+                newDensities[slide.Id] = tiers[0]?.Id ?? "md";
+                continue;
+            }
+
+            var best = tiers[0];
+            foreach (var tier in tiers)
+            {
+                if (Math.Abs(tier.Scale - preset.Scale) < Math.Abs(best.Scale - preset.Scale))
+                    best = tier;
+            }
+            newDensities[slide.Id] = best.Id;
+        }
+        _tileDensities = newDensities;
+    }
+
+    private string GetTileDensity(string slideId)
+    {
+        if (_tileDensities.TryGetValue(slideId, out var d)) return d;
+        var slide = _slides.FirstOrDefault(s => s.Id == slideId);
+        return slide?.DefaultDensity ?? "md";
+    }
+
+    private void SetTileDensity(string slideId, string densityId)
+    {
+        if (_state == BenchmarkState.Running) return;
+        _tileDensities[slideId] = densityId;
+        StateHasChanged();
+    }
+
+    private double GetScaleForSlide(SlideDefinition slide)
+    {
+        var densityId = GetTileDensity(slide.Id);
+        var tier = slide.DensityTiers.FirstOrDefault(t => t.Id == densityId);
+        return tier?.Scale ?? 1.0;
+    }
+
+    private IReadOnlyDictionary<string, EngineBaseResult>? GetSlideResults(string slideId)
+    {
+        return _results.TryGetValue(slideId, out var r) ? r : null;
+    }
+
+    private async Task RunAll()
+    {
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+
+        _state = BenchmarkState.Running;
+        _results.Clear();
+        _doneSlides.Clear();
+        _elapsedMs = 0;
+        StateHasChanged();
+
+        var sw = Stopwatch.StartNew();
+        var activePreset = SlideData.Presets.FirstOrDefault(p => p.Id == _preset)!;
+
+        for (var i = 0; i < _slides.Count; i++)
+        {
+            if (token.IsCancellationRequested) break;
+
+            var slide = _slides[i];
+            _currentIndex = i;
+            _elapsedMs = sw.Elapsed.TotalMilliseconds;
+            StateHasChanged();
+
+            // Transition delay
+            await Task.Delay(activePreset.TransitionMs, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested) break;
+
+            // Run benchmark
+            var scale = GetScaleForSlide(slide);
+            var data = await BenchmarkEngine.RunSlideAsync(slide, scale, token);
+
+            _results[slide.Id] = data;
+            _doneSlides.Add(slide.Id);
+            _elapsedMs = sw.Elapsed.TotalMilliseconds;
+            StateHasChanged();
+
+            // Pause delay
+            await Task.Delay(activePreset.PauseMs, token).ConfigureAwait(false);
+        }
+
+        sw.Stop();
+        _elapsedMs = sw.Elapsed.TotalMilliseconds;
+        _currentIndex = -1;
+        _state = BenchmarkState.Done;
+        StateHasChanged();
+    }
+
+    private void Stop()
+    {
+        _cts?.Cancel();
+        _currentIndex = -1;
+        _state = BenchmarkState.Done;
+        StateHasChanged();
+    }
+
+    private void JumpToSlide(int index)
+    {
+        // Scroll handled by JS interop in the future; for now just a no-op
+    }
+}

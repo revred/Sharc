@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -83,13 +83,13 @@ public class SerialTypeCodecTests
     [InlineData(9)]
     public void GetStorageClass_IntegerTypes_ReturnsInteger(long serialType)
     {
-        Assert.Equal(ColumnStorageClass.Integer, SerialTypeCodec.GetStorageClass(serialType));
+        Assert.Equal(ColumnStorageClass.Integral, SerialTypeCodec.GetStorageClass(serialType));
     }
 
     [Fact]
     public void GetStorageClass_Float_ReturnsFloat()
     {
-        Assert.Equal(ColumnStorageClass.Float, SerialTypeCodec.GetStorageClass(7));
+        Assert.Equal(ColumnStorageClass.Real, SerialTypeCodec.GetStorageClass(7));
     }
 
     [Theory]
@@ -117,7 +117,7 @@ public class SerialTypeCodecTests
     [InlineData(11)]
     public void GetStorageClass_ReservedTypes_ThrowsOrReturnsNull(long serialType)
     {
-        // Decision: reserved types 10, 11 are not used — treat as error
+        // Decision: reserved types 10, 11 are not used â€” treat as error
         Assert.Throws<ArgumentOutOfRangeException>(() => SerialTypeCodec.GetContentSize(serialType));
     }
 

@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                         |
+  Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -34,7 +34,7 @@ public class TraversalTypesTests
         
         Assert.AreEqual(record, node.Record);
         Assert.AreEqual(2, node.Depth);
-        Assert.AreEqual(3, node.Path.Count);
+        Assert.HasCount(3, node.Path);
         Assert.AreEqual(new NodeKey(1), node.Path[0]);
     }
 
@@ -48,7 +48,7 @@ public class TraversalTypesTests
         
         var result = new GraphResult(list);
         
-        Assert.AreEqual(1, result.Nodes.Count);
+        Assert.HasCount(1, result.Nodes);
         Assert.AreEqual(node, result.Nodes[0]);
     }
 

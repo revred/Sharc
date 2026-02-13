@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.Schema;
@@ -224,18 +224,21 @@ public class CreateTableParserEdgeCaseTests
         Assert.True(result[0].IsNotNull);
     }
 
-    // --- Non-INTEGER PRIMARY KEY is NOT a rowid alias ---
-    // Only INTEGER PRIMARY KEY is the rowid alias. TEXT PRIMARY KEY is a real column.
+    // --- Non-INTEGER PRIMARY KEY is detected as PK but not as rowid alias ---
+    // TEXT PRIMARY KEY is a real primary key column, just not a rowid alias.
+    // The rowid alias check in SharcDataReader gates on INTEGER type specifically.
 
     [Fact]
-    public void ParseColumns_TextPrimaryKey_IsNotDetectedAsIntegerPk()
+    public void ParseColumns_TextPrimaryKey_IsDetectedAsPrimaryKey()
     {
         var result = CreateTableParser.ParseColumns(
             "CREATE TABLE test (code TEXT PRIMARY KEY, name TEXT)");
 
         Assert.Equal(2, result.Count);
-        // TEXT PRIMARY KEY is NOT an INTEGER PRIMARY KEY rowid alias
-        Assert.False(result[0].IsPrimaryKey);
+        // TEXT PRIMARY KEY IS a primary key (needed for WITHOUT ROWID support)
+        Assert.True(result[0].IsPrimaryKey);
+        // But its declared type is TEXT, not INTEGER — so it is NOT a rowid alias
+        Assert.Equal("TEXT", result[0].DeclaredType);
     }
 
     // --- Ordinals are sequential ---

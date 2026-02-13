@@ -181,15 +181,22 @@ Sharc follows SemVer. The public API surface is:
 
 The `Sharc.Core` and `Sharc.Crypto` namespaces are **internal** — changes there do not constitute breaking changes.
 
-## 5. Future API Extensions (Non-Breaking)
+## 5. API Extensions Status
+
+### Implemented
+
+| Feature           | API                                               | Status                                    |
+| ----------------- | ------------------------------------------------- | ----------------------------------------- |
+| WHERE filtering   | `SharcFilter` + `db.CreateReader(table, filter)`  | **M7 COMPLETE** — 6 operators, all types  |
+| Index lookup      | `IndexBTreeCursor` + `WithoutRowIdCursorAdapter`  | **M7 COMPLETE** — index b-tree traversal  |
+
+### Future (Non-Breaking)
 
 | Feature | API Addition |
 |---------|-------------|
 | Column name indexing | `reader.GetOrdinal(string name)` |
 | Row-as-dictionary | `reader.GetValues(): IDictionary<string, object>` |
 | Typed enumeration | `db.Enumerate<T>(tableName)` via source generator |
-| Index lookup | `db.CreateIndexReader(indexName, keyValue)` |
-| SQL filtering | `db.Query("SELECT * FROM t WHERE id > ?", 5)` |
 | Async reads | `SharcDataReaderAsync` wrapper |
 
 All are additive — no breaking changes to existing API.

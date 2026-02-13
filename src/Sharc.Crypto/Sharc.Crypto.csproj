@@ -4,6 +4,11 @@
     <AssemblyName>Sharc.Crypto</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Sharc.Tests" />
+    <InternalsVisibleTo Include="Sharc.IntegrationTests" />
+    <InternalsVisibleTo Include="Sharc" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
   </ItemGroup>
 </Project>

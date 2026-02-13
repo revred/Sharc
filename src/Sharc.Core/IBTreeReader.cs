@@ -9,16 +9,16 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message — or a prompt with the right context.
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Core;
 
 /// <summary>
-/// Reads SQLite b-tree structures, supporting sequential table scans.
+/// Reads SQLite b-tree structures, supporting sequential table scans and index scans.
 /// </summary>
 public interface IBTreeReader
 {
@@ -28,6 +28,13 @@ public interface IBTreeReader
     /// <param name="rootPage">The root page number of the table b-tree.</param>
     /// <returns>A cursor positioned before the first cell.</returns>
     IBTreeCursor CreateCursor(uint rootPage);
+
+    /// <summary>
+    /// Creates a cursor for iterating over all entries in an index b-tree.
+    /// </summary>
+    /// <param name="rootPage">The root page number of the index b-tree.</param>
+    /// <returns>A cursor positioned before the first entry.</returns>
+    IIndexBTreeCursor CreateIndexCursor(uint rootPage);
 }
 
 /// <summary>
@@ -55,6 +62,41 @@ public interface IBTreeCursor : IDisposable
 
     /// <summary>
     /// Gets the payload data of the current cell.
+    /// May involve reading overflow pages. Valid until <see cref="MoveNext"/> is called.
+    /// </summary>
+    ReadOnlySpan<byte> Payload { get; }
+
+    /// <summary>
+    /// Gets the total payload size in bytes (including overflow).
+    /// </summary>
+    int PayloadSize { get; }
+}
+
+/// <summary>
+/// Forward-only cursor over index b-tree leaf cells.
+/// Index payloads are standard SQLite records where the last column is the table rowid.
+/// </summary>
+public interface IIndexBTreeCursor : IDisposable
+{
+    /// <summary>
+    /// Advances to the next index entry.
+    /// </summary>
+    /// <returns>True if an entry is available; false at end of tree.</returns>
+    bool MoveNext();
+
+    /// <summary>
+    /// Seeks to the first index entry whose first column (integer) equals or exceeds
+    /// <paramref name="firstColumnKey"/>. Uses binary search through the B-tree for O(log n) access.
+    /// After calling this method, <see cref="Payload"/> points to the first matching entry
+    /// (if found), and subsequent <see cref="MoveNext"/> calls continue from that position.
+    /// </summary>
+    /// <param name="firstColumnKey">The integer value to seek for in the first column of the index.</param>
+    /// <returns>True if an entry with first column == <paramref name="firstColumnKey"/> was found.</returns>
+    bool SeekFirst(long firstColumnKey);
+
+    /// <summary>
+    /// Gets the payload data of the current index entry.
+    /// The payload is a standard SQLite record where the last column is the table rowid.
     /// May involve reading overflow pages. Valid until <see cref="MoveNext"/> is called.
     /// </summary>
     ReadOnlySpan<byte> Payload { get; }

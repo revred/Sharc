@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -270,7 +270,7 @@ public class DatabaseHeaderInferenceTests
     {
         var data = MakeHeader(d =>
         {
-            // SQLite 3.39.4 → 3039004
+            // SQLite 3.39.4 â†’ 3039004
             BinaryPrimitives.WriteUInt32BigEndian(d.AsSpan(96), 3039004);
         });
         var header = DatabaseHeader.Parse(data);

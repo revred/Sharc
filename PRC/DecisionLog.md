@@ -10,7 +10,7 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 **Status**: Accepted
 **Context**: Benchmarks were previously run ad-hoc via direct `dotnet run` commands, leading to inconsistent parameters (missing `--memory`, wrong job type), concurrent run conflicts (BenchmarkDotNet file locks), and no structured way to retrieve or compare results. As the project grows with both Core and Graph benchmark suites, a consistent execution policy is needed.
 
-**Decision**: All benchmarks — both standard (Sharc vs SQLite) and Graph-related (Sharc.Comparisons) — must be run through the MCP Service (`tools/Sharc.McpServer`).
+**Decision**: All benchmarks — both standard (Sharc vs SQLite) and Graph-related (Sharc.Comparisons) — must be run through the MCP Service (`tools/Sharc.Context`).
 
 **Execution Policy**:
 

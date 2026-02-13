@@ -9,15 +9,15 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc;
 using Sharc.IntegrationTests.Helpers;
-using Sharc.Schema;
+using Sharc.Core.Schema;
 using Xunit;
 
 namespace Sharc.IntegrationTests;
@@ -281,6 +281,23 @@ public class EndToEndTests
         Assert.Equal(20, db.GetRowCount("items"));
     }
 
+    [Fact]
+    public void OpenMemory_IndexedTable_IndexColumnsPopulated()
+    {
+        var data = TestDatabaseFactory.CreateIndexedDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        var nameIndex = db.Schema.Indexes.First(i => i.Name == "idx_items_name");
+        Assert.Single(nameIndex.Columns);
+        Assert.Equal("name", nameIndex.Columns[0].Name);
+        Assert.Equal(0, nameIndex.Columns[0].Ordinal);
+        Assert.False(nameIndex.Columns[0].IsDescending);
+
+        var catIndex = db.Schema.Indexes.First(i => i.Name == "idx_items_category");
+        Assert.Single(catIndex.Columns);
+        Assert.Equal("category", catIndex.Columns[0].Name);
+    }
+
     // --- Large Table ---
 
     [Fact]
@@ -535,9 +552,9 @@ public class EndToEndTests
         using var reader = db.CreateReader("all_types");
         Assert.True(reader.Read());
 
-        Assert.Equal(SharcColumnType.Integer, reader.GetColumnType(0)); // id
-        Assert.Equal(SharcColumnType.Integer, reader.GetColumnType(1)); // int_val
-        Assert.Equal(SharcColumnType.Float, reader.GetColumnType(2));   // real_val
+        Assert.Equal(SharcColumnType.Integral, reader.GetColumnType(0)); // id
+        Assert.Equal(SharcColumnType.Integral, reader.GetColumnType(1)); // int_val
+        Assert.Equal(SharcColumnType.Real, reader.GetColumnType(2));   // real_val
         Assert.Equal(SharcColumnType.Text, reader.GetColumnType(3));    // text_val
         Assert.Equal(SharcColumnType.Blob, reader.GetColumnType(4));    // blob_val
         Assert.Equal(SharcColumnType.Null, reader.GetColumnType(5));    // null_val

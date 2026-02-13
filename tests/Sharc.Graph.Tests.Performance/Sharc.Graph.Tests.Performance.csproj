@@ -10,13 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Graph\Sharc.Graph.csproj" />
-    <ProjectReference Include="..\..\src\Sharc.Graph.Abstractions\Sharc.Graph.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Graph.Surface\Sharc.Graph.Surface.csproj" />
   </ItemGroup>
 
 </Project>

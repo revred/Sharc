@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Runtime.CompilerServices;
@@ -47,7 +47,7 @@ public static class SerialTypeCodec
             10 or 11 => throw new ArgumentOutOfRangeException(nameof(serialType),
                 serialType, "Reserved serial types 10 and 11 are not used."),
             _ => serialType >= 12
-                ? (int)((serialType - 12) / 2)  // BLOB (even) or TEXT (odd) — same formula
+                ? (int)((serialType - 12) / 2)  // BLOB (even) or TEXT (odd) â€” same formula
                 : throw new ArgumentOutOfRangeException(nameof(serialType),
                     serialType, "Invalid serial type.")
         };
@@ -60,8 +60,8 @@ public static class SerialTypeCodec
     public static ColumnStorageClass GetStorageClass(long serialType)
     {
         if (serialType == 0) return ColumnStorageClass.Null;
-        if (serialType is >= 1 and <= 6 or 8 or 9) return ColumnStorageClass.Integer;
-        if (serialType == 7) return ColumnStorageClass.Float;
+        if (serialType is >= 1 and <= 6 or 8 or 9) return ColumnStorageClass.Integral;
+        if (serialType == 7) return ColumnStorageClass.Real;
         if (serialType >= 12 && (serialType & 1) == 0) return ColumnStorageClass.Blob;
         if (serialType >= 13 && (serialType & 1) == 1) return ColumnStorageClass.Text;
 
@@ -78,13 +78,13 @@ public static class SerialTypeCodec
     /// Returns true if the serial type represents an integer value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsInteger(long serialType) => serialType is >= 1 and <= 6 or 8 or 9;
+    public static bool IsIntegral(long serialType) => serialType is >= 1 and <= 6 or 8 or 9;
 
     /// <summary>
     /// Returns true if the serial type represents a float value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsFloat(long serialType) => serialType == 7;
+    public static bool IsReal(long serialType) => serialType == 7;
 
     /// <summary>
     /// Returns true if the serial type represents a text value.

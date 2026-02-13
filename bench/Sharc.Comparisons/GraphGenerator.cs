@@ -28,14 +28,15 @@ public static class GraphGenerator
             
             CREATE TABLE _relations (
                 id TEXT NOT NULL,
-                origin INTEGER NOT NULL,
+                source_key INTEGER NOT NULL,
                 kind INTEGER NOT NULL,
-                target INTEGER NOT NULL,
+                target_key INTEGER NOT NULL,
                 data TEXT
             );
 
             CREATE INDEX idx_concepts_id ON _concepts(id);
-            CREATE INDEX idx_relations_target ON _relations(target);
+            CREATE INDEX idx_relations_source_kind ON _relations(source_key, kind, target_key);
+            CREATE INDEX idx_relations_target_kind ON _relations(target_key, kind, source_key);
         ";
         cmd.ExecuteNonQuery();
 
@@ -64,11 +65,11 @@ public static class GraphGenerator
         // Insert Edges
         var edgeCmd = conn.CreateCommand();
         edgeCmd.Transaction = tx;
-        edgeCmd.CommandText = "INSERT INTO _relations (id, origin, kind, target, data) VALUES ($id, $o, $k, $t, $d)";
+        edgeCmd.CommandText = "INSERT INTO _relations (id, source_key, kind, target_key, data) VALUES ($id, $sKey, $k, $tKey, $d)";
         var epId = edgeCmd.Parameters.Add("$id", SqliteType.Text);
-        var epOrigin = edgeCmd.Parameters.Add("$o", SqliteType.Integer);
+        var epOrigin = edgeCmd.Parameters.Add("$sKey", SqliteType.Integer);
         var epKind = edgeCmd.Parameters.Add("$k", SqliteType.Integer);
-        var epTarget = edgeCmd.Parameters.Add("$t", SqliteType.Integer);
+        var epTarget = edgeCmd.Parameters.Add("$tKey", SqliteType.Integer);
         var epData = edgeCmd.Parameters.Add("$d", SqliteType.Text);
 
         for (int i = 0; i < edgeCount; i++)

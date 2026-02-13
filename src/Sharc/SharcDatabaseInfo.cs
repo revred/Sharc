@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc;
@@ -22,7 +22,7 @@ namespace Sharc;
 /// </summary>
 public sealed class SharcDatabaseInfo
 {
-    /// <summary>Page size in bytes (512–65536).</summary>
+    /// <summary>Page size in bytes (512â€“65536).</summary>
     public required int PageSize { get; init; }
 
     /// <summary>Total number of pages in the database.</summary>
@@ -31,7 +31,7 @@ public sealed class SharcDatabaseInfo
     /// <summary>Text encoding (1=UTF-8, 2=UTF-16le, 3=UTF-16be).</summary>
     public required SharcTextEncoding TextEncoding { get; init; }
 
-    /// <summary>Schema format number (1–4).</summary>
+    /// <summary>Schema format number (1â€“4).</summary>
     public required int SchemaFormat { get; init; }
 
     /// <summary>User version integer (settable by PRAGMA user_version).</summary>

@@ -233,19 +233,29 @@ new SharcOpenOptions
 }
 ```
 
-## 9. Future Architecture (Post-MVP)
+## 9. Completed Post-MVP Architecture
 
-### WAL Support (Milestone 8)
-- New `WalPageSource` that merges WAL frames with main database pages
+### WAL Support (Milestone 8 — COMPLETE)
+
+- `WalPageSource` merges WAL frames with main database pages
 - WAL index (shm) parsing for frame lookup
-- Snapshot reads at a consistent point
+- Snapshot reads at a consistent point via frame-by-frame replay
 
-### SQL Subset (Milestone 7)
-- Minimal expression evaluator for WHERE clauses
-- Operates on `ColumnValue[]` — no query planner
-- Expression trees built from simple parser, no full SQL grammar
+### WHERE Filtering (Milestone 7 — COMPLETE)
 
-### Index Reads (Milestone 7+)
-- `IndexBTreeReader` for index b-tree traversal
+- `SharcFilter` with 6 operators (Eq, Ne, Lt, Le, Gt, Ge) across all column types
+- Scan-based filtering on `ColumnValue[]` — no query planner, no SQL parser
+- Composable with column projection for efficient filtered reads
+
+### Index Reads (Milestone 7+ — COMPLETE)
+
+- `IndexBTreeCursor` for index b-tree traversal
 - Key comparison using SQLite collation rules
-- Enables efficient lookups by indexed columns
+- `WithoutRowIdCursorAdapter` for WITHOUT ROWID table support
+
+### Encryption (Milestone 9 — COMPLETE)
+
+- `AesGcmPageTransform` implements `IPageTransform` for page-level AES-256-GCM decryption
+- `DecryptingPageSource` wraps any `IPageSource` with transparent decryption
+- `SharcKeyHandle` with Argon2id and PBKDF2-SHA512 key derivation
+- `EncryptionHeader` parsed from reserved space in page 1

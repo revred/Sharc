@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers;
@@ -72,14 +72,14 @@ public sealed class CachedPageSource : IPageSource
         {
             if (_lookup.TryGetValue(pageNumber, out var node))
             {
-                // Cache hit — move to front
+                // Cache hit â€” move to front
                 _lru.Remove(node);
                 _lru.AddFirst(node);
                 CacheHitCount++;
                 return node.Value.Data.AsSpan(0, PageSize);
             }
 
-            // Cache miss — load from inner source
+            // Cache miss â€” load from inner source
             CacheMissCount++;
             var buffer = ArrayPool<byte>.Shared.Rent(PageSize);
             _inner.ReadPage(pageNumber, buffer);

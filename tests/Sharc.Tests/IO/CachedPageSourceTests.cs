@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.IO;
@@ -91,9 +91,9 @@ public class CachedPageSourceTests
         using var inner = new MemoryPageSource(data);
         using var cached = new CachedPageSource(inner, capacity: 2);
 
-        cached.GetPage(1); // miss — cache: [1]
-        cached.GetPage(2); // miss — cache: [2, 1]
-        cached.GetPage(3); // miss, evicts 1 — cache: [3, 2]
+        cached.GetPage(1); // miss â€” cache: [1]
+        cached.GetPage(2); // miss â€” cache: [2, 1]
+        cached.GetPage(3); // miss, evicts 1 â€” cache: [3, 2]
 
         Assert.Equal(3, cached.CacheMissCount);
 
@@ -101,7 +101,7 @@ public class CachedPageSourceTests
         cached.GetPage(2); // hit
         Assert.Equal(1, cached.CacheHitCount);
 
-        // Page 1 was evicted — re-accessing is a miss
+        // Page 1 was evicted â€” re-accessing is a miss
         cached.GetPage(1); // miss
         Assert.Equal(4, cached.CacheMissCount);
     }
@@ -113,10 +113,10 @@ public class CachedPageSourceTests
         using var inner = new MemoryPageSource(data);
         using var cached = new CachedPageSource(inner, capacity: 2);
 
-        cached.GetPage(1); // miss — cache: [1]
-        cached.GetPage(2); // miss — cache: [2, 1]
-        cached.GetPage(1); // hit, moves to front — cache: [1, 2]
-        cached.GetPage(3); // miss, evicts 2 — cache: [3, 1]
+        cached.GetPage(1); // miss â€” cache: [1]
+        cached.GetPage(2); // miss â€” cache: [2, 1]
+        cached.GetPage(1); // hit, moves to front â€” cache: [1, 2]
+        cached.GetPage(3); // miss, evicts 2 â€” cache: [3, 1]
 
         // Page 1 should still be cached (was moved to front)
         cached.GetPage(1); // hit
@@ -166,7 +166,7 @@ public class CachedPageSourceTests
         var page = cached.GetPage(2);
         Assert.Equal(0xA1, page[0]);
 
-        // No caching — counters stay at 0
+        // No caching â€” counters stay at 0
         Assert.Equal(0, cached.CacheHitCount);
         Assert.Equal(0, cached.CacheMissCount);
     }
