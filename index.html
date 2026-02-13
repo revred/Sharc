@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sharc Benchmark Arena</title>
+    <base href="/Sharc/" />
+
+    <!-- OG Meta -->
+    <meta property="og:title" content="Sharc Benchmark Arena" />
+    <meta property="og:description" content="Browser Database Showdown — 16 benchmarks, 4 engines, real WASM performance" />
+    <meta property="og:type" content="website" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+    <div id="app">
+        <div class="loading-screen">
+            <div class="loading-shark">&#x1F988;</div>
+            <div class="loading-text">Loading Sharc Arena...</div>
+            <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">&#x2716;</a>
+    </div>
+
+    <!-- Tier 2: IndexedDB adapter (browser-native API, JS interop required) -->
+    <script src="js/indexeddb-adapter.js"></script>
+
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+</html>
