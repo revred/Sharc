@@ -9,7 +9,7 @@
     <!-- Arena is an app, not a library — disable doc generation, suppress non-library warnings -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
-    <NoWarn>$(NoWarn);CA1707;CA1305;CA1822</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;CA1305;CA1822;WASM0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

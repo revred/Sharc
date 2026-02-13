@@ -77,7 +77,10 @@ public readonly struct DatabaseHeader
     /// <summary>Whether the database uses WAL journal mode.</summary>
     public bool IsWalMode => ReadVersion == 2 || WriteVersion == 2;
 
-    private DatabaseHeader(int pageSize, byte writeVersion, byte readVersion,
+    /// <summary>
+    /// Initializes a new database header.
+    /// </summary>
+    public DatabaseHeader(int pageSize, byte writeVersion, byte readVersion,
         byte reservedBytesPerPage, uint changeCounter, int pageCount,
         uint firstFreelistPage, int freelistPageCount, uint schemaCookie,
         int schemaFormat, int textEncoding, int userVersion,
@@ -141,5 +144,35 @@ public readonly struct DatabaseHeader
     {
         if (data.Length < 16) return false;
         return data[..16].SequenceEqual(MagicBytes);
+    }
+
+    /// <summary>
+    /// Writes the 100-byte database header to the destination span.
+    /// </summary>
+    /// <param name="destination">At least 100 bytes.</param>
+    /// <param name="header">The header values to write.</param>
+    public static void Write(Span<byte> destination, DatabaseHeader header)
+    {
+        destination[..100].Clear();
+        MagicBytes.CopyTo(destination);
+
+        ushort rawPageSize = header.PageSize == 65536 ? (ushort)1 : (ushort)header.PageSize;
+        BinaryPrimitives.WriteUInt16BigEndian(destination[16..], rawPageSize);
+        destination[18] = header.WriteVersion;
+        destination[19] = header.ReadVersion;
+        destination[20] = header.ReservedBytesPerPage;
+        destination[21] = 64;  // max embedded payload fraction (fixed)
+        destination[22] = 32;  // min embedded payload fraction (fixed)
+        destination[23] = 32;  // leaf payload fraction (fixed)
+        BinaryPrimitives.WriteUInt32BigEndian(destination[24..], header.ChangeCounter);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[28..], (uint)header.PageCount);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[32..], header.FirstFreelistPage);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[36..], (uint)header.FreelistPageCount);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[40..], header.SchemaCookie);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[44..], (uint)header.SchemaFormat);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[56..], (uint)header.TextEncoding);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[60..], (uint)header.UserVersion);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[68..], (uint)header.ApplicationId);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[96..], (uint)header.SqliteVersionNumber);
     }
 }

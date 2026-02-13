@@ -139,8 +139,9 @@ internal static class CreateTableParser
         // Check remaining for constraints
         string remaining = pos < definition.Length ? definition[pos..] : "";
 
-        bool isPrimaryKey = definition.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase);
-        bool isNotNull = remaining.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase);
+        var definitionSpan = definition.AsSpan();
+        bool isPrimaryKey = definitionSpan.Contains("PRIMARY KEY".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        bool isNotNull = definitionSpan.Contains("NOT NULL".AsSpan(), StringComparison.OrdinalIgnoreCase);
 
         return new ColumnInfo
         {

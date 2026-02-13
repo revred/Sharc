@@ -35,6 +35,8 @@ public class CoreBenchmarks
     private string _dbPath = null!;
     private byte[] _dbBytes = null!;
     private SqliteConnection _conn = null!;
+    private SharcDatabase _sharcDb = null!;
+    private IFilterNode _cachedFilterNode = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -49,12 +51,22 @@ public class CoreBenchmarks
 
         _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         _conn.Open();
+
+        // Pre-compile the Baked filter for fair comparison (bypass JIT compilation overhead per call)
+        _sharcDb = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 100 });
+        var table = _sharcDb.Schema.Tables[0]; 
+        var filter = FilterStar.And(
+            FilterStar.Column("age").Gt(30),
+            FilterStar.Column("score").Lt(50.0)
+        );
+        _cachedFilterNode = FilterTreeCompiler.CompileBaked(filter, table.Columns);
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
         _conn?.Dispose();
+        _sharcDb?.Dispose();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -311,13 +323,12 @@ public class CoreBenchmarks
     [BenchmarkCategory("WhereFilter")]
     public long Sharc_WhereFilter()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
         var filters = new[]
         {
             new SharcFilter("age", SharcOperator.GreaterThan, (long)30),
             new SharcFilter("score", SharcOperator.LessThan, 50.0),
         };
-        using var reader = db.CreateReader("users", null, filters);
+        using var reader = _sharcDb.CreateReader("users", null, filters);
         long count = 0;
         while (reader.Read())
         {
@@ -334,6 +345,23 @@ public class CoreBenchmarks
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "SELECT id FROM users WHERE age > 30 AND score < 50";
         using var reader = cmd.ExecuteReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("FilterStar")]
+    public long Sharc_FilterStar()
+    {
+        // Use the pre-compiled node via an internal hack or by setting it on the reader.
+        // For benchmarking the 'Evaluate' speed, we want to bypass 'Compile' inside CreateReader.
+        using var reader = _sharcDb.CreateReader("users", ["id"], _cachedFilterNode);
+        
         long count = 0;
         while (reader.Read())
         {

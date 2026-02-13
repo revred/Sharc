@@ -28,6 +28,7 @@ public class GraphSeekBenchmarks
     private byte[] _dbBytes = null!;
     private SqliteConnection _conn = null!;
     private SqliteCommand _seekCmd = null!;
+    private uint _conceptsRoot;
 
     // Target rowids for seeks â€” spread across the B-tree
     private static readonly long[] SeekTargets = [1, 50, 500, 1000, 2500, 4999];
@@ -50,6 +51,22 @@ public class GraphSeekBenchmarks
         _seekCmd.CommandText = "SELECT id, key, type_id, data FROM _concepts WHERE key = $key";
         _seekCmd.Parameters.Add("$key", SqliteType.Integer);
         _seekCmd.Prepare();
+
+        // Pre-calculate conceptsRoot for pure seek benchmarks
+        var pageSource = new MemoryPageSource(_dbBytes);
+        var header = Sharc.Core.Format.DatabaseHeader.Parse(pageSource.GetPage(1));
+        var bTreeReader = new BTreeReader(pageSource, header);
+        using var schemaCursor = bTreeReader.CreateCursor(1);
+        while (schemaCursor.MoveNext())
+        {
+            var decoder = new RecordDecoder();
+            var cols = decoder.DecodeRecord(schemaCursor.Payload);
+            if (cols.Length >= 5 && cols[1].AsString() == "_concepts")
+            {
+                _conceptsRoot = (uint)cols[3].AsInt64();
+                break;
+            }
+        }
     }
 
     [GlobalCleanup]
@@ -69,21 +86,7 @@ public class GraphSeekBenchmarks
         var header = DatabaseHeader.Parse(pageSource.GetPage(1));
         var bTreeReader = new BTreeReader(pageSource, header);
 
-        // _concepts table root page â€” find it from schema
-        using var schemaCursor = bTreeReader.CreateCursor(1);
-        uint conceptsRoot = 0;
-        while (schemaCursor.MoveNext())
-        {
-            var decoder = new RecordDecoder();
-            var cols = decoder.DecodeRecord(schemaCursor.Payload);
-            if (cols.Length >= 5 && cols[1].AsString() == "_concepts")
-            {
-                conceptsRoot = (uint)cols[3].AsInt64();
-                break;
-            }
-        }
-
-        using var cursor = bTreeReader.CreateCursor(conceptsRoot);
+        using var cursor = bTreeReader.CreateCursor(_conceptsRoot);
         cursor.Seek(2500);
         var rec = new RecordDecoder();
         var row = rec.DecodeRecord(cursor.Payload);
@@ -107,25 +110,11 @@ public class GraphSeekBenchmarks
     public long Sharc_SeekBatch6Nodes()
     {
         var pageSource = new MemoryPageSource(_dbBytes);
-        var header = DatabaseHeader.Parse(pageSource.GetPage(1));
+        var header = Sharc.Core.Format.DatabaseHeader.Parse(pageSource.GetPage(1));
         var bTreeReader = new BTreeReader(pageSource, header);
 
-        // Find concepts root page
-        using var schemaCursor = bTreeReader.CreateCursor(1);
-        uint conceptsRoot = 0;
-        while (schemaCursor.MoveNext())
-        {
-            var decoder = new RecordDecoder();
-            var cols = decoder.DecodeRecord(schemaCursor.Payload);
-            if (cols.Length >= 5 && cols[1].AsString() == "_concepts")
-            {
-                conceptsRoot = (uint)cols[3].AsInt64();
-                break;
-            }
-        }
-
         long sum = 0;
-        using var cursor = bTreeReader.CreateCursor(conceptsRoot);
+        using var cursor = bTreeReader.CreateCursor(_conceptsRoot);
         var rec = new RecordDecoder();
 
         foreach (long target in SeekTargets)

@@ -97,4 +97,19 @@ public readonly struct WalFrameHeader
             checksum2: BinaryPrimitives.ReadUInt32BigEndian(data[20..])
         );
     }
+
+    /// <summary>
+    /// Writes the 24-byte WAL frame header to the destination span.
+    /// </summary>
+    /// <param name="destination">At least 24 bytes.</param>
+    /// <param name="header">The header values to write.</param>
+    public static void Write(Span<byte> destination, WalFrameHeader header)
+    {
+        BinaryPrimitives.WriteUInt32BigEndian(destination, header.PageNumber);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[4..], header.DbSizeAfterCommit);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[8..], header.Salt1);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[12..], header.Salt2);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[16..], header.Checksum1);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[20..], header.Checksum2);
+    }
 }

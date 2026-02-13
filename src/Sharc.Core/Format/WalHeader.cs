@@ -120,4 +120,21 @@ public readonly struct WalHeader
             checksum2: BinaryPrimitives.ReadUInt32BigEndian(data[28..])
         );
     }
+
+    /// <summary>
+    /// Writes the 32-byte WAL header to the destination span.
+    /// </summary>
+    /// <param name="destination">At least 32 bytes.</param>
+    /// <param name="header">The header values to write.</param>
+    public static void Write(Span<byte> destination, WalHeader header)
+    {
+        BinaryPrimitives.WriteUInt32BigEndian(destination, header.Magic);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[4..], header.FormatVersion);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[8..], (uint)header.PageSize);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[12..], header.CheckpointSequence);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[16..], header.Salt1);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[20..], header.Salt2);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[24..], header.Checksum1);
+        BinaryPrimitives.WriteUInt32BigEndian(destination[28..], header.Checksum2);
+    }
 }

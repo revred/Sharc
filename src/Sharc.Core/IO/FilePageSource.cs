@@ -32,7 +32,7 @@ namespace Sharc.Core.IO;
 /// Trade-offs vs other page sources:
 /// <list type="bullet">
 ///   <item><see cref="MemoryPageSource"/>: faster per-read (zero-copy span), but requires entire file in memory.</item>
-///   <item><see cref="MemoryMappedPageSource"/>: faster per-read (zero-copy), but ~98 Âµs OS mapping setup.</item>
+///   <item><see cref="SafeMemMapdPageSource"/>: faster per-read (zero-copy), but ~98 Âµs OS mapping setup.</item>
 ///   <item><see cref="FilePageSource"/>: fast open (~1-5 Âµs), one syscall per page read, small fixed buffer.</item>
 /// </list>
 /// </para>
@@ -41,7 +41,7 @@ namespace Sharc.Core.IO;
 /// footprint must stay minimal.
 /// </para>
 /// </remarks>
-public sealed class FilePageSource : IPageSource
+public sealed class FilePageSource : IWritablePageSource
 {
     private readonly SafeFileHandle _handle;
     private readonly long _fileLength;
@@ -57,51 +57,57 @@ public sealed class FilePageSource : IPageSource
     public int PageCount { get; }
 
     /// <summary>
-    /// Opens a SQLite database file for on-demand page reads.
+    /// Opens a SQLite database file for on-demand page reads and optional writes.
     /// Only reads the 100-byte header on construction.
     /// </summary>
     /// <param name="filePath">Path to the SQLite database file.</param>
     /// <param name="fileShareMode">File sharing mode. Default is <see cref="FileShare.ReadWrite"/>.</param>
-    /// <exception cref="FileNotFoundException">File does not exist.</exception>
-    /// <exception cref="ArgumentException">File is empty.</exception>
-    /// <exception cref="Sharc.Exceptions.InvalidDatabaseException">Database header is invalid.</exception>
-    public FilePageSource(string filePath, FileShare fileShareMode = FileShare.ReadWrite)
+    /// <param name="allowWrites">True to open the file with write access.</param>
+    public FilePageSource(string filePath, FileShare fileShareMode = FileShare.ReadWrite, bool allowWrites = false)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException("Database file not found.", filePath);
 
-        _handle = File.OpenHandle(filePath, FileMode.Open, FileAccess.Read, fileShareMode,
+        var access = allowWrites ? FileAccess.ReadWrite : FileAccess.Read;
+        var mode = allowWrites ? FileMode.OpenOrCreate : FileMode.Open;
+
+        _handle = File.OpenHandle(filePath, mode, access, fileShareMode,
             FileOptions.RandomAccess);
 
         _fileLength = RandomAccess.GetLength(_handle);
-        if (_fileLength == 0)
+        if (_fileLength == 0 && !allowWrites)
         {
             _handle.Dispose();
             throw new ArgumentException("Database file is empty.", nameof(filePath));
         }
 
-        // Read only the 100-byte database header â€” one syscall, stackalloc, zero heap pressure
-        Span<byte> headerBuf = stackalloc byte[100];
-        RandomAccess.Read(_handle, headerBuf, fileOffset: 0);
+        if (_fileLength > 0)
+        {
+            // Read only the 100-byte database header
+            Span<byte> headerBuf = stackalloc byte[100];
+            RandomAccess.Read(_handle, headerBuf, fileOffset: 0);
 
-        try
-        {
-            var header = DatabaseHeader.Parse(headerBuf);
-            PageSize = header.PageSize;
-            PageCount = header.PageCount;
+            try
+            {
+                var header = DatabaseHeader.Parse(headerBuf);
+                PageSize = header.PageSize;
+                PageCount = header.PageCount;
+            }
+            catch
+            {
+                _handle.Dispose();
+                throw;
+            }
         }
-        catch
+        else
         {
-            _handle.Dispose();
-            throw;
+            // New database creation - defaults or wait for header write
+            PageSize = 4096;
+            PageCount = 0;
         }
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// Returns a span over a thread-local buffer that is reused across calls on the same thread.
-    /// The returned span is valid only until the next call to <see cref="GetPage"/> on the same thread.
-    /// </remarks>
     public ReadOnlySpan<byte> GetPage(uint pageNumber)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -128,6 +134,25 @@ public sealed class FilePageSource : IPageSource
         return PageSize;
     }
 
+    /// <inheritdoc />
+    public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // We allow writing to page numbers up to PageCount + 1 to support growth
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageNumber, 1u);
+
+        long offset = (long)(pageNumber - 1) * PageSize;
+        RandomAccess.Write(_handle, source[..PageSize], fileOffset: offset);
+    }
+
+    /// <inheritdoc />
+    public void Flush()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // SafeFileHandle doesn't have a direct Flush method in .NET.
+        // Durability is currently handled by OS-level file options if specified.
+    }
+
     /// <summary>
     /// Closes the file handle.
     /// </summary>
@@ -140,8 +165,10 @@ public sealed class FilePageSource : IPageSource
 
     private void ValidatePageNumber(uint pageNumber)
     {
-        if (pageNumber < 1 || pageNumber > (uint)PageCount)
+        // SQLite pages are 1-indexed. Page 1 is the start.
+        // We check against the current length of the file/source.
+        if (pageNumber < 1 || pageNumber > (uint)((RandomAccess.GetLength(_handle) + PageSize - 1) / PageSize))
             throw new ArgumentOutOfRangeException(nameof(pageNumber), pageNumber,
-                $"Page number must be between 1 and {PageCount}.");
+                $"Page number must be between 1 and the current database size.");
     }
 }
