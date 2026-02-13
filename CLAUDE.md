@@ -146,7 +146,7 @@ sharc/
 │   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Primitives)
 │   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
 │   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
-│   └── Sharc.Graph.Abstractions/      ← Graph models (NodeKey, GraphEdge, RecordId)
+│   └── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
 ├── tests/
 │   ├── Sharc.Tests/                   ← Unit tests (463 tests)
 │   ├── Sharc.IntegrationTests/        ← End-to-end tests (61 tests)

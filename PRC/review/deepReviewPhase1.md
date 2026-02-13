@@ -85,7 +85,7 @@ So the "mitigated by CachedPageSource lock" claim in the TODO is incorrect for t
 
 ### BUG-05: `NodeKey.ToAscii()` Returns Garbage for Non-ASCII-Encoded Keys
 
-**File:** `src/Sharc.Graph.Abstractions/Model/NodeKey.cs:24`
+**File:** `src/Sharc.Graph.Surface/Model/NodeKey.cs:24`
 
 If a `NodeKey` wraps a large integer that wasn't encoded from ASCII (e.g., a raw 48-bit timestamp or a hash), `ToAscii()` will interpret random bytes as ASCII, producing garbage strings with control characters. There's no validation that the bytes are actually printable ASCII.
 
@@ -105,7 +105,7 @@ public string ToAscii()
 
 ### ARCH-01: `RecordId.FullId` Allocates via String Interpolation on Every Access
 
-**File:** `src/Sharc.Graph.Abstractions/Model/RecordId.cs:27`
+**File:** `src/Sharc.Graph.Surface/Model/RecordId.cs:27`
 
 ```csharp
 public string FullId => $"{Table}:{Id}";  // ← New string every property access
@@ -117,7 +117,7 @@ This is a computed property that allocates on every call. `FullId` is used in `T
 
 ### ARCH-02: `RecordId.HasIntegerKey` Returns False for Key == 0
 
-**File:** `src/Sharc.Graph.Abstractions/Model/RecordId.cs:30`
+**File:** `src/Sharc.Graph.Surface/Model/RecordId.cs:30`
 
 ```csharp
 public bool HasIntegerKey => Key.Value != 0;
@@ -143,7 +143,7 @@ Wait — looking at the actual code more carefully, this IS wired. The TODO doc 
 
 ### ARCH-04: Graph Stores Don't Implement `IContextGraph`
 
-**File:** `src/Sharc.Graph.Abstractions/IContextGraph.cs`
+**File:** `src/Sharc.Graph.Surface/IContextGraph.cs`
 
 The `IContextGraph` interface defines `Traverse()`, `GetNode()`, `GetEdges()` — but there is **no class that implements it**. `ConceptStore` and `RelationStore` are separate internal classes. There's no `SharcGraph` or `ContextGraph` facade class.
 
@@ -153,7 +153,7 @@ This means the entire published Graph API contract is unimplemented. Users can't
 
 ### ARCH-05: `GraphRecord.JsonData` Has a Private Setter — But No Method Sets It
 
-**File:** `src/Sharc.Graph.Abstractions/Model/GraphRecord.cs:25`
+**File:** `src/Sharc.Graph.Surface/Model/GraphRecord.cs:25`
 
 ```csharp
 public string JsonData { get; private set; }
@@ -262,7 +262,7 @@ These are things that an experienced engineer opening the repo would notice and 
 
 ### QUALITY-01: UTF-8 BOM Inconsistency
 
-Some files have UTF-8 BOM (`﻿` at byte level, visible as `Ã¢â‚¬â€` mojibake in the headers), some don't. The Graph.Abstractions files have BOM; the Sharc.Core files don't. This causes the decorative header comment to render with mojibake on some systems:
+Some files have UTF-8 BOM (`﻿` at byte level, visible as `Ã¢â‚¬â€` mojibake in the headers), some don't. The Graph.Surface files have BOM; the Sharc.Core files don't. This causes the decorative header comment to render with mojibake on some systems:
 
 ```
 Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
@@ -315,7 +315,7 @@ The project exists, compiles, and is referenced by test projects — but contain
 
 ### QUALITY-05: `GraphRecord` Constructor Sets `CreatedAt` to `UtcNow` — Wrong for Read Path
 
-**File:** `src/Sharc.Graph.Abstractions/Model/GraphRecord.cs:40`
+**File:** `src/Sharc.Graph.Surface/Model/GraphRecord.cs:40`
 
 ```csharp
 public GraphRecord(RecordId id, NodeKey key, int typeId, string jsonData)

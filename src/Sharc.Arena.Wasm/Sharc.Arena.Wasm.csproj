@@ -24,7 +24,7 @@
     <ProjectReference Include="..\Sharc\Sharc.csproj" />
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
     <ProjectReference Include="..\Sharc.Graph\Sharc.Graph.csproj" />
-    <ProjectReference Include="..\Sharc.Graph.Abstractions\Sharc.Graph.Abstractions.csproj" />
+    <ProjectReference Include="..\Sharc.Graph.Surface\Sharc.Graph.Surface.csproj" />
     <ProjectReference Include="..\Sharc.Crypto\Sharc.Crypto.csproj" />
   </ItemGroup>
 
