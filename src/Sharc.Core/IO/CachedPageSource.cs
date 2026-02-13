@@ -23,7 +23,7 @@ namespace Sharc.Core.IO;
 /// LRU-cached wrapper around any <see cref="IPageSource"/>.
 /// Rents buffers from <see cref="ArrayPool{T}.Shared"/> and returns them on eviction or dispose.
 /// </summary>
-public sealed class CachedPageSource : IPageSource
+public sealed class CachedPageSource : IWritablePageSource
 {
     private readonly IPageSource _inner;
     private readonly int _capacity;
@@ -106,6 +106,41 @@ public sealed class CachedPageSource : IPageSource
     {
         GetPage(pageNumber).CopyTo(destination);
         return PageSize;
+    }
+
+    /// <inheritdoc />
+    public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_syncRoot)
+        {
+            // Update cache if page exists
+            if (_lookup.TryGetValue(pageNumber, out var node))
+            {
+                source.CopyTo(node.Value.Data);
+            }
+
+            // Write through to inner source if it supports writes
+            if (_inner is IWritablePageSource writable)
+            {
+                writable.WritePage(pageNumber, source);
+            }
+            else
+            {
+                throw new NotSupportedException("Underlying page source does not support writes.");
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void Flush()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_inner is IWritablePageSource writable)
+        {
+            writable.Flush();
+        }
     }
 
     /// <inheritdoc />

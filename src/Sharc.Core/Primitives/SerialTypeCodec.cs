@@ -97,4 +97,46 @@ public static class SerialTypeCodec
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsBlob(long serialType) => serialType >= 12 && (serialType & 1) == 0;
+
+    /// <summary>
+    /// Determines the optimal SQLite serial type for a given column value.
+    /// This is the write-side inverse of <see cref="GetContentSize"/> and <see cref="GetStorageClass"/>.
+    /// </summary>
+    /// <param name="value">The column value to encode.</param>
+    /// <returns>The SQLite serial type code.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static long GetSerialType(ColumnValue value)
+    {
+        switch (value.StorageClass)
+        {
+            case ColumnStorageClass.Null:
+                return 0;
+
+            case ColumnStorageClass.Integral:
+            {
+                long v = value.AsInt64();
+                if (v == 0) return 8;
+                if (v == 1) return 9;
+                if (v >= -128 && v <= 127) return 1;
+                if (v >= -32768 && v <= 32767) return 2;
+                if (v >= -8388608 && v <= 8388607) return 3;
+                if (v >= -2147483648L && v <= 2147483647L) return 4;
+                if (v >= -140737488355328L && v <= 140737488355327L) return 5;
+                return 6;
+            }
+
+            case ColumnStorageClass.Real:
+                return 7;
+
+            case ColumnStorageClass.Text:
+                return 2L * value.AsBytes().Length + 13;
+
+            case ColumnStorageClass.Blob:
+                return 2L * value.AsBytes().Length + 12;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    value.StorageClass, "Unknown storage class.");
+        }
+    }
 }

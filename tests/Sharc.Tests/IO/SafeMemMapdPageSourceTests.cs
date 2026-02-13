@@ -21,11 +21,11 @@ using Xunit;
 
 namespace Sharc.Tests.IO;
 
-public class MemoryMappedPageSourceTests : IDisposable
+public class SafeMemMapdPageSourceTests : IDisposable
 {
     private readonly string _tempDir;
 
-    public MemoryMappedPageSourceTests()
+    public SafeMemMapdPageSourceTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "sharc_test_mmap_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
@@ -73,7 +73,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile(pageSize: 4096, pageCount: 5);
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         Assert.Equal(4096, source.PageSize);
         Assert.Equal(5, source.PageCount);
@@ -84,7 +84,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile(pageSize: 1024, pageCount: 10);
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         Assert.Equal(1024, source.PageSize);
         Assert.Equal(10, source.PageCount);
@@ -93,7 +93,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     [Fact]
     public void Constructor_FileNotFound_ThrowsFileNotFoundException()
     {
-        Assert.Throws<FileNotFoundException>(() => _ = new MemoryMappedPageSource(Path.Combine(_tempDir, "nonexistent.db")));
+        Assert.Throws<FileNotFoundException>(() => _ = new SafeMemMapdPageSource(Path.Combine(_tempDir, "nonexistent.db")));
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class MemoryMappedPageSourceTests : IDisposable
         var path = Path.Combine(_tempDir, "empty.db");
         File.WriteAllBytes(path, []);
 
-        var ex = Assert.Throws<ArgumentException>(() => _ = new MemoryMappedPageSource(path));
+        var ex = Assert.Throws<ArgumentException>(() => _ = new SafeMemMapdPageSource(path));
         Assert.Contains("empty", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -112,7 +112,7 @@ public class MemoryMappedPageSourceTests : IDisposable
         var path = Path.Combine(_tempDir, "bad_magic.db");
         File.WriteAllBytes(path, new byte[4096]); // all zeros
 
-        Assert.Throws<InvalidDatabaseException>(() => _ = new MemoryMappedPageSource(path));
+        Assert.Throws<InvalidDatabaseException>(() => _ = new SafeMemMapdPageSource(path));
     }
 
     // --- GetPage ---
@@ -122,7 +122,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile();
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
         var page = source.GetPage(1);
 
         Assert.Equal(4096, page.Length);
@@ -137,7 +137,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile(markerAtPage2: 0xBE);
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
         var page = source.GetPage(2);
 
         Assert.Equal(4096, page.Length);
@@ -149,7 +149,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile(pageCount: 5);
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
         var page = source.GetPage(5);
 
         Assert.Equal(4096, page.Length);
@@ -160,7 +160,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     {
         var path = CreateDatabaseFile();
 
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
         var first = source.GetPage(1);
         var second = source.GetPage(1);
 
@@ -171,7 +171,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void GetPage_PageZero_ThrowsArgumentOutOfRange()
     {
         var path = CreateDatabaseFile();
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(0); });
     }
@@ -180,7 +180,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void GetPage_PageBeyondCount_ThrowsArgumentOutOfRange()
     {
         var path = CreateDatabaseFile(pageCount: 3);
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => { _ = source.GetPage(4); });
     }
@@ -191,7 +191,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void ReadPage_CopiesDataIntoBuffer()
     {
         var path = CreateDatabaseFile(markerAtPage2: 0xFE);
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         var buffer = new byte[4096];
         var bytesRead = source.ReadPage(2, buffer);
@@ -206,7 +206,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void Dispose_ReleasesFileHandle()
     {
         var path = CreateDatabaseFile();
-        var source = new MemoryMappedPageSource(path);
+        var source = new SafeMemMapdPageSource(path);
         source.Dispose();
 
         // File should be accessible after dispose
@@ -218,7 +218,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void Dispose_IsIdempotent()
     {
         var path = CreateDatabaseFile();
-        var source = new MemoryMappedPageSource(path);
+        var source = new SafeMemMapdPageSource(path);
 
         source.Dispose();
         source.Dispose(); // should not throw
@@ -228,7 +228,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void GetPage_AfterDispose_ThrowsObjectDisposedException()
     {
         var path = CreateDatabaseFile();
-        var source = new MemoryMappedPageSource(path);
+        var source = new SafeMemMapdPageSource(path);
         source.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => { _ = source.GetPage(1); });
@@ -240,7 +240,7 @@ public class MemoryMappedPageSourceTests : IDisposable
     public void GetPage_AllPages_ReturnsDistinctSlices()
     {
         var path = CreateDatabaseFile(pageSize: 1024, pageCount: 8);
-        using var source = new MemoryMappedPageSource(path);
+        using var source = new SafeMemMapdPageSource(path);
 
         for (uint p = 1; p <= 8; p++)
         {

@@ -117,7 +117,7 @@ public sealed class CommitWriterTests : IDisposable
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private string? QueryScalar(string sql)

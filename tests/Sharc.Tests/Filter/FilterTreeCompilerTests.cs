@@ -4,9 +4,9 @@ using Xunit;
 
 namespace Sharc.Tests.Filter;
 
-public sealed class FilterCompilerTests
+public sealed class FilterTreeCompilerTests
 {
-    private static IReadOnlyList<ColumnInfo> MakeColumns(params string[] names)
+    private static List<ColumnInfo> MakeColumns(params string[] names)
     {
         var list = new List<ColumnInfo>();
         for (int i = 0; i < names.Length; i++)
@@ -27,7 +27,7 @@ public sealed class FilterCompilerTests
         var columns = MakeColumns("id", "name", "age");
         var expr = FilterStar.Column("age").Gt(30);
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
 
         Assert.IsType<PredicateNode>(node);
     }
@@ -41,7 +41,7 @@ public sealed class FilterCompilerTests
             FilterStar.Column("score").Lt(50)
         );
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
 
         Assert.IsType<AndNode>(node);
     }
@@ -55,7 +55,7 @@ public sealed class FilterCompilerTests
             FilterStar.Column("status").Eq("pending")
         );
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
 
         Assert.IsType<OrNode>(node);
     }
@@ -66,7 +66,7 @@ public sealed class FilterCompilerTests
         var columns = MakeColumns("deleted");
         var expr = FilterStar.Not(FilterStar.Column("deleted").IsNotNull());
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
 
         Assert.IsType<NotNode>(node);
     }
@@ -78,7 +78,7 @@ public sealed class FilterCompilerTests
         var expr = FilterStar.Column("age").Gt(30);
 
         // Should not throw — case-insensitive match
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
         Assert.NotNull(node);
     }
 
@@ -88,7 +88,7 @@ public sealed class FilterCompilerTests
         var columns = MakeColumns("id", "name");
         var expr = FilterStar.Column("nonexistent").Gt(30);
 
-        Assert.Throws<ArgumentException>(() => FilterCompiler.Compile(expr, columns));
+        Assert.Throws<ArgumentException>(() => FilterTreeCompiler.Compile(expr, columns));
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed class FilterCompilerTests
         var columns = MakeColumns("id", "name", "age");
         var expr = FilterStar.Column(2).Gt(30);
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
         Assert.IsType<PredicateNode>(node);
     }
 
@@ -107,7 +107,7 @@ public sealed class FilterCompilerTests
         var columns = MakeColumns("id", "name");
         var expr = FilterStar.Column(99).Gt(30);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => FilterCompiler.Compile(expr, columns));
+        Assert.Throws<ArgumentOutOfRangeException>(() => FilterTreeCompiler.Compile(expr, columns));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class FilterCompilerTests
         for (int i = 0; i < 40; i++)
             expr = FilterStar.Not(expr);
 
-        Assert.Throws<ArgumentException>(() => FilterCompiler.Compile(expr, columns));
+        Assert.Throws<ArgumentException>(() => FilterTreeCompiler.Compile(expr, columns));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class FilterCompilerTests
             )
         );
 
-        var node = FilterCompiler.Compile(expr, columns);
+        var node = FilterTreeCompiler.Compile(expr, columns);
         Assert.IsType<AndNode>(node);
     }
 }

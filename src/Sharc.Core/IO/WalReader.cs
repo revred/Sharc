@@ -114,7 +114,7 @@ public static class WalReader
     /// Computes the SQLite WAL cumulative checksum over a data span.
     /// The span length must be a multiple of 8.
     /// </summary>
-    private static void ComputeChecksum(ReadOnlySpan<byte> data, bool bigEndian,
+    internal static void ComputeChecksum(ReadOnlySpan<byte> data, bool bigEndian,
         ref uint s0, ref uint s1)
     {
         for (int i = 0; i + 7 < data.Length; i += 8)

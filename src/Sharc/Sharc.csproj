@@ -6,6 +6,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc.Tests" />
     <InternalsVisibleTo Include="Sharc.IntegrationTests" />
+    <InternalsVisibleTo Include="Sharc.Comparisons" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />

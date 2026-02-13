@@ -25,6 +25,7 @@ internal sealed class SchemaReader
 {
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
+    private readonly ColumnValue[] _columnBuffer = new ColumnValue[5];
 
     public SchemaReader(IBTreeReader bTreeReader, IRecordDecoder recordDecoder)
     {
@@ -47,15 +48,16 @@ internal sealed class SchemaReader
 
         while (cursor.MoveNext())
         {
-            var columns = _recordDecoder.DecodeRecord(cursor.Payload);
-            if (columns.Length < 5) continue;
-
+            _recordDecoder.DecodeRecord(cursor.Payload, _columnBuffer);
+            
             // sqlite_schema columns: type(0), name(1), tbl_name(2), rootpage(3), sql(4)
-            string type = columns[0].IsNull ? "" : columns[0].AsString();
-            string name = columns[1].IsNull ? "" : columns[1].AsString();
-            string tblName = columns[2].IsNull ? "" : columns[2].AsString();
-            int rootPage = columns[3].IsNull ? 0 : (int)columns[3].AsInt64();
-            string? sql = columns[4].IsNull ? null : columns[4].AsString();
+            if (_columnBuffer[0].IsNull) continue;
+            
+            string type = _columnBuffer[0].AsString();
+            string name = _columnBuffer[1].IsNull ? "" : _columnBuffer[1].AsString();
+            string tblName = _columnBuffer[2].IsNull ? "" : _columnBuffer[2].AsString();
+            int rootPage = _columnBuffer[3].IsNull ? 0 : (int)_columnBuffer[3].AsInt64();
+            string? sql = _columnBuffer[4].IsNull ? null : _columnBuffer[4].AsString();
 
             switch (type)
             {

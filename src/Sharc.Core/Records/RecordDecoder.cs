@@ -17,6 +17,7 @@
 
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using Sharc.Core.Primitives;
 
 namespace Sharc.Core.Records;
@@ -24,8 +25,14 @@ namespace Sharc.Core.Records;
 /// <summary>
 /// Decodes SQLite record format (header + body) into typed column values.
 /// </summary>
-internal sealed class RecordDecoder : IRecordDecoder
+internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
 {
+    /// <inheritdoc />
+    public string Name => "RecordDecoder";
+
+    /// <inheritdoc />
+    public void OnRegister(object context) { }
+
     /// <inheritdoc />
     public ColumnValue[] DecodeRecord(ReadOnlySpan<byte> payload)
     {
@@ -67,8 +74,21 @@ internal sealed class RecordDecoder : IRecordDecoder
             }
         }
 
-        int bodyOffset = headerEnd;
-        int decodeCount = Math.Min(colCount, destination.Length);
+        DecodeBody(payload, destination, serialTypes.Slice(0, Math.Min(colCount, serialTypes.Length)), headerEnd);
+    }
+
+    /// <inheritdoc />
+    // This implementation is static-capable but must be an instance method to satisfy the interface.
+    [SuppressMessage("Performance", "CA1822:Mark members as static")]
+    public void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        DecodeBody(payload, destination, serialTypes, bodyOffset);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void DecodeBody(ReadOnlySpan<byte> payload, ColumnValue[] destination, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        int decodeCount = Math.Min(serialTypes.Length, destination.Length);
         for (int i = 0; i < decodeCount; i++)
         {
             long st = serialTypes[i];
@@ -129,10 +149,31 @@ internal sealed class RecordDecoder : IRecordDecoder
     }
 
     /// <inheritdoc />
-    public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes)
+    // This implementation is static-capable but must be an instance method to satisfy the interface.
+    [SuppressMessage("Performance", "CA1822:Mark members as static")]
+    public ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        if (columnIndex < 0 || columnIndex >= serialTypes.Length)
+            throw new ArgumentOutOfRangeException(nameof(columnIndex), columnIndex, "Column index is out of range.");
+
+        int currentOffset = bodyOffset;
+        for (int i = 0; i < columnIndex; i++)
+        {
+            currentOffset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+        }
+
+        long targetSerialType = serialTypes[columnIndex];
+        int contentSize = SerialTypeCodec.GetContentSize(targetSerialType);
+        
+        return DecodeValue(payload.Slice(currentOffset, contentSize), targetSerialType);
+    }
+
+    /// <inheritdoc />
+    public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
-        int headerEnd = (int)headerSize;
+        bodyOffset = (int)headerSize;
+        int headerEnd = bodyOffset;
 
         int colCount = 0;
         while (offset < headerEnd && colCount < serialTypes.Length)
