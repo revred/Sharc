@@ -15,6 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Buffers;
 using Sharc.Core;
 using Sharc.Core.Schema;
 
@@ -42,6 +43,7 @@ public sealed class SharcDataReader : IDisposable
     private readonly IReadOnlyList<ColumnInfo> _columns;
     private readonly int[]? _projection;
     private readonly int _rowidAliasOrdinal;
+    private readonly int _columnCount;
     private ColumnValue[]? _currentRow;
     private ColumnValue[]? _reusableBuffer;
     private bool _disposed;
@@ -72,9 +74,10 @@ public sealed class SharcDataReader : IDisposable
         _bTreeReader = bTreeReader;
         _tableIndexes = tableIndexes;
         _filters = filters;
+        _columnCount = columns.Count;
 
-        // Pre-allocate a reusable buffer for decoding â€” avoids per-row ColumnValue[] allocation
-        _reusableBuffer = new ColumnValue[columns.Count];
+        // Rent a reusable buffer from ArrayPool — returned in Dispose()
+        _reusableBuffer = ArrayPool<ColumnValue>.Shared.Rent(columns.Count);
 
         // Allocate lazy-decode buffers when using projection
         if (projection != null)
@@ -420,7 +423,7 @@ public sealed class SharcDataReader : IDisposable
 
         int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
 
-        if (actualOrdinal < 0 || actualOrdinal >= _currentRow.Length)
+        if (actualOrdinal < 0 || actualOrdinal >= _columnCount)
             throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal,
                 "Column ordinal is out of range.");
 
@@ -440,12 +443,28 @@ public sealed class SharcDataReader : IDisposable
         return value;
     }
 
+    /// <summary>
+    /// Gets a column value as raw UTF-8 bytes without allocating a managed string.
+    /// The span is valid only until the next call to <see cref="Read"/>.
+    /// For TEXT columns, this avoids the <see cref="System.Text.Encoding.UTF8"/> decode allocation.
+    /// </summary>
+    public ReadOnlySpan<byte> GetUtf8Span(int ordinal)
+    {
+        return GetColumnValue(ordinal).AsBytes().Span;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         _cursor.Dispose();
+
+        if (_reusableBuffer is not null)
+        {
+            ArrayPool<ColumnValue>.Shared.Return(_reusableBuffer, clearArray: true);
+            _reusableBuffer = null;
+        }
     }
 }
 

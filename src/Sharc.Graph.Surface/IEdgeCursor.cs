@@ -20,37 +20,30 @@ using Sharc.Graph.Model;
 namespace Sharc.Graph;
 
 /// <summary>
-/// The primary entry point for graph traversal and context retrieval.
+/// A forward-only, zero-allocation cursor over graph edges originating from a single node.
+/// Avoids <see cref="GraphEdge"/> allocation per row — callers read typed properties directly.
+/// The cursor is valid until disposed. Property values are valid until the next <see cref="MoveNext"/> call.
 /// </summary>
-public interface IContextGraph
+public interface IEdgeCursor : IDisposable
 {
-    /// <summary>
-    /// Traverses the graph starting from a specific node using the defined policy.
-    /// </summary>
-    /// <param name="startKey">The starting node key.</param>
-    /// <param name="policy">Traversal configuration.</param>
-    /// <returns>A result set containing visited nodes and metadata.</returns>
-    GraphResult Traverse(NodeKey startKey, TraversalPolicy policy);
+    /// <summary>Advances to the next matching edge. Returns false when exhausted.</summary>
+    bool MoveNext();
+
+    /// <summary>The integer key of the origin node.</summary>
+    long OriginKey { get; }
+
+    /// <summary>The integer key of the target node.</summary>
+    long TargetKey { get; }
+
+    /// <summary>The edge kind/link ID.</summary>
+    int Kind { get; }
+
+    /// <summary>Edge relevance weight (0.0 to 1.0).</summary>
+    float Weight { get; }
 
     /// <summary>
-    /// Retrieves a single node record by its integer key.
+    /// The raw UTF-8 bytes of the edge JSON data. Zero-allocation — avoids string materialization.
+    /// Returns empty if the data column is not present or is NULL.
     /// </summary>
-    GraphRecord? GetNode(NodeKey key);
-
-    /// <summary>
-    /// Retrieves a single node record by its ID.
-    /// </summary>
-    GraphRecord? GetNode(RecordId id);
-
-    /// <summary>
-    /// Retrieves edges originating from the specified node.
-    /// </summary>
-    IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null);
-
-    /// <summary>
-    /// Creates a zero-allocation edge cursor for the specified origin node.
-    /// Avoids <see cref="GraphEdge"/> allocation per row — callers read typed properties directly.
-    /// Caller must dispose the cursor when done.
-    /// </summary>
-    IEdgeCursor GetEdgeCursor(NodeKey origin, RelationKind? kind = null);
+    ReadOnlyMemory<byte> JsonDataUtf8 { get; }
 }
