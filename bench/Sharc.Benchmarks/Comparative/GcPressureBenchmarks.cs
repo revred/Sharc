@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -52,7 +52,7 @@ public class GcPressureBenchmarks
         _conn?.Dispose();
     }
 
-    // --- 9.1: Sustained scan — scan events (100K rows) × 3 iterations ---
+    // --- 9.1: Sustained scan â€” scan events (100K rows) Ã— 3 iterations ---
 
     [Benchmark]
     [BenchmarkCategory("SustainedScan")]
@@ -91,7 +91,7 @@ public class GcPressureBenchmarks
         return sum;
     }
 
-    // --- 9.2: Sustained scan with strings — users (10K rows) × 5 iterations ---
+    // --- 9.2: Sustained scan with strings â€” users (10K rows) Ã— 5 iterations ---
 
     [Benchmark]
     [BenchmarkCategory("SustainedStringScan")]
@@ -130,7 +130,7 @@ public class GcPressureBenchmarks
         return totalLen;
     }
 
-    // --- 9.3: Peak working set — full scan of all tables in sequence ---
+    // --- 9.3: Peak working set â€” full scan of all tables in sequence ---
 
     [Benchmark]
     [BenchmarkCategory("PeakMemory")]

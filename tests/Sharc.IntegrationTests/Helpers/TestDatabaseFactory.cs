@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Microsoft.Data.Sqlite;
@@ -173,6 +173,27 @@ internal static class TestDatabaseFactory
                 cmd.CommandText = "INSERT INTO items (name, category) VALUES ($name, $cat)";
                 cmd.Parameters.AddWithValue("$name", $"Item{i}");
                 cmd.Parameters.AddWithValue("$cat", i % 2 == 0 ? "even" : "odd");
+                cmd.ExecuteNonQuery();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Creates a table with an integer-indexed column.
+    /// </summary>
+    public static byte[] CreateIndexedIntegerDatabase()
+    {
+        return CreateDatabase(conn =>
+        {
+            Execute(conn, "CREATE TABLE events (id INTEGER PRIMARY KEY, user_id INTEGER, event_type TEXT)");
+            Execute(conn, "CREATE INDEX idx_events_user_id ON events (user_id)");
+
+            for (int i = 1; i <= 50; i++)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "INSERT INTO events (user_id, event_type) VALUES ($uid, $type)";
+                cmd.Parameters.AddWithValue("$uid", (i % 5) + 1); // user_id 1-5
+                cmd.Parameters.AddWithValue("$type", i % 2 == 0 ? "click" : "view");
                 cmd.ExecuteNonQuery();
             }
         });

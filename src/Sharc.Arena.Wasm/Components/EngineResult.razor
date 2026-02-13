@@ -1,0 +1,116 @@
+@* Single engine result cell within a slide *@
+
+@if (Result?.NotSupported == true)
+{
+    <div class="engine-result not-supported">
+        <div class="engine-result-header">
+            <span class="engine-icon">@Engine.Icon</span>
+            <span class="engine-name" style="color: @Engine.Color">@Engine.Name</span>
+            <TierBadge Tier="@Engine.Tier" />
+        </div>
+        <span class="not-supported-badge">&#x2715; NOT SUPPORTED</span>
+        @if (Result.Note is not null)
+        {
+            <div class="engine-note muted">@Result.Note</div>
+        }
+    </div>
+}
+else if (Result is null)
+{
+    <div class="engine-result empty">
+        <span class="engine-placeholder">&mdash;</span>
+    </div>
+}
+else
+{
+    <div class="engine-result @(IsWinner ? "winner" : "")" style="@WinnerStyle">
+        <div class="engine-result-header">
+            <div class="engine-result-id">
+                <span class="engine-icon">@Engine.Icon</span>
+                <span class="engine-name" style="color: @Engine.Color">@Engine.Name</span>
+                <TierBadge Tier="@Engine.Tier" />
+            </div>
+            @if (IsWinner)
+            {
+                <span class="fastest-badge">&#x1F451; FASTEST</span>
+            }
+        </div>
+        <div class="engine-value @(IsWinner ? "winner-value" : "")" style="@(IsWinner ? $"color: {Engine.Color}" : "")">
+            @FormatValue(Result.Value, Unit)
+        </div>
+        <div class="engine-bar-row">
+            <div class="engine-bar-track">
+                <div class="engine-bar-fill @(Animate ? "animate" : "")"
+                     style="background: linear-gradient(90deg, @Engine.Color, @(Engine.Color)66); width: @BarWidth%">
+                </div>
+            </div>
+            @if (!IsWinner && WinnerValue.HasValue && Result.Value.HasValue)
+            {
+                var r = RatioText(WinnerValue.Value, Result.Value.Value);
+                if (!string.IsNullOrEmpty(r))
+                {
+                    <span class="engine-slower">@r slower</span>
+                }
+            }
+        </div>
+        <div class="engine-alloc">Alloc: @(Result.Allocation ?? "—")</div>
+        @if (Result.Note is not null)
+        {
+            <div class="engine-note @(IsWinner ? "winner-note" : "")">@Result.Note</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public required EngineDefinition Engine { get; set; }
+    [Parameter] public EngineBaseResult? Result { get; set; }
+    [Parameter] public required string Unit { get; set; }
+    [Parameter] public bool IsWinner { get; set; }
+    [Parameter] public double MaxValue { get; set; }
+    [Parameter] public double? WinnerValue { get; set; }
+    [Parameter] public bool Animate { get; set; }
+
+    private string WinnerStyle => IsWinner
+        ? $"background: linear-gradient(135deg, {Engine.Color}0D, {Engine.Color}04); border-color: {Engine.Color}35;"
+        : "";
+
+    private double BarWidth => MaxValue > 0 && Result?.Value > 0
+        ? Math.Min((Result.Value.Value / MaxValue) * 100, 100)
+        : 0;
+
+    private static string FormatValue(double? v, string unit)
+    {
+        if (v is null) return "\u2014";
+        var val = v.Value;
+
+        return unit switch
+        {
+            "KB" when val < 1      => "<1 KB",
+            "KB" when val >= 1024  => $"{val / 1024.0:F1} MB",
+            "KB"                   => $"{Math.Round(val)} KB",
+
+            "ns" when val >= 1e6   => $"{val / 1e6:F1} ms",
+            "ns" when val >= 1000  => $"{val / 1000.0:F1} \u03BCs",
+            "ns" when val < 10     => $"{val:F1} ns",
+            "ns"                   => $"{Math.Round(val)} ns",
+
+            "\u03BCs" when val >= 1000 => $"{val / 1000.0:F1} ms",
+            "\u03BCs" when val < 10    => $"{val:F1} \u03BCs",
+            "\u03BCs"                  => $"{Math.Round(val)} \u03BCs",
+
+            "ms" when val >= 1000  => $"{val / 1000.0:F1} s",
+            "ms" when val < 10     => $"{val:F1} ms",
+            "ms"                   => $"{Math.Round(val)} ms",
+
+            _ => val.ToString("G4"),
+        };
+    }
+
+    private static string RatioText(double fast, double slow)
+    {
+        if (fast <= 0) return "";
+        var r = slow / fast;
+        if (r < 1.1) return "";
+        return r >= 100 ? $"{Math.Round(r)}\u00D7" : $"{r:F1}\u00D7";
+    }
+}

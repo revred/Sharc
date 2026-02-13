@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -41,7 +41,7 @@ public class RecordDecoderInferenceTests
         var headerBytes = new List<byte>();
         var bodyBytes = new List<byte>();
 
-        // Placeholder for header_size — we'll write it after computing
+        // Placeholder for header_size â€” we'll write it after computing
         foreach (var (st, body) in columns)
         {
             var stBuf = new byte[9];
@@ -87,18 +87,18 @@ public class RecordDecoderInferenceTests
     }
 
     // --- Serial types 8 and 9: integer constants with ZERO body bytes ---
-    // These are a size optimization in SQLite — the entire value is in the type code.
+    // These are a size optimization in SQLite â€” the entire value is in the type code.
 
     [Fact]
     public void DecodeRecord_SerialType8_IntegerConstant0_ZeroBodyBytes()
     {
         // header: [header_size=2] [serial_type=8]
-        // body: (empty — type 8 has 0 content bytes)
+        // body: (empty â€” type 8 has 0 content bytes)
         byte[] record = [0x02, 0x08];
         var result = _decoder.DecodeRecord(record);
 
         Assert.Single(result);
-        Assert.Equal(ColumnStorageClass.Integer, result[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, result[0].StorageClass);
         Assert.Equal(0L, result[0].AsInt64());
     }
 
@@ -109,7 +109,7 @@ public class RecordDecoderInferenceTests
         var result = _decoder.DecodeRecord(record);
 
         Assert.Single(result);
-        Assert.Equal(ColumnStorageClass.Integer, result[0].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, result[0].StorageClass);
         Assert.Equal(1L, result[0].AsInt64());
     }
 
@@ -129,7 +129,7 @@ public class RecordDecoderInferenceTests
     }
 
     // --- Sign extension for 24-bit integers (serial type 3) ---
-    // 24-bit is not a standard CPU width — sign extension from bit 23 is required.
+    // 24-bit is not a standard CPU width â€” sign extension from bit 23 is required.
 
     [Fact]
     public void DecodeRecord_Int24_Positive_NoSignExtension()
@@ -212,8 +212,8 @@ public class RecordDecoderInferenceTests
     }
 
     // --- Large text/blob serial types ---
-    // Even serial ≥ 12 → BLOB of (N-12)/2 bytes
-    // Odd serial ≥ 13 → TEXT of (N-13)/2 bytes
+    // Even serial â‰¥ 12 â†’ BLOB of (N-12)/2 bytes
+    // Odd serial â‰¥ 13 â†’ TEXT of (N-13)/2 bytes
 
     [Fact]
     public void DecodeRecord_TextSerialType25_Has6ByteBody()
@@ -244,8 +244,8 @@ public class RecordDecoderInferenceTests
     public void DecodeRecord_100Columns_AllNull_DecodesCorrectly()
     {
         // 100 NULL columns: header has 100 serial type varints of value 0
-        int headerContentSize = 100; // 100 × 1 byte for serial type 0
-        int headerSize = 1 + headerContentSize; // 1 byte for header_size varint (value ≤ 127)
+        int headerContentSize = 100; // 100 Ã— 1 byte for serial type 0
+        int headerSize = 1 + headerContentSize; // 1 byte for header_size varint (value â‰¤ 127)
         var record = new byte[headerSize]; // no body for NULLs
         record[0] = (byte)headerSize;
         // serial types are all 0 (already zeroed)

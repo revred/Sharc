@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Sharc.Arena.Wasm</RootNamespace>
+    <AssemblyName>Sharc.Arena.Wasm</AssemblyName>
+    <!-- Blazor WASM specific -->
+    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
+    <!-- Arena is an app, not a library — disable doc generation, suppress non-library warnings -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA1305;CA1822</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Blazor WASM runtime -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+    <!-- DataGenerator uses Microsoft.Data.Sqlite for in-memory DB → byte[] export -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" VersionOverride="2.1.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tier 1: Sharc (pure C#) -->
+    <ProjectReference Include="..\Sharc\Sharc.csproj" />
+    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\Sharc.Graph\Sharc.Graph.csproj" />
+    <ProjectReference Include="..\Sharc.Graph.Surface\Sharc.Graph.Surface.csproj" />
+    <ProjectReference Include="..\Sharc.Crypto\Sharc.Crypto.csproj" />
+  </ItemGroup>
+
+</Project>

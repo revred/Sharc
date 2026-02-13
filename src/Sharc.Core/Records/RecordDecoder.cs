@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
@@ -157,15 +157,15 @@ internal sealed class RecordDecoder : IRecordDecoder
         return serialType switch
         {
             0 => ColumnValue.Null(),
-            1 => ColumnValue.Integer(1, (sbyte)data[0]),
-            2 => ColumnValue.Integer(2, BinaryPrimitives.ReadInt16BigEndian(data)),
+            1 => ColumnValue.FromInt64(1, (sbyte)data[0]),
+            2 => ColumnValue.FromInt64(2, BinaryPrimitives.ReadInt16BigEndian(data)),
             3 => DecodeInt24(data),
-            4 => ColumnValue.Integer(4, BinaryPrimitives.ReadInt32BigEndian(data)),
+            4 => ColumnValue.FromInt64(4, BinaryPrimitives.ReadInt32BigEndian(data)),
             5 => DecodeInt48(data),
-            6 => ColumnValue.Integer(6, BinaryPrimitives.ReadInt64BigEndian(data)),
-            7 => ColumnValue.Float(BinaryPrimitives.ReadDoubleBigEndian(data)),
-            8 => ColumnValue.Integer(8, 0),
-            9 => ColumnValue.Integer(9, 1),
+            6 => ColumnValue.FromInt64(6, BinaryPrimitives.ReadInt64BigEndian(data)),
+            7 => ColumnValue.FromDouble(BinaryPrimitives.ReadDoubleBigEndian(data)),
+            8 => ColumnValue.FromInt64(8, 0),
+            9 => ColumnValue.FromInt64(9, 1),
             _ => DecodeVariableLength(data, serialType)
         };
     }
@@ -177,7 +177,7 @@ internal sealed class RecordDecoder : IRecordDecoder
         // Sign-extend from 24-bit
         if ((raw & 0x800000) != 0)
             raw |= unchecked((int)0xFF000000);
-        return ColumnValue.Integer(3, raw);
+        return ColumnValue.FromInt64(3, raw);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -189,7 +189,7 @@ internal sealed class RecordDecoder : IRecordDecoder
         // Sign-extend from 48-bit
         if ((raw & 0x800000000000L) != 0)
             raw |= unchecked((long)0xFFFF000000000000L);
-        return ColumnValue.Integer(5, raw);
+        return ColumnValue.FromInt64(5, raw);
     }
 
     private static ColumnValue DecodeVariableLength(ReadOnlySpan<byte> data, long serialType)

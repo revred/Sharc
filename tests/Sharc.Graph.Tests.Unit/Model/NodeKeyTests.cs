@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                         |
+  Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -106,5 +106,17 @@ public class NodeKeyTests
         {
             // Expected
         }
+    }
+
+    [TestMethod]
+    public void ToAscii_NonAsciiValue_ReturnsNumericString()
+    {
+        // Value that contains non-printable ASCII (e.g., 0x01)
+        var key = new NodeKey(1); // 00 00 00 00 00 00 00 01
+        Assert.AreEqual("1", key.ToAscii());
+
+        // Value that would be garbage ASCII
+        var key2 = new NodeKey(0x0102030405060708L);
+        Assert.AreEqual(0x0102030405060708L.ToString(System.Globalization.CultureInfo.InvariantCulture), key2.ToAscii());
     }
 }

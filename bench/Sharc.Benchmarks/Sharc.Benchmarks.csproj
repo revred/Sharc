@@ -3,8 +3,8 @@
     <RootNamespace>Sharc.Benchmarks</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.4" />
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />

@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.BTree;
@@ -29,8 +29,8 @@ namespace Sharc.Tests.DataStructures;
 public class CellParserInferenceTests
 {
     // --- Overflow threshold boundary: X = U - 35 ---
-    // When payload ≤ X, all bytes are inline.
-    // When payload > X: K = M + (P-M)%(U-4); if K ≤ X use K, else use M.
+    // When payload â‰¤ X, all bytes are inline.
+    // When payload > X: K = M + (P-M)%(U-4); if K â‰¤ X use K, else use M.
     // M = ((U-12)*32/255) - 23
 
     [Fact]
@@ -46,7 +46,7 @@ public class CellParserInferenceTests
     public void CalculateInlinePayloadSize_OneOverThreshold_ReturnsM()
     {
         // SQLite btree.c: K = M + (P-M) % (U-4); if K <= X use K, else use M
-        // P=X+1=4062: K = 489 + (4062-489) % 4092 = 489 + 3573 = 4062; 4062 > 4061 → M = 489
+        // P=X+1=4062: K = 489 + (4062-489) % 4092 = 489 + 3573 = 4062; 4062 > 4061 â†’ M = 489
         int U = 4096;
         int M = ((U - 12) * 32 / 255) - 23; // 489
 
@@ -58,7 +58,7 @@ public class CellParserInferenceTests
     public void CalculateInlinePayloadSize_MassivePayload_StillReturnsM()
     {
         // SQLite btree.c: K = M + (P-M) % (U-4); if K <= X use K, else use M
-        // P=1_000_000_000: K = 489 + 999999511 % 4092 = 489 + 643 = 1132; 1132 <= 4061 → 1132
+        // P=1_000_000_000: K = 489 + 999999511 % 4092 = 489 + 643 = 1132; 1132 <= 4061 â†’ 1132
         int U = 4096;
         int M = ((U - 12) * 32 / 255) - 23;
         int P = 1_000_000_000;
@@ -110,7 +110,7 @@ public class CellParserInferenceTests
     public void CalculateInlinePayloadSize_OverThreshold_ReturnsM(int pageSize)
     {
         // SQLite btree.c: K = M + (P-M) % (U-4); if K <= X use K, else use M
-        // For P = X+1, K = M + (X+1-M)%(U-4) = X+1; X+1 > X → falls back to M
+        // For P = X+1, K = M + (X+1-M)%(U-4) = X+1; X+1 > X â†’ falls back to M
         int M = ((pageSize - 12) * 32 / 255) - 23;
 
         int result = CellParser.CalculateInlinePayloadSize(pageSize - 35 + 1, pageSize);

@@ -1,4 +1,4 @@
-﻿/*-------------------------------------------------------------------------------------------------!
+/*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 
   A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message Ã¢â‚¬â€ or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License Ã¢â‚¬â€ free for personal and commercial use.                         |
+  Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Graph.Schema;
@@ -59,6 +59,11 @@ public sealed class GenericSchemaAdapter : ISchemaAdapter
     public string? NodeUpdatedColumn { get; set; }
 
     /// <inheritdoc/>
+    public string? NodeAliasColumn { get; set; }
+    /// <inheritdoc/>
+    public string? NodeTokensColumn { get; set; }
+
+    /// <inheritdoc/>
     public string EdgeIdColumn { get; set; } = "Id";
     
     /// <inheritdoc/>
@@ -80,6 +85,8 @@ public sealed class GenericSchemaAdapter : ISchemaAdapter
     public string? EdgeLvnColumn { get; set; }
     /// <inheritdoc/>
     public string? EdgeSyncColumn { get; set; }
+    /// <inheritdoc/>
+    public string? EdgeWeightColumn { get; set; }
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<int, string> TypeNames { get; set; } = new Dictionary<int, string>();

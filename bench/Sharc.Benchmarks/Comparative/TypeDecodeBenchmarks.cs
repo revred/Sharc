@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -24,7 +24,7 @@ namespace Sharc.Benchmarks.Comparative;
 /// <summary>
 /// BenchmarkSpec Category 6: Data Type Decoding.
 /// Isolates decode cost from seek cost. Tests per-type overhead:
-/// integers, doubles, strings, BLOBs, NULLs — Sharc vs SQLite.
+/// integers, doubles, strings, BLOBs, NULLs â€” Sharc vs SQLite.
 /// </summary>
 [BenchmarkCategory("Comparative", "TypeDecode")]
 [MemoryDiagnoser]

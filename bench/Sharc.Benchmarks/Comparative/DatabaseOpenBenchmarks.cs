@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -25,8 +25,8 @@ namespace Sharc.Benchmarks.Comparative;
 
 /// <summary>
 /// Compares database open/validate cost:
-///   Sharc: File read (100 bytes) + DatabaseHeader.Parse — stackalloc, 0 heap bytes
-///   SQLite: new SqliteConnection().Open() — native interop, connection pooling objects, WAL check
+///   Sharc: File read (100 bytes) + DatabaseHeader.Parse â€” stackalloc, 0 heap bytes
+///   SQLite: new SqliteConnection().Open() â€” native interop, connection pooling objects, WAL check
 /// Note: SharcDatabase.Open is not yet implemented. This benchmarks the lower bound for Sharc.
 /// MemoryDiagnoser shows the massive allocation gap: Sharc=0B vs SQLite=thousands of bytes.
 /// </summary>
@@ -112,7 +112,7 @@ public class DatabaseOpenBenchmarks
     // --- Sharc: memory-mapped file open (near-instant, zero-copy) ---
 
     /// <summary>
-    /// Sharc: open via memory-mapped file. OS handles paging — only touched pages
+    /// Sharc: open via memory-mapped file. OS handles paging â€” only touched pages
     /// are loaded. Open cost is creating the mapping, not reading the file.
     /// </summary>
     [Benchmark]
@@ -177,11 +177,11 @@ public class DatabaseOpenBenchmarks
         return sum;
     }
 
-    // --- Sharc: FilePageSource (RandomAccess — lightweight file handle) ---
+    // --- Sharc: FilePageSource (RandomAccess â€” lightweight file handle) ---
 
     /// <summary>
     /// Sharc: open via File.OpenHandle + RandomAccess. Only reads 100-byte header.
-    /// No internal buffering, no async state machine — minimal OS overhead.
+    /// No internal buffering, no async state machine â€” minimal OS overhead.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("Sharc", "File")]

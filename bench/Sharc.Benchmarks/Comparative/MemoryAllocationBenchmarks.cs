@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
@@ -98,7 +98,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: MetadataRead — Single metadata query allocation comparison
+    // Category: MetadataRead â€” Single metadata query allocation comparison
     // ========================================================================
 
     /// <summary>Sharc: parse header from bytes. Expected: 0 B allocated.</summary>
@@ -119,7 +119,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: OpenClose — Connection lifecycle allocation comparison
+    // Category: OpenClose â€” Connection lifecycle allocation comparison
     // ========================================================================
 
     /// <summary>Sharc: stackalloc read + struct parse. Expected: 0 B heap allocated.</summary>
@@ -144,12 +144,12 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: RowRead — Per-row allocation comparison (small result set)
+    // Category: RowRead â€” Per-row allocation comparison (small result set)
     // ========================================================================
 
     /// <summary>
     /// Sharc: 5 ColumnValue structs created inline. Integer and Float = 0 B.
-    /// Only Text/Blob reference existing byte[] — no new allocations.
+    /// Only Text/Blob reference existing byte[] â€” no new allocations.
     /// </summary>
     [Benchmark]
     [BenchmarkCategory("RowRead")]
@@ -158,11 +158,11 @@ public class MemoryAllocationBenchmarks
         long sum = 0;
         for (int i = 0; i < 5; i++)
         {
-            var id = ColumnValue.Integer(4, i + 1);
+            var id = ColumnValue.FromInt64(4, i + 1);
             var name = ColumnValue.Text(59, _textBytes);
             var email = ColumnValue.Text(59, _textBytes);
-            var age = ColumnValue.Integer(4, 25 + i);
-            var balance = ColumnValue.Float(1234.56 + i);
+            var age = ColumnValue.FromInt64(4, 25 + i);
+            var balance = ColumnValue.FromDouble(1234.56 + i);
 
             sum += id.AsInt64() + age.AsInt64() + (long)balance.AsDouble();
         }
@@ -191,7 +191,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: IntegerScan — Integer-only scan (best case for both)
+    // Category: IntegerScan â€” Integer-only scan (best case for both)
     // ========================================================================
 
     /// <summary>
@@ -205,8 +205,8 @@ public class MemoryAllocationBenchmarks
         long sum = 0;
         for (int i = 0; i < 100; i++)
         {
-            var id = ColumnValue.Integer(4, i);
-            var age = ColumnValue.Integer(4, 20 + (i % 60));
+            var id = ColumnValue.FromInt64(4, i);
+            var age = ColumnValue.FromInt64(4, 20 + (i % 60));
             sum += id.AsInt64() + age.AsInt64();
         }
         return sum;
@@ -231,7 +231,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: PrimitiveDecode — Varint and serial type codec allocation
+    // Category: PrimitiveDecode â€” Varint and serial type codec allocation
     // ========================================================================
 
     /// <summary>
@@ -271,7 +271,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: BTreeParse — Page parsing allocation comparison
+    // Category: BTreeParse â€” Page parsing allocation comparison
     // ========================================================================
 
     /// <summary>
@@ -339,7 +339,7 @@ public class MemoryAllocationBenchmarks
     }
 
     // ========================================================================
-    // Category: PageTransform — Transform pipeline allocation
+    // Category: PageTransform â€” Transform pipeline allocation
     // ========================================================================
 
     /// <summary>

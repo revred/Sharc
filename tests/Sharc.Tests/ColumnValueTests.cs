@@ -9,10 +9,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
+  Subtle conversations often begin with a single message — or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
+  Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
@@ -36,24 +36,24 @@ public class ColumnValueTests
     [Fact]
     public void Integer_StoresAndRetrievesValue()
     {
-        var val = ColumnValue.Integer(4, 42);
+        var val = ColumnValue.FromInt64(4, 42);
         Assert.False(val.IsNull);
-        Assert.Equal(ColumnStorageClass.Integer, val.StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, val.StorageClass);
         Assert.Equal(42L, val.AsInt64());
     }
 
     [Fact]
     public void Integer_NegativeValue_Works()
     {
-        var val = ColumnValue.Integer(6, -9999);
+        var val = ColumnValue.FromInt64(6, -9999);
         Assert.Equal(-9999L, val.AsInt64());
     }
 
     [Fact]
     public void Float_StoresAndRetrievesValue()
     {
-        var val = ColumnValue.Float(3.14159);
-        Assert.Equal(ColumnStorageClass.Float, val.StorageClass);
+        var val = ColumnValue.FromDouble(3.14159);
+        Assert.Equal(ColumnStorageClass.Real, val.StorageClass);
         Assert.Equal(3.14159, val.AsDouble(), 5);
     }
 
@@ -78,7 +78,7 @@ public class ColumnValueTests
     [Fact]
     public void Integer_ConstantZero_SerialType8()
     {
-        var val = ColumnValue.Integer(8, 0);
+        var val = ColumnValue.FromInt64(8, 0);
         Assert.Equal(8L, val.SerialType);
         Assert.Equal(0L, val.AsInt64());
     }
@@ -86,7 +86,7 @@ public class ColumnValueTests
     [Fact]
     public void Integer_ConstantOne_SerialType9()
     {
-        var val = ColumnValue.Integer(9, 1);
+        var val = ColumnValue.FromInt64(9, 1);
         Assert.Equal(9L, val.SerialType);
         Assert.Equal(1L, val.AsInt64());
     }
