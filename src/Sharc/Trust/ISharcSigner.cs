@@ -5,7 +5,7 @@ namespace Sharc.Trust;
 /// <summary>
 /// Provides cryptographic signatures for ledger entries.
 /// </summary>
-public interface ISharcSigner
+public interface ISharcSigner : IDisposable
 {
     /// <summary>
     /// Gets the unique Agent ID associated with this signer.

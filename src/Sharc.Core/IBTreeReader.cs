@@ -49,6 +49,12 @@ public interface IBTreeCursor : IDisposable
     bool MoveNext();
 
     /// <summary>
+    /// Moves the cursor to the last cell in the table (highest rowid).
+    /// </summary>
+    /// <returns>True if the table is not empty.</returns>
+    bool MoveLast();
+
+    /// <summary>
     /// Repositions the cursor to the specified rowid (or the first rowid >= key).
     /// </summary>
     /// <param name="rowId">The rowid to seek to.</param>

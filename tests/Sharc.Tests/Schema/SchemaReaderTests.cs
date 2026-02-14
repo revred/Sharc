@@ -287,6 +287,13 @@ public class SchemaReaderTests
             return _index < _rows.Length;
         }
 
+        public bool MoveLast()
+        {
+            if (_rows.Length == 0) return false;
+            _index = _rows.Length - 1;
+            return true;
+        }
+
         public bool Seek(long rowId) => false;
         public long RowId => _index;
         public ReadOnlySpan<byte> Payload

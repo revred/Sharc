@@ -16,6 +16,7 @@
 --------------------------------------------------------------------------------------------------*/
 
 using System.Text;
+using System.Buffers.Binary;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
@@ -166,6 +167,142 @@ public sealed class SharcDatabase : IDisposable
     /// </summary>
     private SharcSchema GetSchema() =>
         _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
+
+    /// <summary>
+    /// Creates a new, empty Sharc database valid for both engine and trust usage.
+    /// Includes system tables: _sharc_ledger, _sharc_agents.
+    /// </summary>
+    /// <param name="path">The file path to create.</param>
+    /// <returns>An open database instance with Write mode enabled.</returns>
+    public static SharcDatabase Create(string path)
+    {
+        if (File.Exists(path))
+            throw new InvalidOperationException($"File already exists: {path}");
+
+        int pageSize = 4096;
+        var data = new byte[pageSize * 5]; 
+        
+        // 1. Database Header
+        // PageSize=4096, WriteVersion=1, ReadVersion=1, Reserved=0, MaxEmbed=1, FileChange=1, Schema=4
+        var dbHeader = new DatabaseHeader(pageSize, 1, 1, 0, 1, 4, 0, 0, 1, 4, 1, 0, 0, 3042000);
+        DatabaseHeader.Write(data, dbHeader);
+        
+        // 2. Schema Table Root Page (Page 1 content, after 100-byte header)
+        // Root Page is always Page 1. It is a LeafTable B-Tree.
+        
+        // Cells for system tables:
+        // _sharc_ledger: RootPage=2
+        // _sharc_agents: RootPage=3
+        // _sharc_scores: RootPage=4
+        
+        var ledgerCols = new[] { 
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_ledger")),
+            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_ledger")),
+            ColumnValue.FromInt64(3, 2), // RootPage = 2
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger(SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
+        };
+        
+        var agentsCols = new[] {
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_agents")),
+            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_agents")),
+            ColumnValue.FromInt64(3, 3), // RootPage = 3
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents(AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB)"))
+        };
+
+        var scoresCols = new[] {
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.FromInt64(3, 4), // RootPage = 4
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores(AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, LastRatingCount INTEGER)"))
+        };
+
+        var auditCols = new[] {
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_audit")),
+            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_audit")),
+            ColumnValue.FromInt64(3, 5), // RootPage = 5
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_audit(EventId INTEGER PRIMARY KEY, Timestamp INTEGER, EventType INTEGER, AgentId TEXT, Details TEXT, PreviousHash BLOB, Hash BLOB)"))
+        };
+
+        // Encode records
+        int r1Size = RecordEncoder.ComputeEncodedSize(ledgerCols);
+        byte[] r1 = new byte[r1Size];
+        RecordEncoder.EncodeRecord(ledgerCols, r1);
+        
+        int r2Size = RecordEncoder.ComputeEncodedSize(agentsCols);
+        byte[] r2 = new byte[r2Size];
+        RecordEncoder.EncodeRecord(agentsCols, r2);
+
+        int r3Size = RecordEncoder.ComputeEncodedSize(scoresCols);
+        byte[] r3 = new byte[r3Size];
+        RecordEncoder.EncodeRecord(scoresCols, r3);
+
+        int r4Size = RecordEncoder.ComputeEncodedSize(auditCols);
+        byte[] r4 = new byte[r4Size];
+        RecordEncoder.EncodeRecord(auditCols, r4);
+
+        // Build Page 1 (Schema)
+        // Contains 4 cells.
+        // NOTE: Cells are built from end of page backwards.
+        
+        // Cell 1 (RowId 1) - Ledger
+        Span<byte> cell1 = stackalloc byte[r1Size + 10];
+        int l1 = CellBuilder.BuildTableLeafCell(1, r1, cell1, pageSize);
+        ushort o1 = (ushort)(pageSize - l1);
+        cell1[..l1].CopyTo(data.AsSpan(o1));
+
+        // Cell 2 (RowId 2) - Agents
+        Span<byte> cell2 = stackalloc byte[r2Size + 10];
+        int l2 = CellBuilder.BuildTableLeafCell(2, r2, cell2, pageSize);
+        ushort o2 = (ushort)(o1 - l2);
+        cell2[..l2].CopyTo(data.AsSpan(o2));
+
+        // Cell 3 (RowId 3) - Scores
+        Span<byte> cell3 = stackalloc byte[r3Size + 10];
+        int l3 = CellBuilder.BuildTableLeafCell(3, r3, cell3, pageSize);
+        ushort o3 = (ushort)(o2 - l3);
+        cell3[..l3].CopyTo(data.AsSpan(o3));
+
+        // Cell 4 (RowId 4) - Audit
+        Span<byte> cell4 = stackalloc byte[r4Size + 10];
+        int l4 = CellBuilder.BuildTableLeafCell(4, r4, cell4, pageSize);
+        ushort o4 = (ushort)(o3 - l4);
+        cell4[..l4].CopyTo(data.AsSpan(o4));
+
+        // Write Page 1 Header
+        // Type=LeafTable(0x0D), FreeBlock=0, CellCount=4, CellContentStart=o4, Frag=0
+        var p1Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 4, o4, 0, 0);
+        BTreePageHeader.Write(data.AsSpan(100), p1Header);
+
+        // Write Cell Pointers (4 cells, 2 bytes each = 8 bytes) directly after header (100 + 8 = 108)
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(108), o1); // Cell 1 (RowId 1)
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(110), o2); // Cell 2 (RowId 2)
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(112), o3); // Cell 3 (RowId 3)
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(114), o4); // Cell 4 (RowId 4)
+
+        // 3. Page 2 (Ledger Root) - Empty Leaf
+        var p2Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+        BTreePageHeader.Write(data.AsSpan(pageSize), p2Header);
+
+        // 4. Page 3 (Agents Root) - Empty Leaf
+        var p3Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+        BTreePageHeader.Write(data.AsSpan(pageSize * 2), p3Header);
+
+        // 5. Page 4 (Scores Root) - Empty Leaf
+        var p4Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+        BTreePageHeader.Write(data.AsSpan(pageSize * 3), p4Header);
+
+        // 6. Page 5 (Audit Root) - Empty Leaf
+        var p5Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+        BTreePageHeader.Write(data.AsSpan(pageSize * 4), p5Header);
+
+        File.WriteAllBytes(path, data);
+        
+        return Open(path, new SharcOpenOptions { Writable = true });
+    }
 
     /// <summary>
     /// Opens a SQLite database from a file path.
