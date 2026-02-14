@@ -27,22 +27,44 @@ public sealed class CachedPageSource : IWritablePageSource
 {
     private readonly IPageSource _inner;
     private readonly int _capacity;
-    private readonly Dictionary<uint, LinkedListNode<CacheEntry>> _lookup;
-    private readonly LinkedList<CacheEntry> _lru;
-    private readonly object _syncRoot = new();
     private bool _disposed;
 
-    /// <inheritdoc />
-    public int PageSize => _inner.PageSize;
-
-    /// <inheritdoc />
-    public int PageCount => _inner.PageCount;
+    // Zero-allocation LRU Implementation
+    // We use a fixed-size array of entries and intrusive double-linked list using item indices.
+    // _entries[i] holds the data and metadata for slot i.
+    // _pageLookup maps PageNumber -> SlotIndex.
+    
+    private readonly CacheSlot[] _slots;
+    
+    // Intrusive list pointers (indices)
+    private readonly int[] _prev;
+    private readonly int[] _next;
+    
+    // Dictionary for fast lookup. 
+    // Note: Dictionary<uint, int> does not allocate on Add/Remove if capacity is sufficient 
+    // and we reuse the same keys (page numbers). Effectively it stabilizes.
+    // For absolute zero-alloc, we could use a specialized IntMap, but standard Dictionary is usually fine
+    // after warm-up. Given we only store int, it's efficient.
+    private readonly Dictionary<uint, int> _lookup;
+    
+    // List head/tail identifiers
+    private int _head;
+    private int _tail;
+    private int _count;
+    private readonly Stack<int> _freeSlots; // Stores indices of unused slots
+    private readonly object _syncRoot = new();
 
     /// <summary>Number of cache hits since creation.</summary>
     public int CacheHitCount { get; private set; }
 
     /// <summary>Number of cache misses since creation.</summary>
     public int CacheMissCount { get; private set; }
+
+    /// <inheritdoc />
+    public int PageSize => _inner.PageSize;
+
+    /// <inheritdoc />
+    public int PageCount => _inner.PageCount;
 
     /// <summary>
     /// Wraps an inner page source with an LRU cache of the given capacity.
@@ -56,8 +78,32 @@ public sealed class CachedPageSource : IWritablePageSource
 
         _inner = inner;
         _capacity = capacity;
-        _lookup = new Dictionary<uint, LinkedListNode<CacheEntry>>(Math.Min(capacity, 256));
-        _lru = new LinkedList<CacheEntry>();
+        
+        if (capacity > 0)
+        {
+            _slots = new CacheSlot[capacity];
+            _prev = new int[capacity];
+            _next = new int[capacity];
+            _lookup = new Dictionary<uint, int>(capacity);
+            _freeSlots = new Stack<int>(capacity);
+            
+            for (int i = 0; i < capacity; i++)
+            {
+                _slots[i].Data = ArrayPool<byte>.Shared.Rent(inner.PageSize);
+                _freeSlots.Push(i);
+            }
+            
+            _head = -1;
+            _tail = -1;
+        }
+        else
+        {
+            _slots = Array.Empty<CacheSlot>();
+            _prev = Array.Empty<int>();
+            _next = Array.Empty<int>();
+            _lookup = new Dictionary<uint, int>();
+            _freeSlots = new Stack<int>();
+        }
     }
 
     /// <inheritdoc />
@@ -70,34 +116,43 @@ public sealed class CachedPageSource : IWritablePageSource
 
         lock (_syncRoot)
         {
-            if (_lookup.TryGetValue(pageNumber, out var node))
+            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
             {
-                // Cache hit â€” move to front
-                _lru.Remove(node);
-                _lru.AddFirst(node);
+                // Hit
+                MoveToHead(slotIndex);
                 CacheHitCount++;
-                return node.Value.Data.AsSpan(0, PageSize);
+                return _slots[slotIndex].Data.AsSpan(0, PageSize);
             }
 
-            // Cache miss â€” load from inner source
+            // Miss
             CacheMissCount++;
-            var buffer = ArrayPool<byte>.Shared.Rent(PageSize);
-            _inner.ReadPage(pageNumber, buffer);
-
-            var entry = new CacheEntry(pageNumber, buffer);
-            var newNode = _lru.AddFirst(entry);
-            _lookup[pageNumber] = newNode;
-
-            // Evict LRU if over capacity
-            if (_lru.Count > _capacity)
+            int slot;
+            
+            if (_count < _capacity)
             {
-                var victim = _lru.Last!;
-                _lookup.Remove(victim.Value.PageNumber);
-                ArrayPool<byte>.Shared.Return(victim.Value.Data);
-                _lru.RemoveLast();
+                // Use free slot
+                slot = _freeSlots.Pop();
+                _count++;
+            }
+            else
+            {
+                // Evict tail (LRU)
+                slot = _tail;
+                var victimPage = _slots[slot].PageNumber;
+                _lookup.Remove(victimPage);
+                RemoveNode(slot);
+                // Note: We don't push to free slots because we immediately reuse it
             }
 
-            return buffer.AsSpan(0, PageSize);
+            // Load data
+            _inner.ReadPage(pageNumber, _slots[slot].Data);
+            _slots[slot].PageNumber = pageNumber;
+            
+            // Add to head and lookup
+            AddFirst(slot);
+            _lookup[pageNumber] = slot;
+            
+            return _slots[slot].Data.AsSpan(0, PageSize);
         }
     }
 
@@ -115,13 +170,14 @@ public sealed class CachedPageSource : IWritablePageSource
 
         lock (_syncRoot)
         {
-            // Update cache if page exists
-            if (_lookup.TryGetValue(pageNumber, out var node))
+            // Update cache if present
+            if (_capacity > 0 && _lookup.TryGetValue(pageNumber, out int slot))
             {
-                source.CopyTo(node.Value.Data);
+                source.CopyTo(_slots[slot].Data);
+                MoveToHead(slot); 
             }
 
-            // Write through to inner source if it supports writes
+            // Write through
             if (_inner is IWritablePageSource writable)
             {
                 writable.WritePage(pageNumber, source);
@@ -136,11 +192,8 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <inheritdoc />
     public void Flush()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_inner is IWritablePageSource writable)
-        {
             writable.Flush();
-        }
     }
 
     /// <inheritdoc />
@@ -149,21 +202,66 @@ public sealed class CachedPageSource : IWritablePageSource
         if (_disposed) return;
         _disposed = true;
 
-        lock (_syncRoot)
+        if (_capacity > 0)
         {
-            foreach (var node in _lru)
-                ArrayPool<byte>.Shared.Return(node.Data);
-
-            _lru.Clear();
-            _lookup.Clear();
+            for (int i = 0; i < _slots.Length; i++)
+            {
+                if (_slots[i].Data != null)
+                {
+                    ArrayPool<byte>.Shared.Return(_slots[i].Data);
+                    _slots[i].Data = null!;
+                }
+            }
         }
-
+        
         _inner.Dispose();
     }
 
-    private readonly struct CacheEntry(uint pageNumber, byte[] data)
+    // --- Linked List Helpers ---
+
+    private void MoveToHead(int slot)
     {
-        public uint PageNumber { get; } = pageNumber;
-        public byte[] Data { get; } = data;
+        if (slot == _head) return;
+        RemoveNode(slot);
+        AddFirst(slot);
+    }
+
+    private void AddFirst(int slot)
+    {
+        if (_head == -1)
+        {
+            _head = slot;
+            _tail = slot;
+            _prev[slot] = -1;
+            _next[slot] = -1;
+        }
+        else
+        {
+            _prev[slot] = -1;
+            _next[slot] = _head;
+            _prev[_head] = slot;
+            _head = slot;
+        }
+    }
+
+    private void RemoveNode(int slot)
+    {
+        int p = _prev[slot];
+        int n = _next[slot];
+
+        if (p != -1) _next[p] = n;
+        else _head = n;
+
+        if (n != -1) _prev[n] = p;
+        else _tail = p;
+        
+        _prev[slot] = -1;
+        _next[slot] = -1;
+    }
+
+    private struct CacheSlot
+    {
+        public uint PageNumber;
+        public byte[] Data;
     }
 }

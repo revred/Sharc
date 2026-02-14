@@ -344,6 +344,13 @@ public class ConceptStoreTests
             return false;
         }
 
+        public bool MoveLast()
+        {
+            if (_rows.Count == 0) return false;
+            _index = _rows.Count - 1;
+            return true;
+        }
+
         public void Dispose() { }
     }
 

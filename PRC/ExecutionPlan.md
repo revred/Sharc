@@ -14,6 +14,10 @@
 | 8 | WAL Read Support | Read WAL-mode databases | Correctly merge WAL frames with main DB | **COMPLETE** |
 | 9 | Encryption | AES-256-GCM page-level crypto | Open and read encrypted DB | **COMPLETE** |
 | 10 | Benchmarks | BenchmarkDotNet suite, allocation audit | Comparative suite per BenchmarkSpec.md | **COMPLETE** |
+| 11 | Graph Storage | ConceptStore, RelationStore, SeekFirst | Traverse 5K-node graph from B-tree | **COMPLETE** |
+| 12 | Browser Arena | Blazor WASM 3-way benchmark | 16 live benchmarks, Sharc wins all | **COMPLETE** |
+| 13 | Write Engine | BTreeMutator, SharcWriter, ACID | INSERT with B-tree splits, transactions | **IN PROGRESS** |
+| 14 | Agent Trust | AgentRegistry, LedgerManager, Reputation | ECDSA attestation, hash-chain, co-signatures | **COMPLETE** |
 
 ## Detailed Milestone Breakdown
 
@@ -107,6 +111,11 @@ This is the **minimum viable product** milestone.
                                                      [8: WAL]
                                                      [9: Encryption]
                                                      [10: Benchmarks]
+                                                          ↓
+                                                     [11: Graph]
+                                                     [12: Arena]
+                                                     [13: Write Engine]
+                                                     [14: Agent Trust]
 ```
 
 ## Time Estimates (Working Days)
@@ -123,3 +132,7 @@ This is the **minimum viable product** milestone.
 | 8 | 3d | 18d |
 | 9 | 3d | 21d |
 | 10 | 2d | 23d |
+| 11 | 5d | 28d |
+| 12 | 4d | 32d |
+| 13 | 6d | 38d |
+| 14 | 5d | 43d |
