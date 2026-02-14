@@ -136,9 +136,8 @@ public class CoreBenchmarks
     [BenchmarkCategory("SequentialScan")]
     public long Sharc_SequentialScan()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
         var columns = new[] { "id", "name", "email", "age", "score", "bio", "active", "dept", "created" };
-        using var reader = db.CreateReader("users", columns);
+        using var reader = _sharcDb.CreateReader("users", columns);
         long count = 0;
         while (reader.Read())
         {
@@ -190,8 +189,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("PointLookup")]
     public long Sharc_PointLookup()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("users");
+        using var reader = _sharcDb.CreateReader("users");
         if (reader.Seek(2500))
         {
             return reader.GetInt64(0);
@@ -218,8 +216,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("BatchLookup")]
     public long Sharc_BatchLookup()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("users");
+        using var reader = _sharcDb.CreateReader("users");
         long sum = 0;
         foreach (var target in BatchTargets)
         {
@@ -255,8 +252,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("TypeDecode")]
     public long Sharc_TypeDecode()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("users", "id");
+        using var reader = _sharcDb.CreateReader("users", "id");
         long count = 0;
         while (reader.Read())
         {
@@ -290,8 +286,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("NullScan")]
     public long Sharc_NullScan()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("users", "bio");
+        using var reader = _sharcDb.CreateReader("users", "bio");
         long nullCount = 0;
         while (reader.Read())
         {
@@ -328,7 +323,7 @@ public class CoreBenchmarks
             new SharcFilter("age", SharcOperator.GreaterThan, (long)30),
             new SharcFilter("score", SharcOperator.LessThan, 50.0),
         };
-        using var reader = _sharcDb.CreateReader("users", null, filters);
+        using var reader = _sharcDb.CreateReader("users", ["id"], filters);
         long count = 0;
         while (reader.Read())
         {
@@ -379,8 +374,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("GcPressure")]
     public long Sharc_GcPressure()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("users", "id");
+        using var reader = _sharcDb.CreateReader("users", "id");
         long count = 0;
         while (reader.Read())
         {

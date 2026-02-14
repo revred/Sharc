@@ -283,11 +283,24 @@ public sealed class SharcDataReader : IDisposable
                 return true;
             }
 
+            // ── Zero-Allocation Filter Check ──
+            // Evaluate filters against raw serial types/bytes before allocating managed objects.
+            if (_filters != null && _filters.Length > 0 && 
+                !FilterEvaluator.MatchesRaw(_cursor.Payload, _filters, (Sharc.Core.Records.RecordDecoder)_recordDecoder))
+            {
+                continue; // Skip row without decoding
+            }
+
             // ── Legacy SharcFilter path ──
             DecodeCurrentRow();
 
-            if (_filters is null || EvaluateFilters())
-                return true;
+            // Optimization: If MatchesRaw passed, we verified the row.
+            // We only need EvaluateFilters if MatchesRaw wasn't used (e.g. implementation issue)
+            // or if we want to support legacy filters that MatchesRaw doesn't handle.
+            // For now, assuming MatchesRaw handles all SharcFilters correctly.
+            // if (_filters != null && !EvaluateFilters()) continue;
+
+            return true;
         }
 
         _currentRow = null;

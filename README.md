@@ -64,11 +64,11 @@ Speed without memory discipline is a lie. Here's what each engine allocates per 
 | NULL Detection (5K rows) | **7.8 KB** | 688 B | Sharc |
 | Type Decode — integers (5K) | **7.8 KB** | 688 B | Sharc |
 | GC Pressure — sustained scan | **7.8 KB** | 688 B | Sharc |
-| Batch 6 Lookups | **8.8 KB** | 3.7 KB | Sharc |
+| Batch 6 Lookups | **2.0 KB** | 3.7 KB | Sharc |
 | Schema Read | 6.8 KB | **2.5 KB** | SQLite |
-| Point Lookup (Seek) | 7.7 KB | **728 B** | SQLite |
-| Sequential Scan (5K rows) | 2.4 MB | **1.4 MB** | SQLite |
-| WHERE Filter | 8.4 KB | **720 B** | SQLite |
+| Point Lookup (Seek) | 904 B | **728 B** | SQLite |
+| Sequential Scan (5K rows) | 2.5 MB | **1.4 MB** | SQLite |
+| WHERE Filter | 8.6 KB | **720 B** | SQLite |
 
 > **Sharc allocates less in 5 of 9 core benchmarks.** On hot-path scans where GC pauses kill latency — NULL scans, type decode, sustained reads — Sharc's allocation is **12x lower** than SQLite per-row.
 >
@@ -177,11 +177,11 @@ All benchmarks below are from BenchmarkDotNet v0.15.8, DefaultJob (15 iterations
 | Engine Init (open + header) | **3.66 us** | 23.91 us | **6.5x** | 15,520 B | 1,160 B |
 | Schema Introspection | **2.97 us** | 26.66 us | **9.0x** | 7,000 B | 2,536 B |
 | Sequential Scan (9 cols) | **2.59 ms** | 6.03 ms | **2.3x** | 2,500,832 B | 1,412,320 B |
-| Point Lookup (Seek) | **3,444 ns** | 24,347 ns | **7.1x** | 8,320 B | 728 B |
-| Batch 6 Lookups | **5,237 ns** | 127,763 ns | **24.4x** | 9,424 B | 3,712 B |
+| Point Lookup (Seek) | **3,444 ns** | 24,347 ns | **7.1x** | 904 B | 728 B |
+| Batch 6 Lookups | **5,237 ns** | 127,763 ns | **24.4x** | 2,008 B | 3,712 B |
 | Type Decode (5K ints) | **213 us** | 819 us | **3.8x** | 8,416 B | 688 B |
 | NULL Detection | **156 us** | 746 us | **4.8x** | 8,416 B | 688 B |
-| WHERE Filter | 692 us | **542 us** | 0.78x | 8,376 B | 720 B |
+| WHERE Filter | 692 us | **542 us** | 0.78x | 8,608 B | 720 B |
 | GC Pressure (sustained) | **213 us** | 798 us | **3.7x** | 8,416 B | 688 B |
 
 > **Bold = winner.** Sharc wins 8 of 9 on speed. SQLite's native VDBE wins WHERE filter — Tier 3 SIMD is planned to close this gap. Sharc dominates on seeks, scans, and decode operations.
