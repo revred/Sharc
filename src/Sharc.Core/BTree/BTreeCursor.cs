@@ -110,7 +110,7 @@ internal sealed class BTreeCursor : IBTreeCursor
         while (true)
         {
              var page = _pageSource.GetPage(pageNum);
-             int headerOffset = pageNum == 1 ? 100 : 0;
+             int headerOffset = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
              var header = BTreePageHeader.Parse(page[headerOffset..]);
 
              if (header.IsLeaf)
@@ -173,7 +173,7 @@ internal sealed class BTreeCursor : IBTreeCursor
         while (true)
         {
             var page = _pageSource.GetPage(pageNumber);
-            int headerOffset = pageNumber == 1 ? 100 : 0;
+            int headerOffset = pageNumber == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
 
             if (header.IsLeaf)
@@ -210,7 +210,7 @@ internal sealed class BTreeCursor : IBTreeCursor
         while (true)
         {
             var page = _pageSource.GetPage(pageNumber);
-            int headerOffset = pageNumber == 1 ? 100 : 0;
+            int headerOffset = pageNumber == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
 
             if (header.IsLeaf)

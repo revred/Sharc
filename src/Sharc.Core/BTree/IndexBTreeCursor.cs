@@ -93,7 +93,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         while (true)
         {
             var page = _pageSource.GetPage(pageNumber);
-            int headerOffset = pageNumber == 1 ? 100 : 0;
+            int headerOffset = pageNumber == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
 
             if (header.IsLeaf)
@@ -162,7 +162,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         while (true)
         {
             var page = _pageSource.GetPage(pageNumber);
-            int headerOffset = pageNumber == 1 ? 100 : 0;
+            int headerOffset = pageNumber == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var header = BTreePageHeader.Parse(page[headerOffset..]);
 
             if (header.IsLeaf)
