@@ -73,6 +73,17 @@ public sealed class TableInfo
 
     /// <summary>Whether this is a WITHOUT ROWID table.</summary>
     public required bool IsWithoutRowId { get; init; }
+
+    private Dictionary<string, int>? _columnMap;
+
+    /// <summary>
+    /// Gets the ordinal of a column by name (case-insensitive).
+    /// </summary>
+    public int GetColumnOrdinal(string name)
+    {
+        _columnMap ??= Columns.ToDictionary(c => c.Name, c => c.Ordinal, StringComparer.OrdinalIgnoreCase);
+        return _columnMap.TryGetValue(name, out int ordinal) ? ordinal : -1;
+    }
 }
 
 /// <summary>

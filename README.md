@@ -21,10 +21,10 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 
 | Operation | Sharc | SQLite | Speedup |
 |:---|---:|---:|---:|
-| B-tree Seek | **427 ns** | 24,011 ns | **56.2x** |
-| Batch 6 Seeks | **2,288 ns** | 127,526 ns | **55.7x** |
-| Schema Read | **2.50 us** | 26.41 us | **10.6x** |
-| Engine Init | 1.15 ms | **23.50 us** | 0.02x |
+| B-tree Seek | **392 ns** | 24,011 ns | **61.2x** |
+| Batch 6 Seeks | **1,940 ns** | 127,526 ns | **65.7x** |
+| Schema Read | **3.80 us** | 26.41 us | **6.9x** |
+| Engine Init | **981 ns** | 38.68 us | **39x** |
 
 </td>
 <td width="50%" valign="top">
@@ -33,9 +33,9 @@ Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blo
 
 | Operation | Sharc | SQLite | Speedup |
 |:---|---:|---:|---:|
-| Full Scan (9 cols) | **2.00 ms** | 6.18 ms | **3.1x** |
-| Integer Decode | **402 us** | 793 us | **2.0x** |
-| NULL Detection | **433 us** | 737 us | **1.7x** |
+| Full Scan (9 cols) | **1.54 ms** | 6.22 ms | **4.0x** |
+| Integer Decode | **185 us** | 854 us | **4.6x** |
+| NULL Detection | **394 us** | 1.24 ms | **3.1x** |
 | Graph BFS 2-Hop | **6.00 us** | 74.18 us | **12.3x** |
 
 </td>
@@ -48,7 +48,7 @@ Across 16 browser arena benchmarks, Sharc wins **16**. From sub-microsecond seek
 
 | Benchmark | Sharc | SQLite | Winner |
 |:---|---:|---:|:---:|
-| WHERE Filter (age > 30 AND score < 50) | **0.52 ms** | 0.54 ms | **Sharc** |
+| WHERE Filter (age > 30 AND score < 50) | **0.31 ms** | 0.58 ms | **Sharc** |
 
 Sharc wins **9 of 9 core benchmarks** on speed. Engine Init is the only outlier (slow managed cold start). For reads, seeks, scans, graphs, and encryption — Sharc is the undisputed performance leader for the browser.
 
@@ -174,15 +174,15 @@ All benchmarks below are from BenchmarkDotNet v0.15.8, DefaultJob (15 iterations
 
 | Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
 |:---|---:|---:|:---:|---:|---:|
-| Engine Init (open + header) | 1.15 ms | **23.50 us** | 0.02x | 6,231 KB | 1,160 B |
-| Schema Introspection | **2.50 us** | 26.41 us | **10.6x** | 4,776 B | 2,536 B |
-| Sequential Scan (9 cols) | **2.00 ms** | 6.18 ms | **3.1x** | 1,380 KB | 1,380 KB |
-| Point Lookup (Seek) | **427 ns** | 24,011 ns | **56.2x** | **688 B** | 728 B |
-| Batch 6 Lookups | **2,288 ns** | 127,526 ns | **55.7x** | **1,792 B** | 3,712 B |
-| Type Decode (5K ints) | **402 us** | 793 us | **2.0x** | 784 B | 688 B |
-| NULL Detection | **433 us** | 737 us | **1.7x** | 784 B | 688 B |
-| WHERE Filter | **519 us** | 537 us | **1.03x** | 1,008 B | 720 B |
-| GC Pressure (sustained) | **399 us** | 782 us | **2.0x** | 784 B | 688 B |
+| Engine Init (open + header) | **981 ns** | 38.68 us | **39x** | **1,416 B** | 1,160 B |
+| Schema Introspection | **4.69 us** | 27.86 us | **5.9x** | 4,784 B | 2,536 B |
+| Sequential Scan (9 cols) | **1.54 ms** | 6.22 ms | **4.0x** | 1.41 MB | 1.41 MB |
+| Point Lookup (Seek) | **848 ns** | 39,614 ns | **46.7x** | **688 B** | 728 B |
+| Batch 6 Lookups | **3,326 ns** | 201,979 ns | **60.7x** | **1,792 B** | 3,712 B |
+| Type Decode (5K ints) | **185 us** | 854 us | **4.6x** | 648 B | 688 B |
+| NULL Detection | **394 us** | 1.24 ms | **3.1x** | 648 B | 688 B |
+| WHERE Filter | **315 us** | 587 us | **1.8x** | 1,008 B | 720 B |
+| GC Pressure (sustained) | **214 us** | 1.20 ms | **5.6x** | 648 B | 688 B |
 
 > **Bold = winner.** Sharc wins 9 of 9 on speed. Engine Init is slower due to pre-allocation of the zero-alloc page cache (trade-off for scan performance). Scan allocation now matches SQLite — the direct-decode optimization eliminates intermediate `ColumnValue` construction.
 

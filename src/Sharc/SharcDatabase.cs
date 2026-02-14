@@ -473,8 +473,8 @@ public sealed class SharcDatabase : IDisposable
     {
         IPageSource pageSource = rawSource;
 
-        // Wrap with cache if requested
-        if (options.PageCacheSize > 0)
+        // Wrap with cache if requested (Skip for in-memory sources as they are already RAM-backed)
+        if (options.PageCacheSize > 0 && rawSource is not MemoryPageSource)
             pageSource = new CachedPageSource(rawSource, options.PageCacheSize);
 
         var headerSpan = pageSource.GetPage(1);
@@ -539,10 +539,10 @@ public sealed class SharcDatabase : IDisposable
             projection = new int[columns.Length];
             for (int i = 0; i < columns.Length; i++)
             {
-                var col = table.Columns.FirstOrDefault(c =>
-                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
-                projection[i] = col?.Ordinal
-                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+                int ordinal = table.GetColumnOrdinal(columns[i]);
+                projection[i] = ordinal >= 0
+                    ? ordinal
+                    : throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
             }
         }
 

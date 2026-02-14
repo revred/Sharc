@@ -169,12 +169,14 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int ReadSerialTypes(ReadOnlySpan<byte> payload, long[] serialTypes, out int bodyOffset)
     {
         return ReadSerialTypes(payload, serialTypes.AsSpan(), out bodyOffset);
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
@@ -270,6 +272,7 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SuppressMessage("Performance", "CA1822:Mark members as static")]
     public string DecodeStringDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
     {
@@ -280,6 +283,7 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SuppressMessage("Performance", "CA1822:Mark members as static")]
     public long DecodeInt64Direct(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
     {
@@ -318,6 +322,7 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SuppressMessage("Performance", "CA1822:Mark members as static")]
     public double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
     {
