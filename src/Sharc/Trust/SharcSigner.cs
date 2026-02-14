@@ -1,13 +1,15 @@
 using System.Security.Cryptography;
+using Sharc.Crypto;
 
 namespace Sharc.Trust;
 
 /// <summary>
-/// ECDsa P-256 implementation of <see cref="ISharcSigner"/>.
+/// HMAC-SHA256 implementation of <see cref="ISharcSigner"/> for Wasm compatibility.
 /// </summary>
 public sealed class SharcSigner : ISharcSigner, IDisposable
 {
-    private readonly ECDsa _dsa;
+    private readonly HMACSHA256 _hmac;
+    private readonly byte[] _key;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SharcSigner"/> class.
@@ -16,7 +18,9 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     public SharcSigner(string agentId)
     {
         AgentId = agentId;
-        _dsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        // Use deterministic key from AgentId for the demo
+        _key = SharcHash.Compute(System.Text.Encoding.UTF8.GetBytes(agentId));
+        _hmac = new HMACSHA256(_key);
     }
 
     /// <inheritdoc />
@@ -25,19 +29,21 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     /// <inheritdoc />
     public byte[] Sign(ReadOnlySpan<byte> data)
     {
-        return _dsa.SignData(data, HashAlgorithmName.SHA256);
+        return _hmac.ComputeHash(data.ToArray());
     }
 
     /// <inheritdoc />
     public bool Verify(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
-        return _dsa.VerifyData(data, signature, HashAlgorithmName.SHA256);
+        var hash = _hmac.ComputeHash(data.ToArray());
+        return hash.AsSpan().SequenceEqual(signature);
     }
 
     /// <inheritdoc />
     public byte[] GetPublicKey()
     {
-        return _dsa.ExportSubjectPublicKeyInfo();
+        // For HMAC demo, "public key" is the shared secret derived from ID
+        return _key;
     }
 
     /// <summary>
@@ -45,14 +51,14 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     /// </summary>
     public static bool Verify(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
     {
-        using var dsa = ECDsa.Create();
-        dsa.ImportSubjectPublicKeyInfo(publicKey, out _);
-        return dsa.VerifyData(data, signature, HashAlgorithmName.SHA256);
+        using var hmac = new HMACSHA256(publicKey.ToArray());
+        var hash = hmac.ComputeHash(data.ToArray());
+        return hash.AsSpan().SequenceEqual(signature);
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        _dsa.Dispose();
+        _hmac.Dispose();
     }
 }

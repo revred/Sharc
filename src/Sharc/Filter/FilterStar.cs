@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 namespace Sharc;
 
@@ -56,7 +43,7 @@ public readonly struct ColumnRef
     private PredicateExpression Predicate(FilterOp op, TypedFilterValue value) =>
         new(_name, _ordinal, op, value);
 
-    // ── Comparison (long) ──
+    // â”€â”€ Comparison (long) â”€â”€
 
     /// <summary>Column value equals the given integer.</summary>
     public IFilterStar Eq(long value) => Predicate(FilterOp.Eq, TypedFilterValue.FromInt64(value));
@@ -80,7 +67,7 @@ public readonly struct ColumnRef
     public IFilterStar Between(long low, long high) =>
         Predicate(FilterOp.Between, TypedFilterValue.FromInt64Range(low, high));
 
-    // ── Comparison (double) ──
+    // â”€â”€ Comparison (double) â”€â”€
 
     /// <summary>Column value equals the given double.</summary>
     public IFilterStar Eq(double value) => Predicate(FilterOp.Eq, TypedFilterValue.FromDouble(value));
@@ -104,7 +91,7 @@ public readonly struct ColumnRef
     public IFilterStar Between(double low, double high) =>
         Predicate(FilterOp.Between, TypedFilterValue.FromDoubleRange(low, high));
 
-    // ── Comparison (string) ──
+    // â”€â”€ Comparison (string) â”€â”€
 
     /// <summary>Column value equals the given string (ordinal UTF-8 comparison).</summary>
     public IFilterStar Eq(string value) => Predicate(FilterOp.Eq, TypedFilterValue.FromUtf8(value));
@@ -124,7 +111,7 @@ public readonly struct ColumnRef
     /// <summary>Column value is greater than or equal to the given string.</summary>
     public IFilterStar Gte(string value) => Predicate(FilterOp.Gte, TypedFilterValue.FromUtf8(value));
 
-    // ── Null ──
+    // â”€â”€ Null â”€â”€
 
     /// <summary>Column value is NULL.</summary>
     public IFilterStar IsNull() => Predicate(FilterOp.IsNull, TypedFilterValue.FromNull());
@@ -132,7 +119,7 @@ public readonly struct ColumnRef
     /// <summary>Column value is not NULL.</summary>
     public IFilterStar IsNotNull() => Predicate(FilterOp.IsNotNull, TypedFilterValue.FromNull());
 
-    // ── String operations ──
+    // â”€â”€ String operations â”€â”€
 
     /// <summary>Column text starts with the given UTF-8 prefix.</summary>
     public IFilterStar StartsWith(string prefix) =>
@@ -146,7 +133,7 @@ public readonly struct ColumnRef
     public IFilterStar Contains(string substring) =>
         Predicate(FilterOp.Contains, TypedFilterValue.FromUtf8(substring));
 
-    // ── Set membership ──
+    // â”€â”€ Set membership â”€â”€
 
     /// <summary>Column integer value is in the given set.</summary>
     public IFilterStar In(params long[] values) =>

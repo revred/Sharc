@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using Sharc.Arena.Wasm.Models;
 
@@ -24,12 +11,12 @@ namespace Sharc.Arena.Wasm.Services;
 ///
 /// Tier 1 (same .NET WASM runtime, Stopwatch + GC alloc tracking):
 ///   - Sharc:  pure C# format reader
-///   - SQLite: Microsoft.Data.Sqlite (C → Emscripten → P/Invoke)
+///   - SQLite: Microsoft.Data.Sqlite (C â†’ Emscripten â†’ P/Invoke)
 ///
 /// Tier 2 (browser API, JS interop, performance.now() timing):
 ///   - IndexedDB: browser-native key-value store
 ///
-/// SurrealDB: reference data only (MVP — live engine deferred).
+/// SurrealDB: reference data only (MVP â€” live engine deferred).
 /// </summary>
 public sealed class BenchmarkRunner : IBenchmarkEngine
 {
@@ -97,13 +84,13 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
     /// <summary>
     /// Generates the canonical database byte[] ONCE and shares it across all engines.
-    /// Eliminates 3× redundant DataGenerator runs (was: each engine generated its own copy).
+    /// Eliminates 3Ã— redundant DataGenerator runs (was: each engine generated its own copy).
     /// </summary>
     private async Task EnsureAllEnginesInitialized(int userCount, int nodeCount)
     {
         if (userCount != _lastUserCount || nodeCount != _lastNodeCount)
         {
-            // Single generation — deterministic seed=42, identical for all engines
+            // Single generation â€” deterministic seed=42, identical for all engines
             _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
 
             _sharcEngine.Reset();
@@ -136,6 +123,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             "graph-traverse"   => _sharcEngine.RunGraphTraverse(),
             "gc-pressure"      => _sharcEngine.RunGcPressure(scale),
             "encryption"       => _sharcEngine.RunEncryption(),
+            "trust-ledger"     => _sharcEngine.RunTrustVerification(scale),
             "memory-footprint" => _sharcEngine.RunMemoryFootprint(),
             "primitives"       => _sharcEngine.RunPrimitives(),
             _                  => new EngineBaseResult { Value = null, Note = "Unknown slide" },

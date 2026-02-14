@@ -40,39 +40,7 @@ public sealed class AgentRegistry
     /// <param name="transaction">Optional active transaction. If null, a new one is created and committed.</param>
     public void RegisterAgent(AgentInfo agent, Transaction? transaction = null)
     {
-        // F8: Self-Attestation Verification
-        // Verify that the signer actually holds the private key for the claimed Public Key.
-        // We reconstruct the data they should have signed:
-        // (AgentId + Class + PublicKey + AuthorityCeiling + WriteScope + ReadScope + ValidityStart + ValidityEnd + ParentAgent + CoSignRequired)
-        
-        int bufferSize = Encoding.UTF8.GetByteCount(agent.AgentId) + 
-                         1 + // Class (byte)
-                         agent.PublicKey.Length + 
-                         8 + // AuthorityCeiling
-                         Encoding.UTF8.GetByteCount(agent.WriteScope) + 
-                         Encoding.UTF8.GetByteCount(agent.ReadScope) + 
-                         8 + // ValidityStart
-                         8 + // ValidityEnd
-                         Encoding.UTF8.GetByteCount(agent.ParentAgent) +
-                         1;  // CoSignRequired
-
-        byte[] verificationData = new byte[bufferSize];
-        int offset = 0;
-        
-        offset += Encoding.UTF8.GetBytes(agent.AgentId, verificationData.AsSpan(offset));
-        verificationData[offset++] = (byte)agent.Class;
-        agent.PublicKey.CopyTo(verificationData.AsSpan(offset));
-        offset += agent.PublicKey.Length;
-        BinaryPrimitives.WriteUInt64BigEndian(verificationData.AsSpan(offset), agent.AuthorityCeiling);
-        offset += 8;
-        offset += Encoding.UTF8.GetBytes(agent.WriteScope, verificationData.AsSpan(offset));
-        offset += Encoding.UTF8.GetBytes(agent.ReadScope, verificationData.AsSpan(offset));
-        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityStart);
-        offset += 8;
-        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityEnd);
-        offset += 8;
-        offset += Encoding.UTF8.GetBytes(agent.ParentAgent, verificationData.AsSpan(offset));
-        verificationData[offset++] = agent.CoSignRequired ? (byte)1 : (byte)0;
+        byte[] verificationData = GetVerificationBuffer(agent);
 
             if (!SharcSigner.Verify(verificationData, agent.Signature, agent.PublicKey))
         {
@@ -185,6 +153,43 @@ public sealed class AgentRegistry
             );
             _cache[info.AgentId] = info;
         }
+    }
+
+    /// <summary>
+    /// Constructs the verification buffer for an agent registration.
+    /// </summary>
+    public static byte[] GetVerificationBuffer(AgentInfo agent)
+    {
+        int bufferSize = Encoding.UTF8.GetByteCount(agent.AgentId) + 
+                         1 + // Class (byte)
+                         agent.PublicKey.Length + 
+                         8 + // AuthorityCeiling
+                         Encoding.UTF8.GetByteCount(agent.WriteScope) + 
+                         Encoding.UTF8.GetByteCount(agent.ReadScope) + 
+                         8 + // ValidityStart
+                         8 + // ValidityEnd
+                         Encoding.UTF8.GetByteCount(agent.ParentAgent) +
+                         1;  // CoSignRequired
+
+        byte[] verificationData = new byte[bufferSize];
+        int offset = 0;
+        
+        offset += Encoding.UTF8.GetBytes(agent.AgentId, verificationData.AsSpan(offset));
+        verificationData[offset++] = (byte)agent.Class;
+        agent.PublicKey.CopyTo(verificationData.AsSpan(offset));
+        offset += agent.PublicKey.Length;
+        BinaryPrimitives.WriteUInt64BigEndian(verificationData.AsSpan(offset), agent.AuthorityCeiling);
+        offset += 8;
+        offset += Encoding.UTF8.GetBytes(agent.WriteScope, verificationData.AsSpan(offset));
+        offset += Encoding.UTF8.GetBytes(agent.ReadScope, verificationData.AsSpan(offset));
+        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityStart);
+        offset += 8;
+        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityEnd);
+        offset += 8;
+        offset += Encoding.UTF8.GetBytes(agent.ParentAgent, verificationData.AsSpan(offset));
+        verificationData[offset++] = agent.CoSignRequired ? (byte)1 : (byte)0;
+
+        return verificationData;
     }
 
     private TableInfo? GetTable(string name)

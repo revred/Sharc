@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Linq.Expressions;
 using Sharc.Core.Schema;
@@ -32,7 +19,7 @@ internal static class FilterTreeCompiler
     /// Compiles a filter expression into an evaluation node tree.
     /// </summary>
     /// <param name="expression">The uncompiled filter expression.</param>
-    /// <param name="columns">Table column definitions for name → ordinal resolution.</param>
+    /// <param name="columns">Table column definitions for name â†’ ordinal resolution.</param>
     /// <param name="rowidAliasOrdinal">Ordinal of the INTEGER PRIMARY KEY alias column, or -1.</param>
     /// <returns>A compiled filter node tree ready for per-row evaluation.</returns>
     internal static IFilterNode Compile(IFilterStar expression, IReadOnlyList<ColumnInfo> columns,

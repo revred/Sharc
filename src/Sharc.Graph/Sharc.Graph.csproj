@@ -4,7 +4,22 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>Sharc.Graph</RootNamespace>
+    <AssemblyName>Sharc.Graph</AssemblyName>
+    <Version>1.0.0-beta.1</Version>
+    <Authors>Ram Revanur</Authors>
+    <Description>Graph reasoning and trust layer for Sharc: B-tree backed relationship stores and cryptographic identity for AI context.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/revred/Sharc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/revred/Sharc</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>sqlite;database;graph;trust;context-space;ai;dotnet;csharp</PackageTags>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
