@@ -411,6 +411,7 @@ BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), re
 | Virtual tables | No | Yes |
 | Page I/O backends | Memory, File, Mmap, Cached | Internal |
 | Encryption | **AES-256-GCM** (Argon2id KDF) | Via SQLCipher |
+| Agent Trust Layer | **Yes** — ECDSA attestation, ledger, reputation | No |
 | GC pressure | **0 B per-row** | Allocates per call |
 | Package size | **~50 KB** | ~2 MB |
 
@@ -418,11 +419,16 @@ BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), re
 
 ## Architecture
 
-Pure managed SQLite file-format reader. No VM, no VDBE, no query planner — just B-tree pages decoded through zero-alloc spans.
+Pure managed SQLite file-format reader and writer. No VM, no VDBE, no query planner — just B-tree pages decoded through zero-alloc spans, with a cryptographic trust layer for AI agents.
 
 ```
 +-----------------------------------------------------------+
 |  Public API          SharcDatabase > SharcDataReader        |
++-----------------------------------------------------------+
+|  Trust Layer         AgentRegistry: ECDSA self-attestation  |
+|                      LedgerManager: hash-chain audit log    |
+|                      ReputationEngine: agent scoring        |
+|                      Co-Signatures, Governance policies     |
 +-----------------------------------------------------------+
 |  Graph Layer         ConceptStore, RelationStore            |
 |                      SeekFirst: O(log N) index traversal    |
@@ -461,13 +467,14 @@ Pure managed SQLite file-format reader. No VM, no VDBE, no query planner — jus
 ## Project Structure
 
 ```
-src/Sharc/                    Public API (SharcDatabase, SharcDataReader, Schema)
-src/Sharc.Core/               Internal: page I/O, B-tree, record decoding, primitives
+src/Sharc/                    Public API (SharcDatabase, SharcDataReader, Schema, Trust)
+src/Sharc.Core/               Internal: page I/O, B-tree, record decoding, primitives, trust models
 src/Sharc.Graph/              Graph storage layer (ConceptStore, RelationStore)
 src/Sharc.Graph.Surface/      Graph interfaces and models
 src/Sharc.Crypto/             Encryption: AES-256-GCM, Argon2id KDF
+src/Sharc.Scene/              Trust Playground: live agent simulation and visualization
 src/Sharc.Arena.Wasm/         Live browser benchmark arena (Blazor WASM)
-tests/Sharc.Tests/            Unit tests (xUnit)
+tests/Sharc.Tests/            Unit tests (xUnit) — includes trust, ledger, governance tests
 tests/Sharc.IntegrationTests/ End-to-end tests with real SQLite databases
 tests/Sharc.Graph.Tests.Unit/ Graph layer unit tests
 tests/Sharc.Context.Tests/    MCP context query tool tests
@@ -491,13 +498,13 @@ dotnet run -c Release --project bench/Sharc.Comparisons   # graph + core benchma
 ### Test Status
 
 ```
-818 passed, 0 skipped, 0 failed
-  Unit tests:        534 (core + crypto + filter + WITHOUT ROWID + SeekFirst + write engine)
+1,064 passed, 0 skipped, 0 failed
+  Unit tests:        832 (core + crypto + filter + WITHOUT ROWID + SeekFirst + write engine + trust)
   Graph unit tests:   50
-  Integration tests: 102 (includes encryption, filtering, WITHOUT ROWID, allocation fixes)
+  Integration tests: 146 (includes encryption, filtering, WITHOUT ROWID, allocation fixes, ACID probing)
   Context tests:      14 (MCP query tools)
   Index tests:        22 (GCD schema, git log parser, commit writer)
-  Write engine:       96 (RecordEncoder, CellBuilder, WalWriter, PageManager, BTreeMutator)
+  Trust tests:        ~50 (agent registry, ledger integrity, co-signatures, governance, reputation)
 ```
 
 ### Milestone Progress
@@ -518,6 +525,7 @@ Browser Arena                  ################ COMPLETE (16 live benchmarks)
 MCP Context Tools              ################ COMPLETE (4 query tools)
 sharc-index CLI                ################ COMPLETE
 Write Engine (Phase 1)         ########-------- IN PROGRESS (BTreeMutator, SharcWriter)
+Agent Trust Layer              ################ COMPLETE (ECDSA attestation, ledger, reputation)
 ```
 
 ## Current Limitations
@@ -530,6 +538,7 @@ Sharc is a **SQLite format reader and writer** built in pure managed C#:
 - **No UTF-16 text** — UTF-8 only
 - **WHERE filter gap** — SQLite's VDBE currently beats Sharc's FilterStar on complex WHERE clauses. Tier 3 SIMD is planned to close this gap.
 - **Higher per-open allocation** — Sharc allocates ~15.5 KB on open (header parse + page source); lazy schema initialization defers schema parsing until first access
+- **Trust layer** — Agent registration, ledger, co-signatures, and reputation scoring are functional. Distributed sync (multi-node convergence) is in progress.
 
 ## Design Principles
 
