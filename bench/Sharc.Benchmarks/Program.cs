@@ -15,6 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
 
 namespace Sharc.Benchmarks;
@@ -44,7 +45,10 @@ public static class Program
     public static void Main(string[] args)
     {
         args = ResolveTier(args);
-        BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+        var artifactsPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "artifacts", "benchmarks", "core"));
+        var config = DefaultConfig.Instance.WithArtifactsPath(artifactsPath);
+        BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
     }
 
     private static string[] ResolveTier(string[] args)
