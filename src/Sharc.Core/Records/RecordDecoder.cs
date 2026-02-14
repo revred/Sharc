@@ -425,9 +425,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             if (filterValue is string s)
             {
                 // Optimization: Stack-based comparison for short strings
-                if (s.Length <= 128)
+                // Buffer must be sized for the data bytes (max 1 char per byte for ASCII/UTF-8)
+                if (data.Length <= 128)
                 {
-                    Span<char> chars = stackalloc char[s.Length];
+                    Span<char> chars = stackalloc char[data.Length];
                     int charCount = System.Text.Encoding.UTF8.GetChars(data, chars);
                     // Standard string comparison logic would require identical chars
                     // but we only populated 'chars' from UTF8 bytes.
