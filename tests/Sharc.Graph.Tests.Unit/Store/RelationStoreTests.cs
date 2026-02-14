@@ -14,7 +14,7 @@ namespace Sharc.Graph.Tests.Unit.Store;
 public class RelationStoreTests
 {
     [TestMethod]
-    public void GetEdges_WithMatchingOrigin_ReturnsEdges()
+    public void CreateEdgeCursor_WithMatchingOrigin_ReturnsEdges()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
         var rows = new List<(long rowId, byte[] payload)>
@@ -27,15 +27,18 @@ public class RelationStoreTests
         var store = new RelationStore(reader, adapter);
         store.Initialize(schema);
 
-        var edges = store.GetEdges(new NodeKey(100)).ToList();
+        using var cursor = store.CreateEdgeCursor(new NodeKey(100));
+        var targets = new List<long>();
+        while (cursor.MoveNext())
+            targets.Add(cursor.TargetKey);
 
-        Assert.HasCount(2, edges);
-        Assert.AreEqual(200, edges[0].TargetKey.Value);
-        Assert.AreEqual(300, edges[1].TargetKey.Value);
+        Assert.AreEqual(2, targets.Count);
+        Assert.AreEqual(200, targets[0]);
+        Assert.AreEqual(300, targets[1]);
     }
 
     [TestMethod]
-    public void GetEdges_WithKindFilter_FiltersCorrectly()
+    public void CreateEdgeCursor_WithKindFilter_FiltersCorrectly()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
         var rows = new List<(long rowId, byte[] payload)>
@@ -47,14 +50,21 @@ public class RelationStoreTests
         var store = new RelationStore(reader, adapter);
         store.Initialize(schema);
 
-        var edges = store.GetEdges(new NodeKey(100), RelationKind.Contains).ToList();
+        using var cursor = store.CreateEdgeCursor(new NodeKey(100), RelationKind.Contains);
+        int count = 0;
+        int kind = 0;
+        while (cursor.MoveNext())
+        {
+            count++;
+            kind = cursor.Kind;
+        }
 
-        Assert.HasCount(1, edges);
-        Assert.AreEqual(10, edges[0].Kind);
+        Assert.AreEqual(1, count);
+        Assert.AreEqual(10, kind);
     }
 
     [TestMethod]
-    public void GetEdges_NoMatchingOrigin_ReturnsEmpty()
+    public void CreateEdgeCursor_NoMatchingOrigin_ReturnsEmpty()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
         var rows = new List<(long rowId, byte[] payload)>
@@ -65,13 +75,16 @@ public class RelationStoreTests
         var store = new RelationStore(reader, adapter);
         store.Initialize(schema);
 
-        var edges = store.GetEdges(new NodeKey(999)).ToList();
+        using var cursor = store.CreateEdgeCursor(new NodeKey(999));
+        int count = 0;
+        while (cursor.MoveNext())
+            count++;
 
-        Assert.HasCount(0, edges);
+        Assert.AreEqual(0, count);
     }
 
     [TestMethod]
-    public void GetIncomingEdges_WithMatchingTarget_ReturnsEdges()
+    public void CreateIncomingEdgeCursor_WithMatchingTarget_ReturnsEdges()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
         var rows = new List<(long rowId, byte[] payload)>
@@ -85,11 +98,14 @@ public class RelationStoreTests
         var store = new RelationStore(reader, adapter);
         store.Initialize(schema);
 
-        var edges = store.GetIncomingEdges(new NodeKey(200)).ToList();
+        using var cursor = store.CreateIncomingEdgeCursor(new NodeKey(200));
+        var origins = new List<long>();
+        while (cursor.MoveNext())
+            origins.Add(cursor.OriginKey);
 
-        Assert.HasCount(2, edges);
-        Assert.IsTrue(edges.Any(e => e.OriginKey.Value == 100 && e.Id.Id == "e1"));
-        Assert.IsTrue(edges.Any(e => e.OriginKey.Value == 50 && e.Id.Id == "e4"));
+        Assert.AreEqual(2, origins.Count);
+        Assert.IsTrue(origins.Contains(100));
+        Assert.IsTrue(origins.Contains(50));
     }
 
     #region Test Helpers
@@ -260,6 +276,7 @@ public class RelationStoreTests
         public bool MoveNext() { _index++; return _index < _rows.Count; }
         public bool MoveLast() { if (_rows.Count == 0) return false; _index = _rows.Count - 1; return true; }
         public bool Seek(long rowId) => false;
+        public void Reset() { _index = -1; }
         public void Dispose() { }
     }
 

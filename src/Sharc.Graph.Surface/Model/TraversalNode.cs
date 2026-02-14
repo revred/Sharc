@@ -16,12 +16,12 @@ public readonly record struct TraversalNode
     public int Depth { get; }
     
     /// <summary>The full path of keys taken to reach this node.</summary>
-    public IReadOnlyList<NodeKey> Path { get; }
+    public IReadOnlyList<NodeKey>? Path { get; }
 
     /// <summary>
     /// Creates a new TraversalNode.
     /// </summary>
-    public TraversalNode(GraphRecord record, int depth, IReadOnlyList<NodeKey> path)
+    public TraversalNode(GraphRecord record, int depth, IReadOnlyList<NodeKey>? path)
     {
         Record = record;
         Depth = depth;

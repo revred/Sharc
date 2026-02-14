@@ -332,6 +332,7 @@ internal sealed class FakeBTreeCursor : IBTreeCursor
         }
         return false;
     }
+    public void Reset() { _index = -1; }
     public void Dispose() { }
 }
 

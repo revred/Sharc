@@ -116,6 +116,8 @@ public sealed class WithoutRowIdCursorAdapterTests
             return _index < _moveNextResults.Length && _moveNextResults[_index];
         }
 
+        public void Reset() => _index = -1;
+
         public bool SeekFirst(long firstColumnKey) => false;
 
         public ReadOnlySpan<byte> Payload => _payload;

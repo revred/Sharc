@@ -14,6 +14,7 @@ namespace Sharc.Comparisons;
 
 [BenchmarkCategory("Comparative", "GraphTraversal")]
 [MemoryDiagnoser]
+[InProcess]
 public class GraphDirectionBenchmarks
 {
     private string _dbPath = null!;

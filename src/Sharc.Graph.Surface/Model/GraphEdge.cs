@@ -7,7 +7,7 @@ namespace Sharc.Graph.Model;
 /// <summary>
 /// A typed, directed edge connecting two graph nodes using integer keys.
 /// </summary>
-public sealed class GraphEdge
+public readonly record struct GraphEdge
 {
     /// <summary>The unique Edge ID.</summary>
     public RecordId Id { get; init; }
@@ -22,10 +22,10 @@ public sealed class GraphEdge
     public int Kind { get; init; }
     
     /// <summary>The human-readable edge kind ("has_operation").</summary>
-    public string KindName { get; init; } = "";
+    public string KindName { get; init; }
     
     /// <summary>Edge properties as JSON.</summary>
-    public string JsonData { get; init; } = "{}";
+    public string JsonData { get; init; }
     
     /// <summary>Cloud Version Number.</summary>
     public int CVN { get; init; }
@@ -40,7 +40,7 @@ public sealed class GraphEdge
     public DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>Edge relevance weight (0.0 to 1.0).</summary>
-    public float Weight { get; init; } = 1.0f;
+    public float Weight { get; init; }
 
     /// <summary>
     /// Creates a new GraphEdge connecting origin and target.
@@ -52,6 +52,11 @@ public sealed class GraphEdge
         TargetKey = targetKey;
         Kind = kind;
         JsonData = jsonData;
+        KindName = "";
+        CVN = 0;
+        LVN = 0;
+        SyncStatus = 0;
         CreatedAt = default;
+        Weight = 1.0f;
     }
 }

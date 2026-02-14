@@ -16,6 +16,9 @@ public interface IEdgeCursor : IDisposable
     /// <summary>Advances to the next matching edge. Returns false when exhausted.</summary>
     bool MoveNext();
 
+    /// <summary>Resets the cursor to a new origin and kind without allocation.</summary>
+    void Reset(long matchKey, int? matchKind = null);
+
     /// <summary>The integer key of the origin node.</summary>
     long OriginKey { get; }
 

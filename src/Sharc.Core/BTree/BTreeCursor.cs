@@ -68,6 +68,16 @@ internal sealed class BTreeCursor : IBTreeCursor
     }
 
     /// <inheritdoc />
+    public void Reset()
+    {
+        ReturnAssembledPayload();
+        _stack.Clear();
+        _initialized = false;
+        _exhausted = false;
+        _currentLeafPage = 0;
+    }
+
+    /// <inheritdoc />
     public bool MoveNext()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -130,7 +140,6 @@ internal sealed class BTreeCursor : IBTreeCursor
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ReturnAssembledPayload();
-
         _stack.Clear();
         _exhausted = false;
         _initialized = true;

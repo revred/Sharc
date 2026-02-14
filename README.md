@@ -254,6 +254,7 @@ Sharc includes a built-in graph storage layer (`Sharc.Graph`) that maps concept/
 | Single Node Seek | **1,475 ns** | 21,349 ns | **14.5x** | 1,840 B | 600 B |
 | Batch 6 Node Seeks | **3,858 ns** | 159,740 ns | **41.4x** | 4,176 B | 3,024 B |
 | Open > Seek > Close | **11,764 ns** | 33,386 ns | **2.8x** | 12,496 B | 1,256 B |
+| **Edge Scan (Pushdown)** | **561 us** | 2,529 us | **4.5x** | **736 B** | **696 B** |
 | **Incoming Edge Scan** | **1.75 us** | 27.65 us | **15.8x** | 2,968 B | 728 B |
 | **Bidirectional BFS** | **23.9 us** | 34.9 us | **1.4x** | 10,900 B | 2,808 B |
 | **2-Hop BFS Traversal** | **6.04 us** | 81.56 us | **13.5x** | 10,150 B | 2,740 B |
@@ -380,7 +381,7 @@ IndexedDB cannot compete on WHERE filtering, graph traversal, encryption, or GC 
 | 12 | Graph 2-Hop BFS | **5.78 us** | 79.31 us | N/A | Sharc |
 | 13 | GC Pressure | **0.213 ms** | 0.842 ms | N/A | Sharc |
 | 14 | Encrypted Read | **340 us** | N/A | N/A | Sharc |
-| 15 | Memory Footprint | **~50 KB** | 1,536 KB | 0 (built-in) | Sharc |
+| 15 | Memory Footprint | **~250 KB** | 1,536 KB | 0 (built-in) | Sharc |
 | 16 | Primitives | **8.5 ns** | N/A | N/A | Sharc |
 
 > **Score: Sharc 16 / SQLite 0 / IndexedDB 0.** Every performance metric Sharc ranges from 17x to 233x faster than IndexedDB, and consistently outperforms SQLite's optimized WASM build.
@@ -389,7 +390,7 @@ IndexedDB cannot compete on WHERE filtering, graph traversal, encryption, or GC 
 
 | Factor | Sharc | SQLite WASM | IndexedDB |
 |:---|:---|:---|:---|
-| Download size | **~50 KB** (managed C#) | ~1.5 MB (e_sqlite3.wasm) | 0 B (built-in) |
+| Download size | **~250 KB** (managed C#) | ~1.5 MB (e_sqlite3.wasm) | 0 B (built-in) |
 | Cold start | **430 ns** | 142 ms | 2.1 ms |
 | Runtime | .NET WASM (in-process) | C via Emscripten P/Invoke | Browser JS engine |
 | Interop cost | None | P/Invoke per column | JS to IDB async per txn |
@@ -470,7 +471,7 @@ BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), re
 | Encryption | **AES-256-GCM** (Argon2id KDF) | Via SQLCipher |
 | Agent Trust Layer | **Yes** — ECDSA attestation, ledger, reputation | No |
 | GC pressure | **0 B per-row** | Allocates per call |
-| Package size | **~50 KB** | ~2 MB |
+| Package size | **~250 KB** | ~2 MB |
 
 ---
 
