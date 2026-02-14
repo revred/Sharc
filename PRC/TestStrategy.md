@@ -17,6 +17,14 @@ Pure function tests on isolated components. No disk I/O.
 | `PageCache` | LRU eviction, hit/miss counting, capacity enforcement |
 | `PageTransform` | Encrypt/decrypt round-trip, AAD verification, tamper detection |
 | `KeyDerivation` | Known-answer tests for Argon2id, key verification |
+| `AgentRegistry` | ECDSA self-attestation, agent registration, cache loading |
+| `LedgerManager` | Hash-chain integrity, append/verify, signature validation |
+| `ReputationEngine` | Agent scoring, decay, threshold enforcement |
+| `CoSignature` | Multi-agent endorsement, attestation chaining |
+| `Governance` | Permission policies, scope boundaries, read/write access |
+| `RecordEncoder` | Value serialization to SQLite record format |
+| `CellBuilder` | B-tree leaf cell construction from encoded records |
+| `BTreeMutator` | Leaf insert, page split, overflow handling |
 
 ### Layer 2: Integration Tests (`Sharc.IntegrationTests`)
 End-to-end tests against real SQLite database files.
@@ -95,7 +103,8 @@ Examples:
 
 ## 5. CI Requirements
 
-- All unit tests must pass on every commit
+- All unit tests must pass on every commit (currently 1,064 tests across 5 projects)
 - Integration tests run on PR merge
 - Benchmarks run nightly, results tracked
 - Code coverage target: 90%+ for Sharc.Core
+- Trust tests must validate ECDSA signatures with real EC keys (no random byte stubs)
