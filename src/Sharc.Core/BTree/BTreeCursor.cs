@@ -101,6 +101,44 @@ internal sealed class BTreeCursor : IBTreeCursor
     }
 
     /// <inheritdoc />
+    public bool MoveLast()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ReturnAssembledPayload();
+        _stack.Clear();
+        _exhausted = false;
+        _initialized = true;
+
+        uint pageNum = _rootPage;
+        while (true)
+        {
+             var page = _pageSource.GetPage(pageNum);
+             int headerOffset = pageNum == 1 ? 100 : 0;
+             var header = BTreePageHeader.Parse(page[headerOffset..]);
+
+             if (header.IsLeaf)
+             {
+                 _currentLeafPage = pageNum;
+                 _currentHeaderOffset = headerOffset;
+                 _currentHeader = header;
+                 
+                 if (header.CellCount == 0)
+                 {
+                     _exhausted = true;
+                     return false;
+                 }
+                 
+                 _currentCellIndex = header.CellCount - 1;
+                 ParseCurrentLeafCell();
+                 return true;
+             }
+             
+             // Interior page - follow right pointer
+             pageNum = header.RightChildPage;
+        }
+    }
+
+    /// <inheritdoc />
     public bool Seek(long rowId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
