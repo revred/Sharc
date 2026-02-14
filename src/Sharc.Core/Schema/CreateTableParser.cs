@@ -16,39 +16,59 @@
 --------------------------------------------------------------------------------------------------*/
 
 
+/*-------------------------------------------------------------------------------------------------!
+  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+
+  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
+  Software here is treated not as static text, but as a living system designed to learn and evolve.
+  Built on the belief that architecture and context often define outcomes before code is written.
+
+  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
+  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
+  intelligence-guided system, you may find resonance in these patterns and principles.
+
+  Subtle conversations often begin with a single message — or a prompt with the right context.
+  https://www.linkedin.com/in/revodoc/
+
+  Licensed under the MIT License — free for personal and commercial use.                           |
+--------------------------------------------------------------------------------------------------*/
+
+
 namespace Sharc.Core.Schema;
 
 /// <summary>
 /// Parses CREATE TABLE SQL statements to extract column information.
-/// Manual string parser â€” no regex. Handles quoted identifiers and table constraints.
+/// Manual string parser — no regex. Handles quoted identifiers and table constraints.
+/// optimized for zero allocation using ReadOnlySpan&lt;char&gt;.
 /// </summary>
 internal static class CreateTableParser
 {
     /// <summary>
     /// Parses column definitions from a CREATE TABLE SQL statement.
     /// </summary>
-    /// <param name="sql">The full CREATE TABLE SQL string.</param>
+    /// <param name="sql">The full CREATE TABLE SQL string as a span.</param>
     /// <returns>List of parsed column info objects.</returns>
-    public static IReadOnlyList<ColumnInfo> ParseColumns(string sql)
+    public static IReadOnlyList<ColumnInfo> ParseColumns(ReadOnlySpan<char> sql)
     {
         // Find the opening parenthesis
         int openParen = sql.IndexOf('(');
         if (openParen < 0)
-            return [];
+            return Array.Empty<ColumnInfo>();
 
         // Find the matching closing parenthesis
         int closeParen = FindMatchingParen(sql, openParen);
         if (closeParen < 0)
-            return [];
+            return Array.Empty<ColumnInfo>();
 
-        var body = sql.Substring(openParen + 1, closeParen - openParen - 1).Trim();
-        var segments = SplitByComma(body);
-
+        var body = sql.Slice(openParen + 1, closeParen - openParen - 1).Trim();
+        
         var columns = new List<ColumnInfo>();
         int ordinal = 0;
+        int pos = 0;
 
-        foreach (var segment in segments)
+        while (pos < body.Length)
         {
+            var segment = ReadNextSegment(body, ref pos);
             var trimmed = segment.Trim();
             if (trimmed.Length == 0) continue;
 
@@ -66,10 +86,11 @@ internal static class CreateTableParser
         return columns;
     }
 
-    private static int FindMatchingParen(string sql, int openIndex)
+    private static int FindMatchingParen(ReadOnlySpan<char> sql, int openIndex)
     {
         int depth = 0;
         bool inString = false;
+        
         for (int i = openIndex; i < sql.Length; i++)
         {
             char c = sql[i];
@@ -84,18 +105,17 @@ internal static class CreateTableParser
     }
 
     /// <summary>
-    /// Splits a string by commas, respecting parenthesized groups and string literals.
+    /// Reads the next comma-separated segment, respecting parenthesized groups and strings.
     /// </summary>
-    private static List<string> SplitByComma(string body)
+    private static ReadOnlySpan<char> ReadNextSegment(ReadOnlySpan<char> body, ref int pos)
     {
-        var result = new List<string>();
         int depth = 0;
         bool inString = false;
-        int start = 0;
+        int start = pos;
 
-        for (int i = 0; i < body.Length; i++)
+        for (; pos < body.Length; pos++)
         {
-            char c = body[i];
+            char c = body[pos];
             if (c == '\'' && !inString) { inString = true; continue; }
             if (c == '\'' && inString) { inString = false; continue; }
             if (inString) continue;
@@ -104,20 +124,19 @@ internal static class CreateTableParser
             else if (c == ')') depth--;
             else if (c == ',' && depth == 0)
             {
-                result.Add(body[start..i]);
-                start = i + 1;
+                var segment = body.Slice(start, pos - start);
+                pos++; // Skip comma
+                return segment;
             }
         }
 
-        if (start < body.Length)
-            result.Add(body[start..]);
-
-        return result;
+        // End of string
+        return body.Slice(start);
     }
 
-    private static bool IsTableConstraint(string segment)
+    private static bool IsTableConstraint(ReadOnlySpan<char> segment)
     {
-        var span = segment.AsSpan().TrimStart();
+        var span = segment.TrimStart();
         return span.StartsWith("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) ||
                span.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
                span.StartsWith("CHECK", StringComparison.OrdinalIgnoreCase) ||
@@ -125,7 +144,7 @@ internal static class CreateTableParser
                span.StartsWith("CONSTRAINT ", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ColumnInfo? ParseColumnDefinition(string definition, int ordinal)
+    private static ColumnInfo? ParseColumnDefinition(ReadOnlySpan<char> definition, int ordinal)
     {
         int pos = 0;
         string name = ReadIdentifier(definition, ref pos);
@@ -137,11 +156,11 @@ internal static class CreateTableParser
         string declaredType = ReadTypeName(definition, ref pos);
 
         // Check remaining for constraints
-        string remaining = pos < definition.Length ? definition[pos..] : "";
+        // We scan the rest of the definition for keywords
+        var remaining = pos < definition.Length ? definition.Slice(pos) : ReadOnlySpan<char>.Empty;
 
-        var definitionSpan = definition.AsSpan();
-        bool isPrimaryKey = definitionSpan.Contains("PRIMARY KEY".AsSpan(), StringComparison.OrdinalIgnoreCase);
-        bool isNotNull = definitionSpan.Contains("NOT NULL".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        bool isPrimaryKey = Contains(remaining, "PRIMARY KEY");
+        bool isNotNull = Contains(remaining, "NOT NULL");
 
         return new ColumnInfo
         {
@@ -152,8 +171,13 @@ internal static class CreateTableParser
             IsNotNull = isNotNull || isPrimaryKey // PK is implicitly NOT NULL
         };
     }
+    
+    private static bool Contains(ReadOnlySpan<char> span, string value)
+    {
+        return span.IndexOf(value.AsSpan(), StringComparison.OrdinalIgnoreCase) >= 0;
+    }
 
-    private static string ReadIdentifier(string s, ref int pos)
+    private static string ReadIdentifier(ReadOnlySpan<char> s, ref int pos)
     {
         SkipWhitespace(s, ref pos);
         if (pos >= s.Length) return "";
@@ -165,20 +189,33 @@ internal static class CreateTableParser
         {
             char closeChar = first switch { '[' => ']', _ => first };
             int start = pos + 1;
-            int end = s.IndexOf(closeChar, start);
+            int end = -1;
+            
+            // Find close char
+            for(int i = start; i < s.Length; i++)
+            {
+                if(s[i] == closeChar)
+                {
+                    end = i;
+                    break;
+                }
+            }
+            
             if (end < 0) end = s.Length;
-            pos = end + 1;
-            return s[start..end];
+            else pos = end + 1; // Advance past quote
+            
+            return s.Slice(start, end - start).ToString();
         }
 
         // Unquoted identifier
         int idStart = pos;
         while (pos < s.Length && (char.IsLetterOrDigit(s[pos]) || s[pos] == '_'))
             pos++;
-        return s[idStart..pos];
+            
+        return s.Slice(idStart, pos - idStart).ToString();
     }
 
-    private static string ReadTypeName(string s, ref int pos)
+    private static string ReadTypeName(ReadOnlySpan<char> s, ref int pos)
     {
         SkipWhitespace(s, ref pos);
         if (pos >= s.Length) return "";
@@ -196,7 +233,8 @@ internal static class CreateTableParser
             if (depth > 0) { pos++; continue; }
 
             // Stop at constraint keywords
-            var remaining = s.AsSpan(pos).TrimStart();
+            // Check if current position starts a keyword
+            var remaining = s.Slice(pos).TrimStart();
             if (remaining.StartsWith("PRIMARY", StringComparison.OrdinalIgnoreCase) ||
                 remaining.StartsWith("NOT", StringComparison.OrdinalIgnoreCase) ||
                 remaining.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
@@ -212,10 +250,10 @@ internal static class CreateTableParser
             pos++;
         }
 
-        return s[start..pos].Trim();
+        return s.Slice(start, pos - start).Trim().ToString();
     }
 
-    private static void SkipWhitespace(string s, ref int pos)
+    private static void SkipWhitespace(ReadOnlySpan<char> s, ref int pos)
     {
         while (pos < s.Length && char.IsWhiteSpace(s[pos]))
             pos++;

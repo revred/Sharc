@@ -122,7 +122,7 @@ public static class TrustTestFixtures
         byte[] data = new byte[bufferSize];
         int offset = 0;
         offset += Encoding.UTF8.GetBytes(signer.AgentId, data.AsSpan(offset));
-        data[offset++] = (byte)AgentClass.Human;
+        data[offset++] = (byte)AgentClass.User;
         pub.CopyTo(data.AsSpan(offset));
         offset += pub.Length;
         BinaryPrimitives.WriteUInt64BigEndian(data.AsSpan(offset), authorityCeiling);
@@ -138,6 +138,6 @@ public static class TrustTestFixtures
         
         var sig = signer.Sign(data);
         
-        return new AgentInfo(signer.AgentId, AgentClass.Human, pub, authorityCeiling, wScope, rScope, start, end, parent, cosign, sig);
+        return new AgentInfo(signer.AgentId, AgentClass.User, pub, authorityCeiling, wScope, rScope, start, end, parent, cosign, sig);
     }
 }

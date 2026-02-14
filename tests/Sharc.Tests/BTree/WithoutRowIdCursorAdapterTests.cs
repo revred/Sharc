@@ -156,5 +156,15 @@ public sealed class WithoutRowIdCursorAdapterTests
         {
             return DecodeColumn(payload, columnIndex);
         }
+
+        public int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset)
+        {
+            bodyOffset = 0;
+            return 0;
+        }
+
+        public string DecodeStringDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => string.Empty;
+        public long DecodeInt64Direct(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => 0;
+        public double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => 0;
     }
 }

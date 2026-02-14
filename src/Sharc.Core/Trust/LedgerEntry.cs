@@ -9,6 +9,7 @@ public record LedgerEntry(
     long SequenceNumber,
     long Timestamp,
     string AgentId,
+    byte[] Payload,
     byte[] PayloadHash,
     byte[] PreviousHash,
     byte[] Signature);

@@ -35,9 +35,17 @@ public sealed class SharcSchema
     /// Gets a table by name (case-insensitive).
     /// </summary>
     /// <exception cref="KeyNotFoundException">Table not found.</exception>
-    public TableInfo GetTable(string name) =>
-        Tables.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-        ?? throw new KeyNotFoundException($"Table '{name}' not found in schema.");
+    public TableInfo GetTable(string name)
+    {
+        // Zero-allocation loop instead of LINQ
+        var count = Tables.Count;
+        for (int i = 0; i < count; i++)
+        {
+            if (Tables[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return Tables[i];
+        }
+        throw new KeyNotFoundException($"Table '{name}' not found in schema.");
+    }
 }
 
 /// <summary>
@@ -56,6 +64,12 @@ public sealed class TableInfo
 
     /// <summary>Columns in declaration order.</summary>
     public required IReadOnlyList<ColumnInfo> Columns { get; init; }
+
+    /// <summary>
+    /// Indexes associated with this table.
+    /// populated by SchemaReader.
+    /// </summary>
+    public IReadOnlyList<IndexInfo> Indexes { get; internal set; } = [];
 
     /// <summary>Whether this is a WITHOUT ROWID table.</summary>
     public required bool IsWithoutRowId { get; init; }
