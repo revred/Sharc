@@ -187,35 +187,18 @@ public sealed class SharcDatabase : IDisposable
         SharcDatabaseFactory.OpenMemory(data, options);
 
     /// <summary>
-    /// Creates a forward-only reader for the specified table.
+    /// Creates a forward-only reader for the specified table with optional column projection and filtering.
     /// </summary>
     /// <param name="tableName">Name of the table to read.</param>
+    /// <param name="columns">Optional column names to include.</param>
+    /// <param name="filters">Optional array of <see cref="SharcFilter"/> conditions.</param>
+    /// <param name="filter">Optional <see cref="IFilterStar"/> expression for advanced filtering.</param>
     /// <returns>A data reader positioned before the first row.</returns>
-    /// <exception cref="KeyNotFoundException">The table does not exist.</exception>
-    public SharcDataReader CreateReader(string tableName)
+    public SharcDataReader CreateReader(string tableName, string[]? columns = null, SharcFilter[]? filters = null, IFilterStar? filter = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
-        var table = schema.GetTable(tableName) 
-            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
-            
-        var cursor = CreateTableCursor(table);
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
-            _bTreeReader, table.Indexes);
-    }
-
-    /// <summary>
-    /// Creates a reader that scans the table's b-tree with optional column projection.
-    /// </summary>
-    /// <param name="tableName">Name of the table to read.</param>
-    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
-    /// <returns>A data reader positioned before the first row.</returns>
-    public SharcDataReader CreateReader(string tableName, params string[]? columns)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var schema = GetSchema();
-        var table = schema.GetTable(tableName)
-            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
+        var table = schema.GetTable(tableName) ?? throw new KeyNotFoundException($"Table '{tableName}' not found.");
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -225,106 +208,31 @@ public sealed class SharcDatabase : IDisposable
             for (int i = 0; i < columns.Length; i++)
             {
                 int ordinal = table.GetColumnOrdinal(columns[i]);
-                projection[i] = ordinal >= 0
-                    ? ordinal
-                    : throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+                projection[i] = ordinal >= 0 ? ordinal : throw new ArgumentException($"Column '{columns[i]}' not found.");
             }
         }
 
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, table.Indexes);
-    }
-
-    /// <summary>
-    /// Creates a reader that scans the table with row-level filters applied (AND semantics).
-    /// Rows that do not match all filters are skipped during iteration.
-    /// </summary>
-    /// <param name="tableName">Name of the table to read.</param>
-    /// <param name="filters">Filter conditions. All must match for a row to be returned.</param>
-    /// <returns>A data reader positioned before the first matching row.</returns>
-    public SharcDataReader CreateReader(string tableName, params SharcFilter[] filters)
-    {
-        return CreateReader(tableName, null, filters);
-    }
-
-    /// <summary>
-    /// Creates a reader with both column projection and row-level filters.
-    /// </summary>
-    /// <param name="tableName">Name of the table to read.</param>
-    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
-    /// <param name="filters">Filter conditions (AND semantics). Null or empty for no filtering.</param>
-    /// <returns>A data reader positioned before the first matching row.</returns>
-    public SharcDataReader CreateReader(string tableName, string[]? columns, SharcFilter[]? filters)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var schema = GetSchema();
-        var table = schema.GetTable(tableName)
-            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
-        var cursor = CreateTableCursor(table);
-
-        int[]? projection = null;
-        if (columns is { Length: > 0 })
+        if (filter != null)
         {
-            projection = new int[columns.Length];
-            for (int i = 0; i < columns.Length; i++)
-            {
-                var col = table.Columns.FirstOrDefault(c =>
-                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
-                projection[i] = col?.Ordinal
-                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
-            }
+            var node = FilterTreeCompiler.CompileBaked(filter, table.Columns, FindIntegerPrimaryKeyOrdinal(table.Columns));
+            return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection, _bTreeReader, table.Indexes, null, node);
         }
 
-        ResolvedFilter[]? resolved = ResolveFilters(table, filters);
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, table.Indexes, resolved);
+        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection, _bTreeReader, table.Indexes, ResolveFilters(table, filters));
     }
 
-    /// <summary>
-    /// Creates a reader with byte-level row filtering using the FilterStar expression tree.
-    /// Rows that do not match the filter are skipped without full record decoding.
-    /// </summary>
-    /// <param name="tableName">Name of the table to read.</param>
-    /// <param name="filter">FilterStar expression tree.</param>
-    /// <returns>A data reader positioned before the first matching row.</returns>
-    public SharcDataReader CreateReader(string tableName, IFilterStar filter)
-    {
-        return CreateReader(tableName, null, filter);
-    }
+    /// <summary>Creates a reader with column projection.</summary>
+    public SharcDataReader CreateReader(string tableName, params string[]? columns) => CreateReader(tableName, columns, null, null);
 
-    /// <summary>
-    /// Creates a reader with column projection and byte-level row filtering.
-    /// </summary>
-    /// <param name="tableName">Name of the table to read.</param>
-    /// <param name="columns">Column names to include. Null or empty for all columns.</param>
-    /// <param name="filter">FilterStar expression tree.</param>
-    /// <returns>A data reader positioned before the first matching row.</returns>
-    public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var schema = GetSchema();
-        var table = schema.GetTable(tableName)
-            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
-        var cursor = CreateTableCursor(table);
+    /// <summary>Creates a reader with multiple filters.</summary>
+    public SharcDataReader CreateReader(string tableName, params SharcFilter[] filters) => CreateReader(tableName, null, filters, null);
 
-        int[]? projection = null;
-        if (columns is { Length: > 0 })
-        {
-            projection = new int[columns.Length];
-            for (int i = 0; i < columns.Length; i++)
-            {
-                var col = table.Columns.FirstOrDefault(c =>
-                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
-                projection[i] = col?.Ordinal
-                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
-            }
-        }
+    /// <summary>Creates a reader with a FilterStar expression.</summary>
+    public SharcDataReader CreateReader(string tableName, IFilterStar filter) => CreateReader(tableName, null, null, filter);
 
-        int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
-        var filterNode = FilterTreeCompiler.CompileBaked(filter, table.Columns, rowidAlias);
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, table.Indexes, filters: null, filterNode: filterNode);
-    }
+    /// <summary>Creates a reader with column projection and a FilterStar expression.</summary>
+    public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter) => CreateReader(tableName, columns, null, filter);
+
 
     /// <summary>
     /// Internal overload to support pre-compiled filter nodes with projection.
