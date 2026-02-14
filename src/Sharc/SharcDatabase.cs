@@ -11,6 +11,7 @@ using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Crypto;
 using Sharc.Exceptions;
+using global::Sharc.Core.Query;
 
 namespace Sharc;
 

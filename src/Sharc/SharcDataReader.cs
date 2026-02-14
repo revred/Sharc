@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
+using Sharc.Core.Query;
 
 namespace Sharc;
 
@@ -273,8 +274,9 @@ public sealed class SharcDataReader : IDisposable
 
             // ── Zero-Allocation Filter Check ──
             // Evaluate filters against raw serial types/bytes before allocating managed objects.
+            // Pushdown to RecordDecoder for zero-allocation check
             if (_filters != null && _filters.Length > 0 && 
-                !FilterEvaluator.MatchesRaw(_cursor.Payload, _filters, (Sharc.Core.Records.RecordDecoder)_recordDecoder))
+                !_recordDecoder.Matches(_cursor.Payload, _filters))
             {
                 continue; // Skip row without decoding
             }

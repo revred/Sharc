@@ -26,6 +26,7 @@ public class ReputationTests : IDisposable
     {
         _db?.Dispose();
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

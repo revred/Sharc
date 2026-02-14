@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
 using Sharc.Core.Primitives;
+using Sharc.Core.Query;
 
 namespace Sharc.Core.Records;
 
@@ -341,5 +342,172 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             _ => 0
         };
         return (double)intVal;
+    }
+
+    /// <inheritdoc />
+    public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters)
+    {
+        // 1. Calculate max column ordinal to bound the serial type parsing
+        int maxOrdinal = -1;
+        for (int i = 0; i < filters.Length; i++)
+        {
+            if (filters[i].ColumnOrdinal > maxOrdinal)
+                maxOrdinal = filters[i].ColumnOrdinal;
+        }
+
+        // 2. Parse serial types (stackalloc to avoid allocation)
+        Span<long> serialTypes = stackalloc long[Math.Max(maxOrdinal + 1, 16)];
+        int colCount = ReadSerialTypes(payload, serialTypes, out int bodyOffset);
+
+        // 3. Evaluate each filter
+        for (int i = 0; i < filters.Length; i++)
+        {
+            ref readonly var f = ref filters[i];
+
+            // If filter column is out of range, treat as NULL
+            if (f.ColumnOrdinal >= colCount)
+            {
+                // NULL never matches standard operators
+                return false; 
+            }
+
+            long st = serialTypes[f.ColumnOrdinal];
+
+            // 4. Locate column data
+            int currentOffset = bodyOffset;
+            for (int c = 0; c < f.ColumnOrdinal; c++)
+            {
+                currentOffset += SerialTypeCodec.GetContentSize(serialTypes[c]);
+            }
+            int contentSize = SerialTypeCodec.GetContentSize(st);
+            var data = payload.Slice(currentOffset, contentSize);
+
+            // 5. Compare raw bytes
+            if (!MatchesRawValue(data, st, f.Operator, f.Value))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesRawValue(ReadOnlySpan<byte> data, long st, SharcOperator op, object? filterValue)
+    {
+        if (st == 0) return false; // NULL matches nothing
+        if (filterValue is null) return false;
+
+        int cmp = 0;
+
+        if (IsIntegral(st))
+        {
+            long val = DecodeInt(data, st);
+            switch (filterValue)
+            {
+                case long l: cmp = val.CompareTo(l); break;
+                case int i: cmp = val.CompareTo((long)i); break;
+                case double d: cmp = ((double)val).CompareTo(d); break;
+                default: return false;
+            }
+        }
+        else if (IsReal(st))
+        {
+            double val = BinaryPrimitives.ReadDoubleBigEndian(data);
+            switch (filterValue)
+            {
+                case double d: cmp = val.CompareTo(d); break;
+                case float f: cmp = val.CompareTo((double)f); break;
+                case long l: cmp = val.CompareTo((double)l); break;
+                case int i: cmp = val.CompareTo((double)i); break;
+                default: return false;
+            }
+        }
+        else if (IsText(st))
+        {
+            if (filterValue is string s)
+            {
+                // Optimization: Stack-based comparison for short strings
+                if (s.Length <= 128)
+                {
+                    Span<char> chars = stackalloc char[s.Length];
+                    int charCount = System.Text.Encoding.UTF8.GetChars(data, chars);
+                    // Standard string comparison logic would require identical chars
+                    // but we only populated 'chars' from UTF8 bytes.
+                    // This comparison is only strictly valid if char counts match.
+                    if (charCount != s.Length) 
+                    {
+                        // Length mismatch -> Not equal.
+                        // For ordering, we'd need complex logic.
+                        // Assuming most filters are EQUAL, this is a fast reject path.
+                        // But what if op is LessThan? We can't shortcut.
+                        // Fallback to alloc for non-Equal?
+                        if (op == SharcOperator.Equal) return false;
+                        if (op == SharcOperator.NotEqual) return true;
+                        
+                        // Fallback for ordering
+                        var strVal = System.Text.Encoding.UTF8.GetString(data);
+                        cmp = string.Compare(strVal, s, StringComparison.Ordinal);
+                    }
+                    else
+                    {
+                        // Lengths match, compare chars
+                        cmp = chars.SequenceCompareTo(s.AsSpan());
+                    }
+                }
+                else
+                {
+                    var strVal = System.Text.Encoding.UTF8.GetString(data);
+                    cmp = string.Compare(strVal, s, StringComparison.Ordinal);
+                }
+            }
+            else return false;
+        }
+        else
+        {
+            return false;
+        }
+
+        return op switch
+        {
+            SharcOperator.Equal => cmp == 0,
+            SharcOperator.NotEqual => cmp != 0,
+            SharcOperator.LessThan => cmp < 0,
+            SharcOperator.GreaterThan => cmp > 0,
+            SharcOperator.LessOrEqual => cmp <= 0,
+            SharcOperator.GreaterOrEqual => cmp >= 0,
+            _ => false
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIntegral(long st) => st >= 1 && st <= 6 || st == 8 || st == 9;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsReal(long st) => st == 7;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsText(long st) => st >= 13 && (st & 1) == 1;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long DecodeInt(ReadOnlySpan<byte> data, long st)
+    {
+        return st switch
+        {
+            1 => (sbyte)data[0],
+            2 => BinaryPrimitives.ReadInt16BigEndian(data),
+            3 => DecodeInt24Raw(data),
+            4 => BinaryPrimitives.ReadInt32BigEndian(data),
+            5 => DecodeInt48Raw(data),
+            6 => BinaryPrimitives.ReadInt64BigEndian(data),
+            8 => 0,
+            9 => 1,
+            _ => 0
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long DecodeInt24Raw(ReadOnlySpan<byte> data)
+    {
+        int raw = (data[0] << 16) | (data[1] << 8) | data[2];
+        if ((raw & 0x800000) != 0) raw |= unchecked((int)0xFF000000);
+        return raw;
     }
 }

@@ -77,24 +77,35 @@ public class AcidProbingTests
     public void BTree_StructuralIntegrity_AcrossTransaction()
     {
         // This test probes if B-Tree structures survive staging.
-        // We write to multiple pages and simulate a complex structural bit-pattern.
-        var data = CreateEmptyDatabase(pageCount: 10);
-        using var db = SharcDatabase.OpenMemory(data);
-
-        using (var tx = db.BeginTransaction())
+        var tempFile = Path.GetTempFileName();
+        try
         {
+            File.WriteAllBytes(tempFile, CreateEmptyDatabase(pageCount: 10));
+            
+            using (var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
+            {
+                using (var tx = db.BeginTransaction())
+                {
+                    for (uint i = 2; i <= 10; i++)
+                    {
+                        var page = new byte[4096];
+                        page[0] = (byte)i; // Marker
+                        db.WritePage(i, page);
+                    }
+                    tx.Commit();
+                }
+            }
+
+            // Verify persistence
+            var data = File.ReadAllBytes(tempFile);
             for (uint i = 2; i <= 10; i++)
             {
-                var page = new byte[4096];
-                page[0] = (byte)i; // Marker
-                db.WritePage(i, page);
+                Assert.Equal((byte)i, data[(i - 1) * 4096]);
             }
-            tx.Commit();
         }
-
-        for (uint i = 2; i <= 10; i++)
+        finally
         {
-            Assert.Equal((byte)i, data[(i - 1) * 4096]);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }
 
@@ -223,8 +234,11 @@ public class AcidProbingTests
         catch (IOException) { }
 
         // Verification: Page 1 was written, but Page 2 was NOT.
-        Assert.Equal(0x11, data[500]);
-        Assert.Equal(0, data[4096 + 500]);
+        var page1 = baseSource.GetPage(1);
+        Assert.Equal(0x11, page1[500]);
+        
+        var page2 = baseSource.GetPage(2);
+        Assert.Equal(0, page2[500]);
     }
 
     private sealed class FailingPageSource : IWritablePageSource

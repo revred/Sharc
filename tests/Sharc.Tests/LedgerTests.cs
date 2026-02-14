@@ -4,6 +4,7 @@ using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Sharc.Core.Records;
+using Sharc.Core.Primitives;
 using Sharc.Core.Trust;
 using Sharc.Trust;
 using Sharc.Tests.Trust;
@@ -130,44 +131,69 @@ public class LedgerTests
     [Fact]
     public void Ledger_TamperAttempt_DetectedByVerifyIntegrity()
     {
-        var data = CreateLedgerDatabase();
-        using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
-        
-        var ledger = new LedgerManager(db);
-        var signer = new SharcSigner("agent-alpha");
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var data = CreateLedgerDatabase();
+            File.WriteAllBytes(tempFile, data);
 
-        ledger.Append("Valid data 1", signer);
-        ledger.Append("Valid data 2", signer);
+            using (var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
+            {
+                var ledger = new LedgerManager(db);
+                var signer = new SharcSigner("agent-alpha");
 
-        var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
-        Assert.True(ledger.VerifyIntegrity(keys));
+                ledger.Append("Valid data 1", signer);
+                ledger.Append("Valid data 2", signer);
 
-        // TAMPER: Manually flip a bit in the first entry's Payload Hash
-        // We read via the page source to bypass/interact correctly with caching
-        var page2 = new byte[4096];
-        db.PageSource.ReadPage(2, page2);
-        
-        ushort cellPtr = BinaryPrimitives.ReadUInt16BigEndian(page2.AsSpan(8, 2)); 
-        // Flip something in the record body
-        page2[cellPtr + 30] ^= 0xFF; 
+                var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
+                Assert.True(ledger.VerifyIntegrity(keys));
+            }
 
-        // Write the corrupted page back to simulated storage
-        // Since it's OpenMemory, we might need a way to force-refresh or just trust the next read.
-        // Actually, db.PageSource.WritePage on a ProxyPageSource might not be enough if there's a Pager cache.
-        // But Sharc doesn't have a separate Pager cache in the way SQLite does yet, it uses the PageSource.
-        // Wait, I'll check if SharcDatabase has a Pager. 
-        // If I use tx.WritePage it will be buffered.
-        // If I want to simulate OUT-OF-BAND corruption, I should modify the 'data' array AND clear any cache.
-        // For simplicity in OpenMemory, I'll just close and re-open the database after tampering with 'data'.
-        
-        db.Dispose();
-        data[4096 + cellPtr + 30] ^= 0xFF; // Tamper the raw array
-        
-        using var db2 = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
-        var ledger2 = new LedgerManager(db2);
-        
-        // Now integrity should fail
-        Assert.False(ledger2.VerifyIntegrity(keys));
+            // TAMPER: Manually flip a bit in the first entry's Payload Hash
+            // Read all bytes from disk
+            var diskData = File.ReadAllBytes(tempFile);
+            var page2 = diskData.AsSpan(4096, 4096);
+            
+            ushort cellPtr = BinaryPrimitives.ReadUInt16BigEndian(page2.Slice(8, 2)); // First cell pointer
+            var cell = page2.Slice(cellPtr);
+            
+            // Parse cell header to get payload
+            int pSzLen = VarintDecoder.Read(cell, out long payloadSize);
+            int rIdLen = VarintDecoder.Read(cell.Slice(pSzLen), out long rowId);
+            int headerLen = pSzLen + rIdLen;
+            var payload = cell.Slice(headerLen, (int)payloadSize);
+
+            // Parse record header to find offset of column 4 (PayloadHash)
+            var decoder = new RecordDecoder();
+            Span<long> serialTypes = stackalloc long[10];
+            decoder.ReadSerialTypes(payload, serialTypes, out int bodyOffset);
+            
+            // Calculate offset to column 4
+            int offset = bodyOffset;
+            for (int i = 0; i < 4; i++)
+                offset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+            
+            // Corrupt first byte of PayloadHash
+            payload[offset] ^= 0xFF;
+
+            // Write back to disk
+            File.WriteAllBytes(tempFile, diskData);
+
+            // Re-open and verify
+            using (var db2 = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
+            {
+                var ledger2 = new LedgerManager(db2);
+                var signer = new SharcSigner("agent-alpha");
+                var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
+                
+                // Now integrity should fail
+                Assert.False(ledger2.VerifyIntegrity(keys));
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
     }
 
     private static byte[] CreateTrustDatabase(int pageSize = 4096)
