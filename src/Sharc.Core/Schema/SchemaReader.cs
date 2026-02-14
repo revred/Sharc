@@ -51,7 +51,7 @@ internal sealed class SchemaReader
                 case "table":
                     if (sql != null)
                     {
-                        var columnInfos = CreateTableParser.ParseColumns(sql.AsSpan());
+                        var columnInfos = SchemaParser.ParseTableColumns(sql.AsSpan());
                         tables.Add(new TableInfo
                         {
                             Name = name,
@@ -66,7 +66,7 @@ internal sealed class SchemaReader
 
                 case "index":
                     var indexColumns = sql != null
-                        ? CreateIndexParser.ParseColumns(sql)
+                        ? SchemaParser.ParseIndexColumns(sql.AsSpan())
                         : (IReadOnlyList<IndexColumnInfo>)[];
                     indexes.Add(new IndexInfo
                     {
