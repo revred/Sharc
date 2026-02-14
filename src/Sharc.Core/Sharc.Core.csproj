@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>Sharc.Core</RootNamespace>
     <AssemblyName>Sharc.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc" />
