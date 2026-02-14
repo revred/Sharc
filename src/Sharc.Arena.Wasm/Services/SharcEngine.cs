@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Arena.Wasm.Services;
 
@@ -22,6 +9,9 @@ using Sharc.Arena.Wasm.Models;
 using Sharc.Graph;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
+using Sharc.Trust;
+using Sharc.Crypto;
+using Sharc.Core.Trust;
 
 /// <summary>
 /// Tier 1 live engine: runs actual Sharc API calls against an in-memory database.
@@ -48,7 +38,7 @@ public sealed class SharcEngine : IDisposable
         _db = SharcDatabase.OpenMemory(_dbBytes);
 
         // Share the same IBTreeReader (and underlying MemoryPageSource) that
-        // SharcDatabase already created — zero duplication.
+        // SharcDatabase already created â€” zero duplication.
         _graph = new SharcContextGraph(_db.BTreeReader, new NativeSchemaAdapter());
         _graph.Initialize();
 
@@ -516,7 +506,7 @@ public sealed class SharcEngine : IDisposable
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        // Sustained scan — measure total allocation pressure
+        // Sustained scan â€” measure total allocation pressure
         long count = 0;
         using (var reader = _db.CreateReader("users", "id"))
         {
@@ -567,7 +557,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(allocKb, 0),
             Allocation = $"{allocKb:F0} KB (managed heap)",
-            Note = "Pure managed C# — no native WASM binary",
+            Note = "Pure managed C# â€” no native WASM binary",
         };
     }
 
@@ -581,10 +571,67 @@ public sealed class SharcEngine : IDisposable
         };
     }
 
+    public EngineBaseResult RunTrustVerification(double scale)
+    {
+        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+
+        var ledger = new LedgerManager(_db);
+        
+        // Ensure some entries exist for the benchmark
+        var count = _db.GetRowCount("_sharc_ledger");
+        if (count < 10)
+        {
+             var signer = new SharcSigner("agent-0");
+             // Add agent info to registry so verification works
+             var registry = new AgentRegistry(_db);
+             var pubKey = signer.GetPublicKey();
+             
+             var tempAgent = new AgentInfo(
+                 "agent-0", 
+                 AgentClass.Root, 
+                 pubKey, 
+                 1000000, 
+                 "rw", 
+                 "r", 
+                 0, 
+                 0, 
+                 "", 
+                 false, 
+                 Array.Empty<byte>());
+
+             var buffer = AgentRegistry.GetVerificationBuffer(tempAgent);
+             var signature = signer.Sign(buffer);
+             var agentInfo = tempAgent with { Signature = signature };
+
+             registry.RegisterAgent(agentInfo);
+
+             for (int i = 0; i < 50; i++)
+             {
+                 ledger.Append($"Context update {i}", signer);
+             }
+             count = _db.GetRowCount("_sharc_ledger");
+        }
+
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        var sw = Stopwatch.StartNew();
+
+        bool valid = ledger.VerifyIntegrity();
+
+        sw.Stop();
+        var allocAfter = GC.GetAllocatedBytesForCurrentThread();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
+            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Note = $"Verified {count} entries (Hash Chain + Ed25519)",
+        };
+    }
+
     /// <summary>Disposes the current database (if any), ready for re-init at different scale.</summary>
     public void Reset()
     {
-        // Dispose graph FIRST — it shares _db's BTreeReader (and underlying page source)
+        // Dispose graph FIRST â€” it shares _db's BTreeReader (and underlying page source)
         _graph?.Dispose();
         _graph = null;
 

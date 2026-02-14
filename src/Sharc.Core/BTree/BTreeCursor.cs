@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Buffers;
 using System.Buffers.Binary;
@@ -48,7 +35,7 @@ internal sealed class BTreeCursor : IBTreeCursor
     private int _inlinePayloadOffset;
     private uint _inlinePayloadPage;
 
-    // Reusable overflow cycle detection set â€” cleared between overflow assemblies
+    // Reusable overflow cycle detection set Ã¢â‚¬â€ cleared between overflow assemblies
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
@@ -189,10 +176,10 @@ internal sealed class BTreeCursor : IBTreeCursor
                 return;
             }
 
-            // Interior page â€” push onto stack and descend to leftmost child
+            // Interior page Ã¢â‚¬â€ push onto stack and descend to leftmost child
             if (header.CellCount == 0)
             {
-                // Interior page with no cells â€” go to right child
+                // Interior page with no cells Ã¢â‚¬â€ go to right child
                 _stack.Push((pageNumber, 0, headerOffset, header));
                 pageNumber = header.RightChildPage;
                 continue;
@@ -248,7 +235,7 @@ internal sealed class BTreeCursor : IBTreeCursor
                 return false;
             }
 
-            // Interior page â€” binary search for the correct child
+            // Interior page Ã¢â‚¬â€ binary search for the correct child
             int idx = -1;
             int l = 0;
             int r = header.CellCount - 1;
@@ -297,7 +284,7 @@ internal sealed class BTreeCursor : IBTreeCursor
                 return true;
             }
 
-            // Current leaf exhausted â€” try to move to next leaf via stack
+            // Current leaf exhausted Ã¢â‚¬â€ try to move to next leaf via stack
             if (!MoveToNextLeaf())
             {
                 _exhausted = true;
@@ -318,7 +305,7 @@ internal sealed class BTreeCursor : IBTreeCursor
 
             if (nextCellIndex < header.CellCount)
             {
-                // More cells in this interior page â€” push updated state and descend
+                // More cells in this interior page Ã¢â‚¬â€ push updated state and descend
                 _stack.Push((page, nextCellIndex, headerOffset, header));
 
                 // Read the single cell pointer on-demand (no array allocation)
@@ -330,7 +317,7 @@ internal sealed class BTreeCursor : IBTreeCursor
                 return true;
             }
 
-            // All cells exhausted â€” descend to right child
+            // All cells exhausted Ã¢â‚¬â€ descend to right child
             if (header.RightChildPage != 0)
             {
                 DescendToLeftmostLeaf(header.RightChildPage);
@@ -344,7 +331,7 @@ internal sealed class BTreeCursor : IBTreeCursor
     private void ParseCurrentLeafCell()
     {
         var page = _pageSource.GetPage(_currentLeafPage);
-        // Read cell pointer on-demand â€” zero allocation
+        // Read cell pointer on-demand Ã¢â‚¬â€ zero allocation
         int cellOffset = _currentHeader.GetCellPointer(page[_currentHeaderOffset..], _currentCellIndex);
 
         int cellHeaderSize = CellParser.ParseTableLeafCell(
@@ -355,14 +342,14 @@ internal sealed class BTreeCursor : IBTreeCursor
 
         if (inlineSize >= _payloadSize)
         {
-            // All payload is inline â€” point directly at page data
+            // All payload is inline Ã¢â‚¬â€ point directly at page data
             _inlinePayloadOffset = payloadStart;
             _inlinePayloadPage = _currentLeafPage;
             _assembledPayload = null;
         }
         else
         {
-            // Overflow â€” assemble the full payload
+            // Overflow Ã¢â‚¬â€ assemble the full payload
             AssembleOverflowPayload(page, payloadStart, inlineSize);
         }
     }

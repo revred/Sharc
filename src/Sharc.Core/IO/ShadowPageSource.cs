@@ -21,8 +21,18 @@ public sealed class ShadowPageSource : IWritablePageSource
 
     /// <inheritdoc />
     public int PageSize => _baseSource.PageSize;
+
     /// <inheritdoc />
-    public int PageCount => _baseSource.PageCount;
+    public int PageCount 
+    {
+        get
+        {
+            int baseCount = _baseSource.PageCount;
+            if (_dirtyPages.Count == 0) return baseCount;
+            int maxDirty = (int)_dirtyPages.Keys.Max();
+            return Math.Max(baseCount, maxDirty);
+        }
+    }
 
     /// <inheritdoc />
     public ReadOnlySpan<byte> GetPage(uint pageNumber)

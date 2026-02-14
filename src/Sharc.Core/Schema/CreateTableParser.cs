@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 
 /*-------------------------------------------------------------------------------------------------!
@@ -27,10 +14,10 @@
   to modern engineering. If you seek to transform a traditional codebase into an adaptive,
   intelligence-guided system, you may find resonance in these patterns and principles.
 
-  Subtle conversations often begin with a single message — or a prompt with the right context.
+  Subtle conversations often begin with a single message â€” or a prompt with the right context.
   https://www.linkedin.com/in/revodoc/
 
-  Licensed under the MIT License — free for personal and commercial use.                           |
+  Licensed under the MIT License â€” free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
 
@@ -38,7 +25,7 @@ namespace Sharc.Core.Schema;
 
 /// <summary>
 /// Parses CREATE TABLE SQL statements to extract column information.
-/// Manual string parser — no regex. Handles quoted identifiers and table constraints.
+/// Manual string parser â€” no regex. Handles quoted identifiers and table constraints.
 /// optimized for zero allocation using ReadOnlySpan&lt;char&gt;.
 /// </summary>
 internal static class CreateTableParser

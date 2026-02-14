@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
@@ -23,7 +10,7 @@ namespace Sharc.Arena.Wasm.Services;
 
 /// <summary>
 /// Tier 1 live engine: runs Microsoft.Data.Sqlite directly in .NET WASM.
-/// Same runtime as Sharc — identical timing (Stopwatch + GC alloc tracking).
+/// Same runtime as Sharc â€” identical timing (Stopwatch + GC alloc tracking).
 /// SQLitePCLRaw bundles e_sqlite3 compiled to WASM via Emscripten, accessed via P/Invoke.
 /// </summary>
 public sealed class SqliteEngine : IDisposable
@@ -84,7 +71,7 @@ public sealed class SqliteEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
             Allocation = $"{allocKb:F1} KB",
-            Note = "Microsoft.Data.Sqlite — in-process P/Invoke",
+            Note = "Microsoft.Data.Sqlite â€” in-process P/Invoke",
         };
     }
 

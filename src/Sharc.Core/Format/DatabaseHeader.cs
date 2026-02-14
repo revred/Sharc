@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
 using Sharc.Exceptions;
@@ -26,6 +13,7 @@ namespace Sharc.Core.Format;
 /// </summary>
 public readonly struct DatabaseHeader
 {
+    private const int HeaderSize = SQLiteLayout.DatabaseHeaderSize;
     /// <summary>Expected magic string at offset 0.</summary>
     public static ReadOnlySpan<byte> MagicBytes => "SQLite format 3\0"u8;
 
@@ -56,7 +44,7 @@ public readonly struct DatabaseHeader
     /// <summary>Schema cookie (incremented on schema change).</summary>
     public uint SchemaCookie { get; }
 
-    /// <summary>Schema format number (1â€“4).</summary>
+    /// <summary>Schema format number (1Ã¢â‚¬â€œ4).</summary>
     public int SchemaFormat { get; }
 
     /// <summary>Text encoding (1=UTF-8, 2=UTF-16le, 3=UTF-16be).</summary>
@@ -110,8 +98,8 @@ public readonly struct DatabaseHeader
     /// <exception cref="InvalidDatabaseException">Invalid magic or header values.</exception>
     public static DatabaseHeader Parse(ReadOnlySpan<byte> data)
     {
-        if (data.Length < 100)
-            throw new InvalidDatabaseException("Database header must be at least 100 bytes.");
+        if (data.Length < HeaderSize)
+            throw new InvalidDatabaseException($"Database header must be at least {HeaderSize} bytes.");
 
         if (!data[..16].SequenceEqual(MagicBytes))
             throw new InvalidDatabaseException("Invalid SQLite magic string.");
@@ -153,7 +141,7 @@ public readonly struct DatabaseHeader
     /// <param name="header">The header values to write.</param>
     public static void Write(Span<byte> destination, DatabaseHeader header)
     {
-        destination[..100].Clear();
+        destination[..HeaderSize].Clear();
         MagicBytes.CopyTo(destination);
 
         ushort rawPageSize = header.PageSize == 65536 ? (ushort)1 : (ushort)header.PageSize;
@@ -161,9 +149,9 @@ public readonly struct DatabaseHeader
         destination[18] = header.WriteVersion;
         destination[19] = header.ReadVersion;
         destination[20] = header.ReservedBytesPerPage;
-        destination[21] = 64;  // max embedded payload fraction (fixed)
-        destination[22] = 32;  // min embedded payload fraction (fixed)
-        destination[23] = 32;  // leaf payload fraction (fixed)
+        destination[21] = SQLiteLayout.MaxLocalRatio;  // max embedded payload fraction (fixed)
+        destination[22] = SQLiteLayout.MinLocalRatio;  // min embedded payload fraction (fixed)
+        destination[23] = SQLiteLayout.MinLocalRatio;  // leaf payload fraction (fixed)
         BinaryPrimitives.WriteUInt32BigEndian(destination[24..], header.ChangeCounter);
         BinaryPrimitives.WriteUInt32BigEndian(destination[28..], (uint)header.PageCount);
         BinaryPrimitives.WriteUInt32BigEndian(destination[32..], header.FirstFreelistPage);

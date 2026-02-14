@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.IO.MemoryMappedFiles;
 using Sharc.Core.Format;
@@ -22,7 +9,7 @@ namespace Sharc.Core.IO;
 
 /// <summary>
 /// Page source backed by a memory-mapped file.
-/// The OS handles paging â€” only accessed pages are loaded into physical memory.
+/// The OS handles paging Ã¢â‚¬â€ only accessed pages are loaded into physical memory.
 /// Opening is near-instant (no upfront file read), and all page access is zero-copy.
 /// </summary>
 /// <remarks>
@@ -78,7 +65,7 @@ public sealed class SafeMemMapdPageSource : IPageSource
 
         _accessor = _mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
 
-        // SAFETY: The single unsafe block â€” acquires the OS-pinned pointer and wraps it
+        // SAFETY: The single unsafe block acquires the OS-pinned pointer and wraps it
         // in UnsafeMemoryManager (BCL MemoryManager<byte> pattern) so all downstream
         // code uses safe Memory<byte> / Span<byte>.
         unsafe

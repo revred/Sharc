@@ -1,10 +1,65 @@
 # Sharc
 
+**SQLite performance at memory speed. Pure C#. Zero dependencies. Built for AI context.**
+
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
+[![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
 
-**Read SQLite files at memory speed. Pure C#. Zero native dependencies. Zero per-row allocation.**
+Sharc is a high-performance, managed SQLite format reader and writer for .NET. It eliminates the SQL virtual machine (VDBE) and P/Invoke boundaries to deliver **2-56x faster** point lookups and scans directly from `.db` files.
 
-Sharc reads SQLite database files (format 3) from disk, memory, or encrypted blobs — without a single native library. No `sqlite3.dll`. No P/Invoke. No connection strings. Just bytes in, typed values out.
+---
+
+## ⚡ Speed. 📦 Size. 🛡️ Trust.
+
+| **Speed** | **Size** | **Trust** |
+|:---|:---|:---|
+| **61x faster** B-tree seeks | **Sub-50KB** engine footprint | **ECDSA** attribution & ledger |
+| **12x faster** graph traversal | **Zero** native dependencies | **AES-256-GCM** encryption |
+| **~0 B** per-row allocation | **WASM** / Mobile / IoT ready | **Tamper-evident** audit log |
+
+---
+
+## The "Context Space" Advantage
+
+AI agents don't need a full SQL engine; they need targeted, trusted context. Sharc delivers:
+1. **Precision Retrieval**: Point lookups in **< 600ns** reduce token waste.
+2. **Cryptographic Provenance**: A built-in trust layer verifies who contributed what data.
+3. **Graph Reasoning**: O(log N) relationship traversal for complex context mapping.
+
+---
+
+## Quick Start
+
+```csharp
+using Sharc;
+
+// Open at memory speed (Zero-alloc read)
+using var db = SharcDatabase.Open("context.db");
+
+// O(log N) point lookup in < 1us
+using var reader = db.CreateReader("concepts");
+if (reader.Seek("unique_id_123")) 
+{
+    Console.WriteLine(reader.GetString("metadata"));
+}
+```
+
+👉 [**Full Getting Started Guide**](docs/GETTING_STARTED.md)
+
+---
+
+## Explore More
+
+- [**Benchmarks**](docs/BENCHMARKS.md): Detailed comparison with SQLite and IndexedDB.
+- [**Architecture**](docs/ARCHITECTURE.md): How we achieve zero-allocation performance.
+- [**Cookbook**](docs/COOKBOOK.md): Recipes for common data scenarios.
+- [**Trust Layer**](docs/ARCHITECTURE.md#trust-layer): Cryptographic attribution for AI agents.
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 

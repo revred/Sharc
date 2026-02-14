@@ -1,19 +1,5 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
-
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
 using System.Text;
 using System.Buffers.Binary;
@@ -117,12 +103,15 @@ public sealed class SharcDatabase : IDisposable
     /// <summary>
     /// Gets the database header information.
     /// </summary>
+    /// <summary>
+    /// Gets the database header information.
+    /// </summary>
     public SharcDatabaseInfo Info
     {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _info;
+            return _info with { PageCount = _proxySource.PageCount };
         }
     }
 
@@ -140,7 +129,7 @@ public sealed class SharcDatabase : IDisposable
     }
 
 
-    private SharcDatabase(ProxyPageSource proxySource, IPageSource rawSource, DatabaseHeader header,
+    internal SharcDatabase(ProxyPageSource proxySource, IPageSource rawSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
         SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null)
     {
@@ -174,135 +163,7 @@ public sealed class SharcDatabase : IDisposable
     /// </summary>
     /// <param name="path">The file path to create.</param>
     /// <returns>An open database instance with Write mode enabled.</returns>
-    public static SharcDatabase Create(string path)
-    {
-        if (File.Exists(path))
-            throw new InvalidOperationException($"File already exists: {path}");
-
-        int pageSize = 4096;
-        var data = new byte[pageSize * 5]; 
-        
-        // 1. Database Header
-        // PageSize=4096, WriteVersion=1, ReadVersion=1, Reserved=0, MaxEmbed=1, FileChange=1, Schema=4
-        var dbHeader = new DatabaseHeader(pageSize, 1, 1, 0, 1, 4, 0, 0, 1, 4, 1, 0, 0, 3042000);
-        DatabaseHeader.Write(data, dbHeader);
-        
-        // 2. Schema Table Root Page (Page 1 content, after 100-byte header)
-        // Root Page is always Page 1. It is a LeafTable B-Tree.
-        
-        // Cells for system tables:
-        // _sharc_ledger: RootPage=2
-        // _sharc_agents: RootPage=3
-        // _sharc_scores: RootPage=4
-        
-        var ledgerCols = new[] { 
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
-            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_ledger")),
-            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_ledger")),
-            ColumnValue.FromInt64(3, 2), // RootPage = 2
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger(SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
-        };
-        
-        var agentsCols = new[] {
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
-            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_agents")),
-            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_agents")),
-            ColumnValue.FromInt64(3, 3), // RootPage = 3
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents(AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB)"))
-        };
-
-        var scoresCols = new[] {
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
-            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_scores")),
-            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_scores")),
-            ColumnValue.FromInt64(3, 4), // RootPage = 4
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores(AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, LastRatingCount INTEGER)"))
-        };
-
-        var auditCols = new[] {
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
-            ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_audit")),
-            ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_audit")),
-            ColumnValue.FromInt64(3, 5), // RootPage = 5
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_audit(EventId INTEGER PRIMARY KEY, Timestamp INTEGER, EventType INTEGER, AgentId TEXT, Details TEXT, PreviousHash BLOB, Hash BLOB)"))
-        };
-
-        // Encode records
-        int r1Size = RecordEncoder.ComputeEncodedSize(ledgerCols);
-        byte[] r1 = new byte[r1Size];
-        RecordEncoder.EncodeRecord(ledgerCols, r1);
-        
-        int r2Size = RecordEncoder.ComputeEncodedSize(agentsCols);
-        byte[] r2 = new byte[r2Size];
-        RecordEncoder.EncodeRecord(agentsCols, r2);
-
-        int r3Size = RecordEncoder.ComputeEncodedSize(scoresCols);
-        byte[] r3 = new byte[r3Size];
-        RecordEncoder.EncodeRecord(scoresCols, r3);
-
-        int r4Size = RecordEncoder.ComputeEncodedSize(auditCols);
-        byte[] r4 = new byte[r4Size];
-        RecordEncoder.EncodeRecord(auditCols, r4);
-
-        // Build Page 1 (Schema)
-        // Contains 4 cells.
-        // NOTE: Cells are built from end of page backwards.
-        
-        // Cell 1 (RowId 1) - Ledger
-        Span<byte> cell1 = stackalloc byte[r1Size + 10];
-        int l1 = CellBuilder.BuildTableLeafCell(1, r1, cell1, pageSize);
-        ushort o1 = (ushort)(pageSize - l1);
-        cell1[..l1].CopyTo(data.AsSpan(o1));
-
-        // Cell 2 (RowId 2) - Agents
-        Span<byte> cell2 = stackalloc byte[r2Size + 10];
-        int l2 = CellBuilder.BuildTableLeafCell(2, r2, cell2, pageSize);
-        ushort o2 = (ushort)(o1 - l2);
-        cell2[..l2].CopyTo(data.AsSpan(o2));
-
-        // Cell 3 (RowId 3) - Scores
-        Span<byte> cell3 = stackalloc byte[r3Size + 10];
-        int l3 = CellBuilder.BuildTableLeafCell(3, r3, cell3, pageSize);
-        ushort o3 = (ushort)(o2 - l3);
-        cell3[..l3].CopyTo(data.AsSpan(o3));
-
-        // Cell 4 (RowId 4) - Audit
-        Span<byte> cell4 = stackalloc byte[r4Size + 10];
-        int l4 = CellBuilder.BuildTableLeafCell(4, r4, cell4, pageSize);
-        ushort o4 = (ushort)(o3 - l4);
-        cell4[..l4].CopyTo(data.AsSpan(o4));
-
-        // Write Page 1 Header
-        // Type=LeafTable(0x0D), FreeBlock=0, CellCount=4, CellContentStart=o4, Frag=0
-        var p1Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 4, o4, 0, 0);
-        BTreePageHeader.Write(data.AsSpan(100), p1Header);
-
-        // Write Cell Pointers (4 cells, 2 bytes each = 8 bytes) directly after header (100 + 8 = 108)
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(108), o1); // Cell 1 (RowId 1)
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(110), o2); // Cell 2 (RowId 2)
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(112), o3); // Cell 3 (RowId 3)
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(114), o4); // Cell 4 (RowId 4)
-
-        // 3. Page 2 (Ledger Root) - Empty Leaf
-        var p2Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
-        BTreePageHeader.Write(data.AsSpan(pageSize), p2Header);
-
-        // 4. Page 3 (Agents Root) - Empty Leaf
-        var p3Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
-        BTreePageHeader.Write(data.AsSpan(pageSize * 2), p3Header);
-
-        // 5. Page 4 (Scores Root) - Empty Leaf
-        var p4Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
-        BTreePageHeader.Write(data.AsSpan(pageSize * 3), p4Header);
-
-        // 6. Page 5 (Audit Root) - Empty Leaf
-        var p5Header = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
-        BTreePageHeader.Write(data.AsSpan(pageSize * 4), p5Header);
-
-        File.WriteAllBytes(path, data);
-        
-        return Open(path, new SharcOpenOptions { Writable = true });
-    }
+    public static SharcDatabase Create(string path) => SharcDatabaseFactory.Create(path);
 
     /// <summary>
     /// Opens a SQLite database from a file path.
@@ -312,141 +173,8 @@ public sealed class SharcDatabase : IDisposable
     /// <returns>An open database instance.</returns>
     /// <exception cref="SharcException">The file is not a valid SQLite database.</exception>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    public static SharcDatabase Open(string path, SharcOpenOptions? options = null)
-    {
-        options ??= new SharcOpenOptions();
-
-        // Recovery: Check for journal file
-        var journalPath = path + ".journal";
-        if (File.Exists(journalPath))
-        {
-            // We found a journal! This means the previous session crashed during commit.
-            // Recover original state before opening.
-            RollbackJournal.Recover(path, journalPath);
-            File.Delete(journalPath);
-        }
-
-        // Read the first 6 bytes with sharing to detect encrypted vs plain SQLite
-        bool isEncryptedFile;
-        {
-            Span<byte> magic = stackalloc byte[6];
-            using var probe = new FileStream(path, FileMode.Open, FileAccess.Read,
-                options.FileShareMode);
-            int read = probe.Read(magic);
-            isEncryptedFile = read >= 6 && EncryptionHeader.HasMagic(magic);
-        }
-
-        if (isEncryptedFile)
-        {
-            byte[] fileData;
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
-                options.FileShareMode))
-            {
-                fileData = new byte[fs.Length];
-                fs.ReadExactly(fileData);
-            }
-            return OpenEncrypted(fileData, options);
-        }
-
-        IPageSource pageSource;
-        if (options.PreloadToMemory)
-        {
-            var data = File.ReadAllBytes(path);
-            pageSource = new MemoryPageSource(data);
-        }
-        else
-        {
-            pageSource = new FilePageSource(path, options.FileShareMode, allowWrites: options.Writable);
-        }
-
-        try
-        {
-            // Check for WAL mode and wrap page source if a WAL file exists
-            var headerSpan = pageSource.GetPage(1);
-            var header = DatabaseHeader.Parse(headerSpan);
-
-            if (header.IsWalMode)
-            {
-                var walPath = path + "-wal";
-                if (File.Exists(walPath))
-                {
-                    // Read WAL file with ReadWrite sharing since another process
-                    // (e.g., SQLite writer) may hold a lock on it.
-                    byte[] walData;
-                    using (var walStream = new FileStream(walPath, FileMode.Open,
-                        FileAccess.Read, FileShare.ReadWrite))
-                    {
-                        walData = new byte[walStream.Length];
-                        walStream.ReadExactly(walData);
-                    }
-
-                    if (walData.Length >= WalHeader.HeaderSize)
-                    {
-                        var walFrameMap = WalReader.ReadFrameMap(walData, header.PageSize);
-                        if (walFrameMap.Count > 0)
-                        {
-                            pageSource = new WalPageSource(pageSource, walData, walFrameMap);
-                        }
-                    }
-                }
-            }
-
-            return CreateFromPageSource(pageSource, options, filePath: path);
-        }
-        catch
-        {
-            pageSource.Dispose();
-            throw;
-        }
-    }
-
-    private static SharcDatabase OpenEncrypted(byte[] fileData, SharcOpenOptions options)
-    {
-        var password = options.Encryption?.Password
-            ?? throw new SharcCryptoException("Password required for encrypted database.");
-
-        var encHeader = EncryptionHeader.Parse(fileData);
-        var passwordBytes = Encoding.UTF8.GetBytes(password);
-
-        var keyHandle = SharcKeyHandle.DeriveKey(
-            passwordBytes, encHeader.Salt.Span,
-            encHeader.TimeCost, encHeader.MemoryCostKiB, encHeader.Parallelism);
-
-        try
-        {
-            // Verify the key against the stored verification hash
-            var computedHmac = keyHandle.ComputeHmac(encHeader.Salt.Span);
-            if (!computedHmac.AsSpan().SequenceEqual(encHeader.VerificationHash.Span))
-                throw new SharcCryptoException("Wrong password or corrupted encryption header.");
-
-            var transform = new AesGcmPageTransform(keyHandle);
-            int encryptedPageSize = transform.TransformedPageSize(encHeader.PageSize);
-
-            // Create page source over the encrypted data (after the 128-byte header)
-            var encryptedData = new ReadOnlyMemory<byte>(fileData, EncryptionHeader.HeaderSize,
-                fileData.Length - EncryptionHeader.HeaderSize);
-            var innerSource = new MemoryPageSource(encryptedData, encryptedPageSize, encHeader.PageCount);
-
-            var decryptingSource = new DecryptingPageSource(innerSource, transform, encHeader.PageSize);
-
-            try
-            {
-                // Transfer keyHandle ownership to SharcDatabase
-                return CreateFromPageSource(decryptingSource, options,
-                    isEncrypted: true, keyHandle: keyHandle);
-            }
-            catch
-            {
-                decryptingSource.Dispose();
-                throw;
-            }
-        }
-        catch
-        {
-            keyHandle.Dispose();
-            throw;
-        }
-    }
+    public static SharcDatabase Open(string path, SharcOpenOptions? options = null) => 
+        SharcDatabaseFactory.Open(path, options);
 
     /// <summary>
     /// Opens a SQLite database from an in-memory buffer.
@@ -455,54 +183,8 @@ public sealed class SharcDatabase : IDisposable
     /// <param name="data">The raw database bytes.</param>
     /// <param name="options">Optional open configuration.</param>
     /// <returns>An open database instance.</returns>
-    public static SharcDatabase OpenMemory(ReadOnlyMemory<byte> data, SharcOpenOptions? options = null)
-    {
-        if (data.IsEmpty)
-            throw new InvalidDatabaseException("Database buffer is empty.");
-
-        if (!DatabaseHeader.HasValidMagic(data.Span))
-            throw new InvalidDatabaseException("Invalid SQLite magic string.");
-
-        options ??= new SharcOpenOptions();
-        IPageSource pageSource = new MemoryPageSource(data);
-        return CreateFromPageSource(pageSource, options);
-    }
-
-    private static SharcDatabase CreateFromPageSource(IPageSource rawSource, SharcOpenOptions options,
-        bool isEncrypted = false, string? filePath = null, SharcKeyHandle? keyHandle = null)
-    {
-        IPageSource pageSource = rawSource;
-
-        // Wrap with cache if requested (Skip for in-memory sources as they are already RAM-backed)
-        if (options.PageCacheSize > 0 && rawSource is not MemoryPageSource)
-            pageSource = new CachedPageSource(rawSource, options.PageCacheSize);
-
-        var headerSpan = pageSource.GetPage(1);
-        var header = DatabaseHeader.Parse(headerSpan);
-
-        // Detect unsupported features
-        if (header.TextEncoding is 2 or 3)
-            throw new UnsupportedFeatureException("UTF-16 text encoding");
-
-        var proxySource = new ProxyPageSource(pageSource);
-        var bTreeReader = new BTreeReader(proxySource, header);
-        var recordDecoder = new RecordDecoder();
-
-        var info = new SharcDatabaseInfo
-        {
-            PageSize = header.PageSize,
-            PageCount = header.PageCount,
-            TextEncoding = (SharcTextEncoding)header.TextEncoding,
-            SchemaFormat = header.SchemaFormat,
-            UserVersion = header.UserVersion,
-            ApplicationId = header.ApplicationId,
-            SqliteVersion = header.SqliteVersionNumber,
-            IsWalMode = header.IsWalMode,
-            IsEncrypted = isEncrypted
-        };
-
-        return new SharcDatabase(proxySource, pageSource, header, bTreeReader, recordDecoder, info, filePath, keyHandle);
-    }
+    public static SharcDatabase OpenMemory(ReadOnlyMemory<byte> data, SharcOpenOptions? options = null) =>
+        SharcDatabaseFactory.OpenMemory(data, options);
 
     /// <summary>
     /// Creates a forward-only reader for the specified table.
@@ -514,7 +196,9 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
-        var table = schema.GetTable(tableName);
+        var table = schema.GetTable(tableName) 
+            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
+            
         var cursor = CreateTableCursor(table);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
             _bTreeReader, table.Indexes);
@@ -530,7 +214,8 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
-        var table = schema.GetTable(tableName);
+        var table = schema.GetTable(tableName)
+            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -573,7 +258,8 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
-        var table = schema.GetTable(tableName);
+        var table = schema.GetTable(tableName)
+            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -617,7 +303,8 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
-        var table = schema.GetTable(tableName);
+        var table = schema.GetTable(tableName)
+            ?? throw new KeyNotFoundException($"Table '{tableName}' not found in database schema.");
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;

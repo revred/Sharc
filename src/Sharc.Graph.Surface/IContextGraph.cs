@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                         |
---------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
 
@@ -49,7 +36,7 @@ public interface IContextGraph
 
     /// <summary>
     /// Creates a zero-allocation edge cursor for the specified origin node.
-    /// Avoids <see cref="GraphEdge"/> allocation per row — callers read typed properties directly.
+    /// Avoids <see cref="GraphEdge"/> allocation per row â€” callers read typed properties directly.
     /// Caller must dispose the cursor when done.
     /// </summary>
     IEdgeCursor GetEdgeCursor(NodeKey origin, RelationKind? kind = null);

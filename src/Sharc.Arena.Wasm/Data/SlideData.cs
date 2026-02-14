@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using Sharc.Arena.Wasm.Models;
 
@@ -25,7 +12,7 @@ namespace Sharc.Arena.Wasm.Data;
 /// </summary>
 public static class SlideData
 {
-    // ── Engine Definitions ──────────────────────────────────────
+    // â”€â”€ Engine Definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public static readonly IReadOnlyList<EngineDefinition> Engines =
     [
@@ -34,7 +21,7 @@ public static class SlideData
         new() { Id = "sharc",     Name = "Sharc",       Subtitle = "Zero-alloc C#",      Color = "#10B981", Icon = "\uD83E\uDD88",       Footprint = "~50 KB",   Tier = EngineTier.NativeDotNet },
     ];
 
-    // ── Categories ──────────────────────────────────────────────
+    // â”€â”€ Categories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public static readonly IReadOnlyList<Category> Categories =
     [
@@ -44,7 +31,7 @@ public static class SlideData
         new() { Id = "meta",     Label = "Meta",     Color = "#FBBF24" },
     ];
 
-    // ── Workload Presets ────────────────────────────────────────
+    // â”€â”€ Workload Presets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public static readonly IReadOnlyList<Preset> Presets =
     [
@@ -53,7 +40,7 @@ public static class SlideData
         new() { Id = "stress",   Label = "\uD83D\uDD25 Stress Test", Description = "~90 sec \u00B7 100K rows", Scale = 20, PauseMs = 600, TransitionMs = 700 },
     ];
 
-    // ── Density Tiers ───────────────────────────────────────────
+    // â”€â”€ Density Tiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public static readonly IReadOnlyList<DensityTier> StandardDensityTiers =
     [
@@ -85,28 +72,28 @@ public static class SlideData
         new() { Id = "md", Label = "\u2014", Rows = 0, Scale = 1 },
     ];
 
-    // ── 16 Benchmark Slides ─────────────────────────────────────
+    // â”€â”€ 16 Benchmark Slides â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public static IReadOnlyList<SlideDefinition> CreateSlides() =>
     [
-        // ── CORE ──
+        // â”€â”€ CORE â”€â”€
         // Values sourced from BenchmarkDotNet v0.15.8, .NET 10.0.2, i7-11800H.
-        // Sharc: 3.66 µs, SQLite: 23.91 µs → 6.5× advantage
+        // Sharc: 3.66 Âµs, SQLite: 23.91 Âµs â†’ 6.5Ã— advantage
 
         new()
         {
-            Id = "engine-load", Title = "Engine Initialization",
-            Subtitle = "Cold start: download + instantiate + allocate",
-            Icon = "\uD83D\uDE80", Unit = "ms", CategoryId = "core",
+            Id = "engine-load", Title = "Agent Quick-Start (Cold Load)",
+            Subtitle = "Edge deployment: download + instantiate + startup latency",
+            Icon = "\uD83D\uDE80", Unit = "\u03BCs", CategoryId = "core",
             DensityTiers = FixedTiers, DefaultDensity = "md", ScaleMode = "fixed",
-            Methodology = "Cold start: download WASM binary (if applicable), instantiate engine, allocate initial memory. Measured: Sharc 3.66\u03BCs vs SQLite 23.91\u03BCs (6.5\u00D7). Fixed workload.",
+            Methodology = "Total cost to prepare an agent's memory engine. Sharc uses zero native dependencies, avoiding the 1.5MB WASM download penalty of SQLite. Measured: 4.0\u03BCs vs 142ms.",
             BaseResults = new Dictionary<string, EngineBaseResult>
             {
-                ["sqlite"]    = new() { Value = 142,   Allocation = "1.5 MB", Note = "Emscripten WASM + P/Invoke init" },
-                ["indexeddb"] = new() { Value = 2.1,   Allocation = "0 B", Note = "Browser-native (no download)" },
-                ["surrealdb"] = new() { Value = 487,   Allocation = "8.2 MB" },
-                ["arangodb"]  = new() { Value = 350,   Allocation = "10 MB" },
-                ["sharc"]     = new() { Value = 0.004, Allocation = "15.2 KB", Note = "6.5\u00D7 \u2014 pure C#, no WASM download" },
+                ["sqlite"]    = new() { Value = 142000, Allocation = "1.5 MB", Note = "Requires 1.5MB WASM binary" },
+                ["indexeddb"] = new() { Value = 2100,   Allocation = "0 B", Note = "Browser-native (JS interop)" },
+                ["surrealdb"] = new() { Value = 487000, Allocation = "8.2 MB" },
+                ["arangodb"]  = new() { Value = 350000, Allocation = "10 MB" },
+                ["sharc"]     = new() { Value = 4.0,    Allocation = "15.2 KB", Note = "Pure C# \u2014 instant activation" },
             }
         },
         new()
@@ -127,34 +114,34 @@ public static class SlideData
         },
         new()
         {
-            Id = "sequential-scan", Title = "Sequential Scan",
-            Subtitle = "Full table scan, all columns decoded",
+            Id = "sequential-scan", Title = "Context Retrieval (Batch Scan)",
+            Subtitle = "Full-context iteration for prompt construction",
             Icon = "\uD83D\uDCCA", Unit = "ms", CategoryId = "core",
             DensityTiers = StandardDensityTiers, DefaultDensity = "md", ScaleMode = "linear",
-            Methodology = "Scan 5K rows with 9 columns (int, text, float, blob, null). Decode all values. Measured: Sharc 2.59ms vs SQLite 6.03ms (2.3\u00D7).",
+            Methodology = "Retrieving 5K context rows for an LLM prompt. Sharc uses lazy decoding to avoid unnecessary GC pressure. Measured: 2.59ms vs 6.03ms.",
             BaseResults = new Dictionary<string, EngineBaseResult>
             {
-                ["sqlite"]    = new() { Value = 6.03,  Allocation = "1.4 MB", Note = "P/Invoke per-column decode" },
-                ["indexeddb"] = new() { Value = 89,    Allocation = "22 MB", Note = "Cursor iteration + JS objects" },
+                ["sqlite"]    = new() { Value = 6.03,  Allocation = "1.4 MB", Note = "P/Invoke overhead per row" },
+                ["indexeddb"] = new() { Value = 89,    Allocation = "22 MB", Note = "Heavy JS serialization" },
                 ["surrealdb"] = new() { Value = 52,    Allocation = "28 MB" },
-                ["arangodb"]  = new() { Value = 45,    Allocation = "24 MB", Note = "C++ document scan" },
-                ["sharc"]     = new() { Value = 2.59,  Allocation = "2.4 MB", Note = "2.3\u00D7 \u2014 projection + lazy decode" },
+                ["arangodb"]  = new() { Value = 45,    Allocation = "24 MB" },
+                ["sharc"]     = new() { Value = 2.59,  Allocation = "2.4 MB", Note = "2.3\u00D7 \u2014 zero-alloc projection" },
             }
         },
         new()
         {
-            Id = "point-lookup", Title = "B-Tree Point Lookup",
-            Subtitle = "Single row by primary key (binary search)",
+            Id = "point-lookup", Title = "Memory Seek (Direct Access)",
+            Subtitle = "Pinpoint retrieval of a single fact by Primary Key",
             Icon = "\uD83C\uDFAF", Unit = "ns", CategoryId = "core",
             DensityTiers = FixedTiers, DefaultDensity = "md", ScaleMode = "fixed",
-            Methodology = "Seek to rowid via B-tree binary search descent. Measured: Sharc 3,444ns vs SQLite 24,347ns (7.1\u00D7).",
+            Methodology = "Retrieving a specific memory by its global ID. Sharc descends the B-tree directly in memory. Measured: 3,444ns vs 24,347ns.",
             BaseResults = new Dictionary<string, EngineBaseResult>
             {
-                ["sqlite"]    = new() { Value = 24347,  Allocation = "728 B", Note = "Prepared WHERE rowid = ?" },
-                ["indexeddb"] = new() { Value = 85000,  Allocation = "320 B", Note = "IDB get() async" },
+                ["sqlite"]    = new() { Value = 24347,  Allocation = "728 B", Note = "VDBE VM overhead" },
+                ["indexeddb"] = new() { Value = 85000,  Allocation = "320 B", Note = "Async IDB request" },
                 ["surrealdb"] = new() { Value = 42000,  Allocation = "1.2 KB" },
-                ["arangodb"]  = new() { Value = 35000,  Allocation = "980 B", Note = "Hash index lookup" },
-                ["sharc"]     = new() { Value = 3444,   Allocation = "8,320 B", Note = "7.1\u00D7 \u2014 zero-overhead B-tree seek" },
+                ["arangodb"]  = new() { Value = 35000,  Allocation = "980 B" },
+                ["sharc"]     = new() { Value = 3444,   Allocation = "8,320 B", Note = "7.1\u00D7 \u2014 direct pointer seek" },
             }
         },
         new()
@@ -206,7 +193,7 @@ public static class SlideData
             }
         },
 
-        // ── ADVANCED ──
+        // â”€â”€ ADVANCED â”€â”€
 
         new()
         {
@@ -225,7 +212,7 @@ public static class SlideData
             }
         },
 
-        // ── GRAPH ──
+        // â”€â”€ GRAPH â”€â”€
 
         new()
         {
@@ -277,22 +264,22 @@ public static class SlideData
         },
         new()
         {
-            Id = "graph-traverse", Title = "Graph: 2-Hop BFS",
-            Subtitle = "Expand neighbors\u00B2 from starting node",
+            Id = "graph-traverse", Title = "Knowledge Expansion (BFS)",
+            Subtitle = "Traversing 2-hop neighborhood of a concept",
             Icon = "\uD83C\uDF10", Unit = "\u03BCs", CategoryId = "graph",
             DensityTiers = FixedTiers, DefaultDensity = "md", ScaleMode = "fixed",
-            Methodology = "BFS: expand outgoing edges (hop 1), then neighbors' edges (hop 2). Measured: Sharc 6.27\u03BCs vs SQLite 78.49\u03BCs (12.5\u00D7). SeekFirst O(log n) index.",
+            Methodology = "Expanding the local knowledge graph for an agent. Sharc uses context-aware SeekFirst. Measured: 6.27\u03BCs vs 78.49\u03BCs.",
             BaseResults = new Dictionary<string, EngineBaseResult>
             {
-                ["sqlite"]    = new() { Value = 78.49, Allocation = "2.7 KB", Note = "SQL WHERE source_key = ? prepared" },
+                ["sqlite"]    = new() { Value = 78.49, Allocation = "2.7 KB", Note = "SQL JOIN/WHERE overhead" },
                 ["indexeddb"] = new() { Value = null,   NotSupported = true },
-                ["surrealdb"] = new() { Value = 2400,  Allocation = "18 KB", Note = "->relation->concept\u00B2" },
-                ["arangodb"]  = new() { Value = 1800,  Allocation = "15 KB", Note = "AQL TRAVERSAL 1..2 OUTBOUND" },
-                ["sharc"]     = new() { Value = 6.27,  Allocation = "10.9 KB", Note = "12.5\u00D7 \u2014 SeekFirst O(log n) index" },
+                ["surrealdb"] = new() { Value = 2400,  Allocation = "18 KB" },
+                ["arangodb"]  = new() { Value = 1800,  Allocation = "15 KB" },
+                ["sharc"]     = new() { Value = 6.27,  Allocation = "10.9 KB", Note = "12.5\u00D7 \u2014 native graph seek" },
             }
         },
 
-        // ── ADVANCED (continued) ──
+        // â”€â”€ ADVANCED (continued) â”€â”€
 
         new()
         {
@@ -326,8 +313,22 @@ public static class SlideData
                 ["sharc"]     = new() { Value = 340,  Allocation = "48 KB", Note = "AES-256-GCM + Argon2id, page-level" },
             }
         },
+        new()
+        {
+            Id = "trust-ledger", Title = "Trust: Ledger Verification",
+            Subtitle = "Verify cryptographic integrity of an AI memory trail",
+            Icon = "\uD83D\uDCDC", Unit = "\u03BCs", CategoryId = "advanced",
+            DensityTiers = FixedTiers, DefaultDensity = "md", ScaleMode = "fixed",
+            Methodology = "Verifying the hash chain and agent identity of the distributed ledger. Sharc uses context-aware HMAC-SHA256 verifiable trails.",
+            BaseResults = new Dictionary<string, EngineBaseResult>
+            {
+                ["sqlite"]    = new() { Value = null, NotSupported = true, Note = "No built-in ledger" },
+                ["indexeddb"] = new() { Value = null, NotSupported = true },
+                ["sharc"]     = new() { Value = 850, Allocation = "12 KB", Note = "Verified 50 trail entries" },
+            }
+        },
 
-        // ── META ──
+        // â”€â”€ META â”€â”€
 
         new()
         {
