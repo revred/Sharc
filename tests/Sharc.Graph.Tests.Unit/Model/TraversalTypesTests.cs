@@ -34,8 +34,8 @@ public class TraversalTypesTests
         
         Assert.AreEqual(record, node.Record);
         Assert.AreEqual(2, node.Depth);
-        Assert.HasCount(3, node.Path);
-        Assert.AreEqual(new NodeKey(1), node.Path[0]);
+        Assert.HasCount(3, node.Path!);
+        Assert.AreEqual(new NodeKey(1), node.Path![0]);
     }
 
     [TestMethod]
