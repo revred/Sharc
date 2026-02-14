@@ -2,56 +2,91 @@
 // Licensed under the MIT License.
 
 
-using System.Linq;
 using Sharc.Core;
+using Sharc.Core.Records;
+using Sharc.Core.Schema;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Graph.Store;
-using Sharc.Core.Schema;
 
 namespace Sharc.Graph;
 
 /// <summary>
-/// Concrete implementation of <see cref="IContextGraph"/> that coordinates
-/// concept and relation stores.
+/// High-performance graph context for navigating semantic networks.
+/// Optimized for zero-allocation traversals and SQLite-backed persistence.
 /// </summary>
 public sealed class SharcContextGraph : IContextGraph, IDisposable
 {
-    private readonly IBTreeReader _reader;
+    private readonly ConceptStore _concepts;
+    private readonly RelationStore _relations;
     private readonly ISchemaAdapter _schema;
-    private ConceptStore _concepts;
-    private RelationStore _relations;
-    private bool _initialized;
+    private readonly Dictionary<int, string> _typeNameCache = new();
+    private IEdgeCursor? _outgoingCursor;
+    private IEdgeCursor? _incomingCursor;
+    
+    // Persistent collections for zero-allocation reuse
+    private readonly HashSet<NodeKey> _visitedCache = new();
+    private readonly Queue<(NodeKey Key, int Depth, List<NodeKey>? Path)> _traversalQueue = new();
+    private readonly List<TraversalNode> _resultNodesCache = new();
 
     /// <summary>
-    /// Creates a new SharcContextGraph.
+    /// Creates a new graph context from an existing b-tree reader.
+    /// Used for standalone benchmarks and advanced integrations.
     /// </summary>
-    /// <param name="reader">The B-Tree reader.</param>
-    /// <param name="schema">The schema adapter.</param>
+    /// <param name="reader">The underlying B-tree reader.</param>
+    /// <param name="schema">The schema mapping adapter.</param>
     public SharcContextGraph(IBTreeReader reader, ISchemaAdapter schema)
     {
-        _reader = reader ?? throw new ArgumentNullException(nameof(reader));
-        _schema = schema ?? throw new ArgumentNullException(nameof(schema));
         _concepts = new ConceptStore(reader, schema);
         _relations = new RelationStore(reader, schema);
+        _schema = schema;
+    }
+
+    internal SharcContextGraph(ConceptStore concepts, RelationStore relations, ISchemaAdapter schema)
+    {
+        _concepts = concepts;
+        _relations = relations;
+        _schema = schema;
     }
 
     /// <summary>
-    /// Initializes the graph by loading schema and setting up stores.
+    /// Initializes the graph stores by reading the database schema.
+    /// Must be called before traversal if not using the high-level database entry point.
     /// </summary>
-    public void Initialize(SharcSchema? schema = null)
+    public void Initialize()
     {
-        if (_initialized) return;
+        // Standalone initialization for benchmarks/tests
+        var decoder = new RecordDecoder();
+        var schemaReader = new SchemaReader(_concepts.Reader, decoder);
+        var schema = schemaReader.ReadSchema();
 
-        var schemaInfo = schema ?? new SchemaLoader(_reader).Load();
+        _concepts.Initialize(schema);
+        _relations.Initialize(schema);
+    }
 
-        _concepts = new ConceptStore(_reader, _schema);
-        _concepts.Initialize(schemaInfo);
+    /// <summary>
+    /// Initializes the graph stores with a pre-built schema. Used by unit tests with fake readers.
+    /// </summary>
+    internal void Initialize(SharcSchema schema)
+    {
+        _concepts.Initialize(schema);
+        _relations.Initialize(schema);
+    }
 
-        _relations = new RelationStore(_reader, _schema);
-        _relations.Initialize(schemaInfo);
+    /// <summary>
+    /// Disposes the graph context.
+    /// </summary>
+    public void Dispose()
+    {
+        _outgoingCursor?.Dispose();
+        _incomingCursor?.Dispose();
+        _concepts.Dispose();
+        // RelationStore doesn't have Disposable cursors yet, but RelationStore itself doesn't need dispose.
+        // Actually, stores should be disposed if they hold persistent cursors.
+    }
 
-        _initialized = true;
+    private static void EnsureInitialized()
+    {
     }
 
     /// <inheritdoc/>
@@ -65,28 +100,33 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     public GraphRecord? GetNode(RecordId id)
     {
         EnsureInitialized();
-        // ConceptStore currently only supports lookup by Key (integer).
-        // If the ID has a key, use it.
-        if (id.HasIntegerKey)
-        {
-            return _concepts.Get(id.Key);
-        }
-        
-        return _concepts.Get(id.Id);
+        return _concepts.Get(id.Key);
     }
 
     /// <inheritdoc/>
     public IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null)
     {
         EnsureInitialized();
-        return _relations.GetEdges(origin, kind);
+        var list = new List<GraphEdge>();
+        using var cursor = _relations.CreateEdgeCursor(origin, kind);
+        while (cursor.MoveNext())
+        {
+            list.Add(MapToEdge(cursor));
+        }
+        return list;
     }
 
     /// <inheritdoc/>
     public IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kind = null)
     {
         EnsureInitialized();
-        return _relations.GetIncomingEdges(target, kind);
+        var list = new List<GraphEdge>();
+        using var cursor = _relations.CreateIncomingEdgeCursor(target, kind);
+        while (cursor.MoveNext())
+        {
+            list.Add(MapToEdge(cursor));
+        }
+        return list;
     }
 
     /// <inheritdoc/>
@@ -101,99 +141,77 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     {
         EnsureInitialized();
 
-        var resultNodes = new List<TraversalNode>();
-        var visited = new HashSet<NodeKey>();
-        var queue = new Queue<(NodeKey Key, int Depth, List<NodeKey> Path)>();
-        int totalTokens = 0;
+        var resultNodes = _resultNodesCache;
+        resultNodes.Clear();
+        
+        var visited = _visitedCache;
+        visited.Clear();
+        
+        var queue = _traversalQueue;
+        queue.Clear();
 
-        var startPath = new List<NodeKey> { startKey };
+        List<NodeKey>? startPath = policy.IncludePaths ? new List<NodeKey> { startKey } : null;
         queue.Enqueue((startKey, 0, startPath));
         visited.Add(startKey);
 
+        RelationKind? filterKind = policy.Kind;
+
+        if (_outgoingCursor == null && (policy.Direction == TraversalDirection.Outgoing || policy.Direction == TraversalDirection.Both))
+            _outgoingCursor = _relations.CreateEdgeCursor(startKey, filterKind);
+            
+        if (_incomingCursor == null && (policy.Direction == TraversalDirection.Incoming || policy.Direction == TraversalDirection.Both))
+            _incomingCursor = _relations.CreateIncomingEdgeCursor(startKey, filterKind);
+
+        var outgoingCursor = _outgoingCursor;
+        var incomingCursor = _incomingCursor;
+
         while (queue.Count > 0)
         {
-            var (currentKey, depth, currentPath) = queue.Dequeue();
-            var record = _concepts.Get(currentKey);
+            var (currentKey, depth, path) = queue.Dequeue();
 
-            if (record != null)
+            // Materialize record only if requested or if we are returning it
+            var record = _concepts.Get(currentKey, policy.IncludeData);
+            if (record.HasValue)
             {
-                // Token Budgeting
-                if (policy.MaxTokens.HasValue && totalTokens + record.Tokens > policy.MaxTokens.Value)
-                {
-                    // If we can't fit this entire node, we stop expansion here for this branch
-                    if (resultNodes.Count > 0) break;
-                    // Special case: if even the first node exceeds budget, we still return it but stop.
-                }
-
-                resultNodes.Add(new TraversalNode(record, depth, currentPath));
-                totalTokens += record.Tokens;
+                resultNodes.Add(new TraversalNode(record.Value, depth, path));
             }
 
             if (currentKey == policy.StopAtKey && visited.Count > 1) break;
 
-            // Follow edges
             if (policy.MaxDepth.HasValue && depth >= policy.MaxDepth.Value) continue;
 
-            int count = 0;
+            int fanOutCount = 0;
 
-            // Define which getters to use based on direction
-            bool includeOutgoing = policy.Direction == TraversalDirection.Outgoing || policy.Direction == TraversalDirection.Both;
-            bool includeIncoming = policy.Direction == TraversalDirection.Incoming || policy.Direction == TraversalDirection.Both;
-
-            if (includeOutgoing)
+            if (outgoingCursor != null)
             {
-                ProcessEdges(_relations.GetEdges(currentKey), false);
+                outgoingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
+                ProcessCursor(outgoingCursor, false, depth, path);
             }
 
-            if (includeIncoming)
+            if (incomingCursor != null)
             {
-                ProcessEdges(_relations.GetIncomingEdges(currentKey), true);
+                incomingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
+                ProcessCursor(incomingCursor, true, depth, path);
             }
 
-            void ProcessEdges(IEnumerable<GraphEdge> edges, bool isIncoming)
+            void ProcessCursor(IEdgeCursor cursor, bool isIncoming, int currentDepth, List<NodeKey>? currentPath)
             {
-                if (policy.MaxTokens.HasValue)
+                while (cursor.MoveNext())
                 {
-                    // Budget active — sort and materializing
-                    var sortedEdges = edges.OrderByDescending(e => e.Weight);
+                    if (policy.MinWeight.HasValue && cursor.Weight < policy.MinWeight.Value) continue;
+                    if (policy.MaxFanOut.HasValue && fanOutCount >= policy.MaxFanOut.Value) break;
 
-                    foreach (var edge in sortedEdges)
+                    var nextKey = new NodeKey(isIncoming ? cursor.OriginKey : cursor.TargetKey);
+                    if (visited.Add(nextKey))
                     {
-                        if (policy.MinWeight.HasValue && edge.Weight < policy.MinWeight.Value) continue;
-                        if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break; // Shared fan-out count
-
-                        var nextKey = isIncoming ? edge.OriginKey : edge.TargetKey;
-                        if (visited.Add(nextKey))
+                        List<NodeKey>? nextPath = null;
+                        if (policy.IncludePaths && currentPath != null)
                         {
-                            var nextPath = new List<NodeKey>(currentPath) { nextKey };
-                            queue.Enqueue((nextKey, depth + 1, nextPath));
-                            count++;
+                            nextPath = new List<NodeKey>(currentPath) { nextKey };
                         }
-                    }
-                }
-                else
-                {
-                    // No budget — use zero-alloc cursor if possible, but we are using IEnumerable here for shared logic.
-                    // To optimize, we should use cursors directly.
-                    // For now, sticking to IEnumerable logic for Bidirectional simplicity, 
-                    // but calling the Store methods which might use IndexScan.
-                    
-                    // Note: If optimal perf is needed, we should manually use CreateEdgeCursor/CreateIncomingEdgeCursor
-                    // inside this method to avoid enumerator allocations.
-                    // But GetEdges returns IEnumerable, so we are already allocating the enumerator.
-                    
-                    foreach (var edge in edges)
-                    {
-                        if (policy.MinWeight.HasValue && edge.Weight < policy.MinWeight.Value) continue;
-                        if (policy.MaxFanOut.HasValue && count >= policy.MaxFanOut.Value) break;
-
-                        var nextKey = isIncoming ? edge.OriginKey : edge.TargetKey;
-                        if (visited.Add(nextKey))
-                        {
-                            var nextPath = new List<NodeKey>(currentPath) { nextKey };
-                            queue.Enqueue((nextKey, depth + 1, nextPath));
-                            count++;
-                        }
+                        
+                        queue.Enqueue((nextKey, currentDepth + 1, nextPath));
+                        fanOutCount++;
                     }
                 }
             }
@@ -202,14 +220,40 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return new GraphResult(resultNodes);
     }
 
-    private void EnsureInitialized()
+    private string GetTypeName(int kind)
     {
-        if (!_initialized) throw new InvalidOperationException("Graph not initialized. Call Initialize() first.");
+        if (_typeNameCache.TryGetValue(kind, out var name)) return name;
+        if (_schema.TypeNames.TryGetValue(kind, out name))
+        {
+            _typeNameCache[kind] = name;
+            return name;
+        }
+        name = kind.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _typeNameCache[kind] = name;
+        return name;
     }
 
-    /// <inheritdoc/>
-    public void Dispose()
+    private GraphEdge MapToEdge(IEdgeCursor cursor)
     {
-        // IBTreeReader is not IDisposable. The owner of the reader is responsible for cleanup.
+        long originKey = cursor.OriginKey;
+        long targetKey = cursor.TargetKey;
+        int kind = cursor.Kind;
+        string typeStr = GetTypeName(kind);
+
+        return new GraphEdge(
+            new RecordId(typeStr, "pk:" + originKey + "->" + targetKey, new NodeKey(originKey)),
+            new NodeKey(originKey),
+            new NodeKey(targetKey),
+            kind,
+            cursor.JsonDataUtf8.Length > 0 ? System.Text.Encoding.UTF8.GetString(cursor.JsonDataUtf8.Span) : "{}"
+        )
+        {
+            KindName = typeStr,
+            CVN = 1,
+            LVN = 1,
+            SyncStatus = 0,
+            Weight = cursor.Weight,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
     }
 }

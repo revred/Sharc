@@ -36,6 +36,11 @@ public interface IBTreeCursor : IDisposable
     bool MoveNext();
 
     /// <summary>
+    /// Resets the cursor to its initial state before the first cell.
+    /// </summary>
+    void Reset();
+
+    /// <summary>
     /// Moves the cursor to the last cell in the table (highest rowid).
     /// </summary>
     /// <returns>True if the table is not empty.</returns>
@@ -76,6 +81,11 @@ public interface IIndexBTreeCursor : IDisposable
     /// </summary>
     /// <returns>True if an entry is available; false at end of tree.</returns>
     bool MoveNext();
+
+    /// <summary>
+    /// Resets the cursor to its initial state before the first entry.
+    /// </summary>
+    void Reset();
 
     /// <summary>
     /// Seeks to the first index entry whose first column (integer) equals or exceeds

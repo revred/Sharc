@@ -14,6 +14,9 @@ public readonly record struct TraversalPolicy
     
     /// <summary>Only traverse to nodes of this type ID.</summary>
     public int? TargetTypeFilter { get; init; }
+
+    /// <summary>Only traverse edges of this kind.</summary>
+    public RelationKind? Kind { get; init; }
     
     /// <summary>Stop traversal if this node key is reached.</summary>
     public NodeKey StopAtKey { get; init; }
@@ -32,6 +35,12 @@ public readonly record struct TraversalPolicy
 
     /// <summary>Minimum edge weight to follow.</summary>
     public float? MinWeight { get; init; }
+
+    /// <summary>Whether to capture and return the full path to each node.</summary>
+    public bool IncludePaths { get; init; }
+
+    /// <summary>Whether to include JSON data in the returned records.</summary>
+    public bool IncludeData { get; init; } = true;
 
     /// <summary>Default constructor.</summary>
     public TraversalPolicy() { }

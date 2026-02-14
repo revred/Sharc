@@ -288,6 +288,8 @@ public class SchemaReaderTests
             return _index < _rows.Length;
         }
 
+        public void Reset() => _index = -1;
+
         public bool MoveLast()
         {
             if (_rows.Length == 0) return false;

@@ -151,7 +151,8 @@ internal static class SchemaParser
         return rem.StartsWith("PRIMARY", StringComparison.OrdinalIgnoreCase) ||
                rem.StartsWith("NOT", StringComparison.OrdinalIgnoreCase) ||
                rem.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
-               rem.StartsWith("DEFAULT", StringComparison.OrdinalIgnoreCase);
+               rem.StartsWith("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
+               rem.StartsWith("REFERENCES", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsTableConstraint(ReadOnlySpan<char> s) =>
