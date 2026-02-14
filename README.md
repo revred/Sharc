@@ -254,7 +254,9 @@ Sharc includes a built-in graph storage layer (`Sharc.Graph`) that maps concept/
 | Single Node Seek | **1,475 ns** | 21,349 ns | **14.5x** | 1,840 B | 600 B |
 | Batch 6 Node Seeks | **3,858 ns** | 159,740 ns | **41.4x** | 4,176 B | 3,024 B |
 | Open > Seek > Close | **11,764 ns** | 33,386 ns | **2.8x** | 12,496 B | 1,256 B |
-| **2-Hop BFS Traversal** | **6.27 us** | 78.49 us | **12.5x** | 10,900 B | 2,808 B |
+| **Incoming Edge Scan** | **1.75 us** | 27.65 us | **15.8x** | 2,968 B | 728 B |
+| **Bidirectional BFS** | **23.9 us** | 34.9 us | **1.4x** | 10,900 B | 2,808 B |
+| **2-Hop BFS Traversal** | **6.04 us** | 81.56 us | **13.5x** | 10,150 B | 2,740 B |
 
 > **Graph seeks are the sweet spot:** 14.5x-41.4x faster. The BFS traversal achieves 12.5x through `SeekFirst(key)` — O(log N) binary search on the index B-tree that positions the cursor at the first matching entry, replacing linear scan.
 

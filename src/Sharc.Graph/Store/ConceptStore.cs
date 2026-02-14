@@ -93,12 +93,19 @@ internal sealed class ConceptStore
     private GraphRecord? GetViaIndex(NodeKey key)
     {
         using var indexCursor = _reader.CreateIndexCursor((uint)_keyIndexRootPage);
-        while (indexCursor.MoveNext())
+        
+        // O(log N) seek
+        if (!indexCursor.SeekFirst(key.Value))
+            return null;
+
+        do
         {
             var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
             if (indexRecord.Length < 2) continue;
 
             long indexKeyValue = indexRecord[0].AsInt64();
+            
+            // Exact match check
             if (indexKeyValue == key.Value)
             {
                 // Last column is the table rowid
@@ -120,10 +127,12 @@ internal sealed class ConceptStore
                 return null;
             }
 
-            // Early exit: index is sorted, so if we've passed the target value, stop
+            // Early exit: index is sorted
             if (indexKeyValue > key.Value)
                 return null;
-        }
+                
+        } while (indexCursor.MoveNext());
+        
         return null;
     }
 

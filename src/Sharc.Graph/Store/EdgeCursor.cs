@@ -13,6 +13,10 @@ namespace Sharc.Graph.Store;
 /// Zero-allocation edge cursor using index scan with O(log N) positioning.
 /// Rents ColumnValue[] from ArrayPool and returns on dispose.
 /// </summary>
+/// <summary>
+/// Zero-allocation edge cursor using index scan with O(log N) positioning.
+/// Rents ColumnValue[] from ArrayPool and returns on dispose.
+/// </summary>
 internal sealed class IndexEdgeCursor : IEdgeCursor
 {
     private readonly IIndexBTreeCursor _indexCursor;
@@ -20,7 +24,7 @@ internal sealed class IndexEdgeCursor : IEdgeCursor
     private readonly RecordDecoder _decoder;
     private readonly ColumnValue[] _tableBuffer;
     private readonly int _columnCount;
-    private readonly long _originKey;
+    private readonly long _lookupKey;
     private readonly RelationKind? _kindFilter;
     private readonly int _colSource, _colKind, _colTarget, _colData, _colWeight;
     private bool _positioned;
@@ -34,12 +38,12 @@ internal sealed class IndexEdgeCursor : IEdgeCursor
 
     internal IndexEdgeCursor(IBTreeReader reader, RecordDecoder decoder,
         int indexRootPage, int tableRootPage, int columnCount,
-        long originKey, RelationKind? kindFilter,
+        long lookupKey, RelationKind? kindFilter,
         int colSource, int colKind, int colTarget, int colData, int colWeight)
     {
         _decoder = decoder;
         _columnCount = columnCount;
-        _originKey = originKey;
+        _lookupKey = lookupKey;
         _kindFilter = kindFilter;
         _colSource = colSource;
         _colKind = colKind;
@@ -61,7 +65,7 @@ internal sealed class IndexEdgeCursor : IEdgeCursor
             bool hasNext;
             if (!_positioned)
             {
-                hasNext = _indexCursor.SeekFirst(_originKey);
+                hasNext = _indexCursor.SeekFirst(_lookupKey);
                 _positioned = true;
             }
             else
@@ -78,13 +82,13 @@ internal sealed class IndexEdgeCursor : IEdgeCursor
             var indexRecord = _decoder.DecodeRecord(_indexCursor.Payload);
             if (indexRecord.Length < 2) continue;
 
-            long indexOriginValue = indexRecord[0].AsInt64();
-            if (indexOriginValue > _originKey)
+            long indexValue = indexRecord[0].AsInt64();
+            if (indexValue > _lookupKey)
             {
                 _exhausted = true;
                 return false;
             }
-            if (indexOriginValue != _originKey) continue;
+            if (indexValue != _lookupKey) continue;
 
             long rowId = indexRecord[^1].AsInt64();
             if (!_tableCursor.Seek(rowId)) continue;
@@ -121,7 +125,8 @@ internal sealed class TableScanEdgeCursor : IEdgeCursor
     private readonly RecordDecoder _decoder;
     private readonly ColumnValue[] _buffer;
     private readonly int _columnCount;
-    private readonly long _originKey;
+    private readonly long _lookupKey;
+    private readonly int _lookupColOrdinal;
     private readonly RelationKind? _kindFilter;
     private readonly int _colSource, _colKind, _colTarget, _colData, _colWeight;
 
@@ -133,12 +138,13 @@ internal sealed class TableScanEdgeCursor : IEdgeCursor
 
     internal TableScanEdgeCursor(IBTreeReader reader, RecordDecoder decoder,
         int tableRootPage, int columnCount,
-        long originKey, RelationKind? kindFilter,
+        long lookupKey, int lookupColOrdinal, RelationKind? kindFilter,
         int colSource, int colKind, int colTarget, int colData, int colWeight)
     {
         _decoder = decoder;
         _columnCount = columnCount;
-        _originKey = originKey;
+        _lookupKey = lookupKey;
+        _lookupColOrdinal = lookupColOrdinal;
         _kindFilter = kindFilter;
         _colSource = colSource;
         _colKind = colKind;
@@ -156,13 +162,13 @@ internal sealed class TableScanEdgeCursor : IEdgeCursor
         {
             _decoder.DecodeRecord(_cursor.Payload, _buffer);
 
-            long sourceKey = _colSource >= 0 && _colSource < _columnCount ? _buffer[_colSource].AsInt64() : 0;
-            if (sourceKey != _originKey) continue;
+            long recordKey = _lookupColOrdinal >= 0 && _lookupColOrdinal < _columnCount ? _buffer[_lookupColOrdinal].AsInt64() : 0;
+            if (recordKey != _lookupKey) continue;
 
             int kindVal = _colKind >= 0 && _colKind < _columnCount ? (int)_buffer[_colKind].AsInt64() : 0;
             if (_kindFilter.HasValue && kindVal != (int)_kindFilter.Value) continue;
 
-            OriginKey = sourceKey;
+            OriginKey = _colSource >= 0 && _colSource < _columnCount ? _buffer[_colSource].AsInt64() : 0;
             TargetKey = _colTarget >= 0 && _colTarget < _columnCount ? _buffer[_colTarget].AsInt64() : 0;
             Kind = kindVal;
             Weight = _colWeight >= 0 && _colWeight < _columnCount ? (float)_buffer[_colWeight].AsDouble() : 1.0f;

@@ -35,6 +35,7 @@ public static class GraphGenerator
             );
 
             CREATE INDEX idx_concepts_id ON _concepts(id);
+            CREATE UNIQUE INDEX idx_concepts_key ON _concepts(key);
             CREATE INDEX idx_relations_source_kind ON _relations(source_key, kind, target_key);
             CREATE INDEX idx_relations_target_kind ON _relations(target_key, kind, source_key);
         ";
