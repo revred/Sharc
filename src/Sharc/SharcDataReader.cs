@@ -16,6 +16,7 @@
 --------------------------------------------------------------------------------------------------*/
 
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
@@ -257,6 +258,7 @@ public sealed class SharcDataReader : IDisposable
     /// Advances the reader to the next row.
     /// </summary>
     /// <returns>True if there is another row; false if the end has been reached.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Read()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -293,12 +295,6 @@ public sealed class SharcDataReader : IDisposable
 
             // ── Legacy SharcFilter path ──
             DecodeCurrentRow();
-
-            // Optimization: If MatchesRaw passed, we verified the row.
-            // We only need EvaluateFilters if MatchesRaw wasn't used (e.g. implementation issue)
-            // or if we want to support legacy filters that MatchesRaw doesn't handle.
-            // For now, assuming MatchesRaw handles all SharcFilters correctly.
-            // if (_filters != null && !EvaluateFilters()) continue;
 
             return true;
         }
@@ -404,6 +400,7 @@ public sealed class SharcDataReader : IDisposable
     /// <summary>
     /// Gets a column value as a 64-bit signed integer.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public long GetInt64(int ordinal)
     {
         // Fast path: decode directly from page span (skip ColumnValue construction)
@@ -428,6 +425,7 @@ public sealed class SharcDataReader : IDisposable
     /// <summary>
     /// Gets a column value as a double-precision float.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public double GetDouble(int ordinal)
     {
         // Fast path: decode directly from page span (skip ColumnValue construction)
@@ -442,6 +440,7 @@ public sealed class SharcDataReader : IDisposable
     /// <summary>
     /// Gets a column value as a UTF-8 string.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string GetString(int ordinal)
     {
         // Fast path: decode UTF-8 directly from page span (eliminates intermediate byte[] allocation)
