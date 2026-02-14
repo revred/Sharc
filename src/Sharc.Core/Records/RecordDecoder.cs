@@ -321,8 +321,34 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     [SuppressMessage("Performance", "CA1822:Mark members as static")]
     public double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
     {
+        long st = serialTypes[columnIndex];
+
+        // NULL → 0.0
+        if (st == 0) return 0.0;
+        // Constant integer serial types
+        if (st == 8) return 0.0;
+        if (st == 9) return 1.0;
+
         int offset = ComputeColumnOffset(serialTypes, columnIndex, bodyOffset);
-        int size = SerialTypeCodec.GetContentSize(serialTypes[columnIndex]);
-        return BinaryPrimitives.ReadDoubleBigEndian(payload.Slice(offset, size));
+
+        // Serial type 7 = 8-byte IEEE 754 float
+        if (st == 7)
+            return BinaryPrimitives.ReadDoubleBigEndian(payload.Slice(offset, 8));
+
+        // Integer serial types (1-6) — SQLite stores doubles as integers when exact
+        var data = payload.Slice(offset, SerialTypeCodec.GetContentSize(st));
+        long intVal = st switch
+        {
+            1 => (sbyte)data[0],
+            2 => BinaryPrimitives.ReadInt16BigEndian(data),
+            3 => ((data[0] & 0x80) != 0)
+                ? (int)((uint)(data[0] << 16) | (uint)(data[1] << 8) | data[2]) | unchecked((int)0xFF000000)
+                : (data[0] << 16) | (data[1] << 8) | data[2],
+            4 => BinaryPrimitives.ReadInt32BigEndian(data),
+            5 => DecodeInt48Raw(data),
+            6 => BinaryPrimitives.ReadInt64BigEndian(data),
+            _ => 0
+        };
+        return (double)intVal;
     }
 }
