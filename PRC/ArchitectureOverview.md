@@ -2,7 +2,7 @@
 
 ## 1. Design Philosophy
 
-Sharc is a **layered, interface-driven, read-only SQLite file-format reader**. Each layer has a single responsibility, communicates through well-defined interfaces, and is independently testable.
+Sharc is a **layered, interface-driven SQLite file-format reader and writer**. Each layer has a single responsibility, communicates through well-defined interfaces, and is independently testable. The library includes a cryptographic trust layer for AI multi-agent coordination.
 
 Core tenets:
 - **Composition over inheritance** — layers compose via interfaces, never via class hierarchies
@@ -154,11 +154,18 @@ SharcDataReader exposes column values via GetInt64(), GetString(), etc.
 ## 4. Assembly Dependencies
 
 ```
-Sharc (public API)
-  └── Sharc.Core (internal engine)
+Sharc (public API + Trust)
+  └── Sharc.Core (internal engine + write + trust models)
+
+Sharc.Graph (graph storage)
+  ├── Sharc.Core
+  └── Sharc.Graph.Surface (graph models)
 
 Sharc.Crypto (encryption)
   └── Sharc.Core (IPageTransform)
+
+Sharc.Scene (trust playground)
+  └── Sharc (Trust layer)
 
 Sharc.Tests
   ├── Sharc
@@ -171,6 +178,8 @@ Sharc.Benchmarks
 ```
 
 Sharc.Crypto is **optional** — unencrypted databases require only Sharc + Sharc.Core.
+Sharc.Graph is **optional** — graph storage adds ConceptStore/RelationStore over the B-tree engine.
+Sharc.Scene is **optional** — trust playground for visualizing agent interactions.
 
 ## 5. Threading Model
 
@@ -260,3 +269,39 @@ new SharcOpenOptions
 - `DecryptingPageSource` wraps any `IPageSource` with transparent decryption
 - `SharcKeyHandle` with Argon2id and PBKDF2-SHA512 key derivation
 - `EncryptionHeader` parsed from reserved space in page 1
+
+### Graph Storage (Phase 2 — COMPLETE)
+
+- `Sharc.Graph` layers concept/relation graph model over B-tree storage
+- `ConceptStore` and `RelationStore` with O(log N) index seeks
+- `SeekFirst(key)` on `IndexBTreeCursor` for graph traversal (12.5x faster than SQLite)
+- Schema adapter resolves table root pages dynamically
+
+### Write Engine (Phase 3 — IN PROGRESS)
+
+- `SharcWriter` public API for INSERT operations
+- `BTreeMutator` handles leaf inserts with B-tree page splits
+- `RecordEncoder` serializes typed values to SQLite record format
+- `CellBuilder` constructs B-tree leaf cells from encoded records
+- `PageManager` allocates and manages database pages
+- `RollbackJournal` provides ACID transaction support (atomic writes, rollback)
+- `Transaction` wraps Begin/Commit/Rollback lifecycle
+
+### Agent Trust Layer (Phase 4 — COMPLETE)
+
+- `AgentRegistry` manages agent registration with ECDSA self-attestation
+- `LedgerManager` provides hash-chain audit log (SHA-256 linked, ECDSA signed)
+- `ReputationEngine` tracks agent scoring based on ledger activity
+- Co-signature support for multi-agent endorsement
+- Governance policies for permission boundaries and scope control
+- Trust models (`AgentInfo`, `AgentClass`, `TrustPayload`, `LedgerEntry`) in `Sharc.Core.Trust`
+- `Sharc.Scene` trust playground for live agent simulation and visualization
+
+### Current Test Status
+
+**1,064 tests passing** across 5 projects:
+- Unit tests: 832 (core + crypto + filter + WITHOUT ROWID + SeekFirst + write engine + trust)
+- Integration tests: 146
+- Graph unit tests: 50
+- Index tests: 22
+- Context tests: 14

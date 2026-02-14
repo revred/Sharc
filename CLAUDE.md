@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Sharc is a high-performance, pure managed C# library that reads SQLite database files (format 3) from disk and in-memory buffers, with optional password-based encryption. It is **read-only** — no writes, no SQL VM, no query planner.
+Sharc is a high-performance, pure managed C# library that reads and writes SQLite database files (format 3) from disk and in-memory buffers, with optional password-based encryption. It includes a cryptographic agent trust layer for AI multi-agent coordination.
 
 ## Build & Test Commands
 
@@ -39,6 +39,19 @@ Sharc is a **layered file-format reader**, not a database engine.
 │  SharcDatabase → SharcDataReader               │
 │  SharcSchema → TableInfo, ColumnInfo           │
 ├────────────────────────────────────────────────┤
+│  Trust Layer (Sharc/Trust/)                    │
+│  AgentRegistry: ECDSA self-attestation         │
+│  LedgerManager: hash-chain audit log           │
+│  ReputationEngine, Co-Signatures, Governance   │
+├────────────────────────────────────────────────┤
+│  Write Layer (Sharc/Write/, Sharc.Core/Write/) │
+│  SharcWriter → WriteEngine → BTreeMutator      │
+│  RecordEncoder, CellBuilder, PageManager       │
+│  RollbackJournal, Transaction (ACID)           │
+├────────────────────────────────────────────────┤
+│  Graph Layer (Sharc.Graph/)                    │
+│  ConceptStore, RelationStore, SeekFirst        │
+├────────────────────────────────────────────────┤
 │  Schema Layer (Sharc.Core/Schema/)             │
 │  SchemaReader: parses sqlite_schema table      │
 ├────────────────────────────────────────────────┤
@@ -49,7 +62,7 @@ Sharc is a **layered file-format reader**, not a database engine.
 │  BTreeReader → BTreeCursor → CellParser        │
 ├────────────────────────────────────────────────┤
 │  Page I/O Layer (Sharc.Core/IO/)               │
-│  IPageSource: File | Memory | Mmap | Cached     │
+│  IPageSource: File | Memory | Mmap | Cached    │
 │  IPageTransform: Identity | Decrypting         │
 ├────────────────────────────────────────────────┤
 │  Primitives (Sharc.Core/Primitives/)           │
@@ -103,14 +116,17 @@ Examples: `DecodeVarint_SingleByteZero_ReturnsZero`, `Parse_InvalidMagic_ThrowsI
 ```
 Sharc                        — Public API (SharcDatabase, SharcDataReader, options, enums)
 Sharc.Schema                 — Public schema models (TableInfo, ColumnInfo, etc.)
+Sharc.Trust                  — Trust layer (AgentRegistry, LedgerManager, ReputationEngine)
 Sharc.Exceptions             — Public exception types
 Sharc.Core                   — Internal interfaces (IPageSource, IBTreeReader, etc.)
 Sharc.Core.Primitives        — Varint, serial type codecs
 Sharc.Core.Format            — File/page header parsers
-Sharc.Core.IO                — Page sources, caching
-Sharc.Core.BTree             — B-tree traversal
-Sharc.Core.Records           — Record decoding
+Sharc.Core.IO                — Page sources, caching, rollback journal
+Sharc.Core.BTree             — B-tree traversal and mutation
+Sharc.Core.Records           — Record decoding and encoding
 Sharc.Core.Schema            — Internal schema reader
+Sharc.Core.Trust             — Trust models (AgentInfo, AgentClass, TrustPayload, LedgerEntry)
+Sharc.Core.Write             — Write engine internals (PageManager, CellBuilder)
 Sharc.Crypto                 — Encryption (KDF, ciphers, key handles)
 ```
 
@@ -139,55 +155,58 @@ sharc/
 ├── CLAUDE.md                          ← You are here
 ├── README.md                          ← User-facing docs
 ├── Sharc.sln                          ← Solution file
-├── docs/                              ← Reference docs (format analysis, coding standards)
+├── docs/                              ← Reference docs (format analysis, trust architecture)
 ├── PRC/                               ← Architecture docs & decisions (ADRs, specs)
+├── secrets/                           ← Competitive analysis, internal strategy
 ├── src/
-│   ├── Sharc/                         ← Public API (SharcDatabase, SharcDataReader, Schema)
-│   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Primitives)
+│   ├── Sharc/                         ← Public API + Trust Layer + Write Engine
+│   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Write, Trust models)
 │   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
 │   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
-│   └── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
+│   ├── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
+│   └── Sharc.Scene/                   ← Trust Playground (agent simulation & visualization)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (463 tests)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (61 tests)
-│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (49 tests)
-│   ├── Sharc.Graph.Tests.Performance/ ← Graph performance tests
+│   ├── Sharc.Tests/                   ← Unit tests (832 tests: core + trust + write + crypto)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (146 tests)
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (50 tests)
 │   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
-│   └── Sharc.Index.Tests/            ← Index CLI tests (22 tests)
+│   └── Sharc.Index.Tests/             ← Index CLI tests (22 tests)
 ├── bench/
-│   ├── Sharc.Benchmarks/             ← Core BenchmarkDotNet suite (Sharc vs SQLite)
-│   └── Sharc.Comparisons/            ← Graph benchmark suite
+│   ├── Sharc.Benchmarks/              ← Core BenchmarkDotNet suite (Sharc vs SQLite)
+│   └── Sharc.Comparisons/             ← Graph + core benchmarks
 └── tools/
-    ├── Sharc.Context/                ← MCP Context Server (queries, benchmarks, tests)
-    └── Sharc.Index/                  ← GCD CLI (git history → SQLite)
+    ├── Sharc.Context/                 ← MCP Context Server (queries, benchmarks, tests)
+    └── Sharc.Index/                   ← GCD CLI (git history → SQLite)
 ```
 
 ## Current Status
 
-**Milestones 1–10 ALL COMPLETE**: 696 tests passing (463 unit + 61 integration + 49 graph + 22 index + 14 context + 87 crypto/filtering/WAL).
+**1,064 tests passing** across 5 test projects (832 unit + 146 integration + 50 graph + 22 index + 14 context).
 
-All core layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage, WHERE Filtering (SharcFilter, 6 operators), WAL Read Support, AES-256-GCM Encryption (Argon2id/PBKDF2-SHA512 KDF). See README.md for benchmark results.
+All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage (SeekFirst O(log N)), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (INSERT with B-tree splits, ACID transactions), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring). See README.md for benchmark results.
 
 ## What NOT To Do
 
-- **Do not add SQL parsing or execution** — Sharc is a format reader, not a database engine
-- **Do not add write support** until read-only is solid and benchmarked (Milestone 10 gate)
+- **Do not add SQL parsing or execution** — Sharc reads/writes raw B-tree pages, not a SQL engine
 - **Do not add dependencies** without checking `PRC/DependencyPolicy.md`
 - **Do not use `unsafe` code** unless profiling proves it's necessary and the gain is >20%
 - **Do not allocate in hot paths** — use spans, stackalloc, ArrayPool
 - **Do not break the public API surface** without updating all docs and tests
 - **Do not merge without all tests green**
+- **Do not bypass the Trust layer** — all agent operations must go through `AgentRegistry` and `LedgerManager`
 
 ## Key Files to Understand the System
 
 | To understand... | Read... |
 |-----------------|---------|
 | What Sharc does | `README.md` |
-| SQLite file format | `docs/SQLiteC_Analysis.md` and `docs/FileFormatQuickRef.md` |
+| SQLite file format | `docs/SQLiteAnalysis.md` and `docs/FileFormatQuickRef.md` |
 | Why pure managed | `PRC/StrategyDecision.md` |
 | Architecture layers | `PRC/ArchitectureOverview.md` |
 | Public API design | `PRC/APIDesign.md` |
 | Encryption format | `PRC/EncryptionSpec.md` |
+| Trust architecture | `docs/DistributedTrustArchitecture.md` |
+| Ledger features | `PRC/LedgerFeatures.md` |
 | What to build next | `PRC/ExecutionPlan.md` |
 | How to test | `PRC/TestStrategy.md` |
 | All decisions made | `PRC/DecisionLog.md` |
