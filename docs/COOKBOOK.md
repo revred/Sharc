@@ -1,99 +1,241 @@
 # Sharc Cookbook
 
-Actionable recipes for common and advanced tasks in Sharc.
+15 recipes for common patterns. All examples use the correct public API.
 
-## 1. Reading Data
+---
 
-### Paginate through results
-Use `Skip()` and `Take()` on the reader (standard iterator pattern).
+## Reading Data
+
+### 1. Open and Scan a Table
 
 ```csharp
-using var reader = db.CreateReader("events");
-int page = 2;
-int pageSize = 20;
+using Sharc;
 
-// Skip to page 2 (manually)
-for (int i = 0; i < page * pageSize; i++) reader.Read();
+using var db = SharcDatabase.Open("mydata.db");
+using var reader = db.CreateReader("users");
 
-// Read current page
-for (int i = 0; i < pageSize && reader.Read(); i++)
+while (reader.Read())
 {
-    Console.WriteLine(reader.GetString("event_name"));
+    long id = reader.GetInt64(0);
+    string name = reader.GetString(1);
+    Console.WriteLine($"{id}: {name}");
 }
 ```
 
-### Read from a MemoryStream
-Handy for cloud blobs or incoming network packets.
+### 2. Point Lookup (Seek)
 
-```csharp
-byte[] buffer = await GetDatabaseFromS3();
-using var db = SharcDatabase.OpenMemory(buffer);
-```
-
-## 2. Searching & Filtering
-
-### Case-Insensitive Filter
-Note: Sharc's FilterStar is case-sensitive by default (binary compare).
-
-```csharp
-var reader = db.CreateReader("users")
-               .Where("username", FilterOp.Equals, "revanur"); // Exact match
-```
-
-### Multiple Filters (AND logic)
-Chaining `.Where()` calls applies ALL filters.
-
-```csharp
-var reader = db.CreateReader("logs")
-               .Where("level", FilterOp.Equals, "Error")
-               .Where("timestamp", FilterOp.GreaterThan, "2026-02-14");
-```
-
-## 3. High Performance
-
-### Reuse Reader for Multiple Seeks
-Don't recreate the reader in a loop. Reuse it to leverage the column metadata cache.
+Sub-microsecond O(log N) B-tree seek.
 
 ```csharp
 using var reader = db.CreateReader("users");
-foreach (var id in idsToFind)
+
+if (reader.Seek(42))
+    Console.WriteLine($"Found: {reader.GetString(1)}");
+```
+
+### 3. Column Projection
+
+Decode only the columns you need. Unneeded columns are skipped at the byte level.
+
+```csharp
+using var reader = db.CreateReader("users", "id", "email");
+
+while (reader.Read())
 {
-    if (reader.Seek(id)) 
-    {
-        // Process row
-    }
+    long id = reader.GetInt64(0);     // "id" maps to index 0
+    string email = reader.GetString(1); // "email" maps to index 1
 }
 ```
 
-### Partial Projection
-Only request the columns you actually intend to read. This significantly reduces varint decoding and B-tree leaf traversal work.
+### 4. In-Memory Database
+
+Load from a byte array (cloud blobs, network packets, embedded resources).
 
 ```csharp
-// Load ONLY the 'email' column
-using var reader = db.CreateReader("users", "email"); 
+byte[] dbBytes = await File.ReadAllBytesAsync("mydata.db");
+using var db = SharcDatabase.OpenMemory(dbBytes);
 ```
 
-## 4. Graph & Trust
+### 5. Batch Seeks (Reuse Reader)
 
-### Find all "Owned" entities
-Using the graph layer to traverse ownership edges.
+Reuse a single reader for multiple seeks to leverage LRU page cache locality.
 
 ```csharp
-var edges = graph.GetEdges(userId, TraversalDirection.Outgoing, "owns");
-while (edges.MoveNext())
+using var reader = db.CreateReader("users");
+
+long[] idsToFind = [10, 42, 99, 500, 1234, 5000];
+foreach (long id in idsToFind)
 {
-    Console.WriteLine($"Owns asset: {edges.TargetKey}");
+    if (reader.Seek(id))
+        Console.WriteLine($"[{id}] {reader.GetString(1)}");
 }
-```
-
-### Sign a new data entry
-Using a human-controlled ECDSA key to sign a ledger entry.
-
-```csharp
-var agent = AgentIdentity.FromPrivateKey(privateKey);
-graph.Ledger.RecordEntry(agent, "Updated project status to 'Closed'");
 ```
 
 ---
 
-[View Benchmarks](../docs/BENCHMARKS.md) | [Architecture](../docs/ARCHITECTURE.md)
+## Filtering
+
+### 6. Simple Filter (SharcFilter)
+
+Apply a single WHERE-style predicate.
+
+```csharp
+using Sharc.Core.Query; // for SharcOperator
+
+using var reader = db.CreateReader("users",
+    new SharcFilter("age", SharcOperator.GreaterOrEqual, 18L));
+
+while (reader.Read())
+    Console.WriteLine($"{reader.GetString(1)}, age {reader.GetInt64(2)}");
+```
+
+### 7. Composable Filters (FilterStar)
+
+Build complex predicates with AND/OR/NOT.
+
+```csharp
+var filter = FilterStar.And(
+    FilterStar.Column("status").Eq("active"),
+    FilterStar.Column("age").Between(21L, 65L)
+);
+
+using var reader = db.CreateReader("users", filter);
+```
+
+### 8. Filter with Projection
+
+Combine column projection and filtering for maximum efficiency.
+
+```csharp
+var filter = FilterStar.Column("level").Gte(3L);
+
+using var reader = db.CreateReader("logs", ["timestamp", "message"], filter);
+while (reader.Read())
+    Console.WriteLine($"[{reader.GetString(0)}] {reader.GetString(1)}");
+```
+
+### 9. String Prefix Search
+
+Find rows where a column starts with a given prefix.
+
+```csharp
+var filter = FilterStar.Column("email").StartsWith("admin@");
+using var reader = db.CreateReader("users", filter);
+```
+
+---
+
+## Schema & Metadata
+
+### 10. Schema Introspection
+
+List all tables and their columns.
+
+```csharp
+foreach (var table in db.Schema.Tables)
+{
+    Console.WriteLine($"Table: {table.Name}");
+    foreach (var col in table.Columns)
+        Console.WriteLine($"  {col.Name} ({col.TypeAffinity})");
+}
+```
+
+### 11. Row Count
+
+Get the number of rows in a table.
+
+```csharp
+long count = db.GetRowCount("users");
+Console.WriteLine($"Users: {count} rows");
+```
+
+---
+
+## Graph Traversal
+
+Requires `Sharc.Graph` package.
+
+### 12. Graph Setup and Node Lookup
+
+```csharp
+using Sharc.Graph;
+using Sharc.Graph.Model;
+using Sharc.Graph.Schema;
+
+using var db = SharcDatabase.Open("graph.db");
+using var graph = new SharcContextGraph(db.BTreeReader, new NativeSchemaAdapter());
+graph.Initialize();
+
+var node = graph.GetNode(new NodeKey(42));
+if (node != null)
+    Console.WriteLine($"Node 42: {node.Value.JsonData}");
+```
+
+### 13. Edge Enumeration
+
+```csharp
+// Outgoing edges
+foreach (var edge in graph.GetEdges(new NodeKey(1)))
+    Console.WriteLine($"  -> {edge.TargetKey} (kind={edge.Kind})");
+
+// Incoming edges
+foreach (var edge in graph.GetIncomingEdges(new NodeKey(1)))
+    Console.WriteLine($"  <- {edge.SourceKey} (kind={edge.Kind})");
+```
+
+### 14. BFS Traversal (2-Hop)
+
+```csharp
+var policy = new TraversalPolicy
+{
+    Direction = TraversalDirection.Both,
+    MaxDepth = 2
+};
+
+var result = graph.Traverse(new NodeKey(1), policy);
+Console.WriteLine($"Reached {result.Nodes.Count} nodes:");
+foreach (var n in result.Nodes)
+    Console.WriteLine($"  Key={n.Record.Key}, Depth={n.Depth}");
+```
+
+---
+
+## Trust Layer
+
+### 15. Register Agent, Append Ledger, Verify Chain
+
+```csharp
+using Sharc.Trust;
+using Sharc.Core.Trust;
+
+// Register an agent
+var signer = new SharcSigner("agent-001");
+var agent = new AgentInfo(
+    AgentId: "agent-001",
+    Class: AgentClass.Human,
+    PublicKey: signer.GetPublicKey(),
+    AuthorityCeiling: 10000,
+    WriteScope: "*",
+    ReadScope: "*",
+    ValidityStart: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+    ValidityEnd: DateTimeOffset.UtcNow.AddYears(1).ToUnixTimeSeconds(),
+    ParentAgent: "",
+    CoSignRequired: false,
+    Signature: Array.Empty<byte>()
+);
+
+var registry = new AgentRegistry(db);
+registry.RegisterAgent(agent);
+
+// Append to the ledger
+var ledger = new LedgerManager(db);
+ledger.Append("Patient record updated by agent-001", signer);
+
+// Verify chain integrity
+bool valid = ledger.VerifyIntegrity();
+Console.WriteLine(valid ? "Chain intact" : "Chain compromised!");
+```
+
+---
+
+[Getting Started](GETTING_STARTED.md) | [Benchmarks](BENCHMARKS.md) | [Architecture](ARCHITECTURE.md)
