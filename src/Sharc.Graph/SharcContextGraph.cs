@@ -26,8 +26,11 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     
     // Persistent collections for zero-allocation reuse
     private readonly HashSet<NodeKey> _visitedCache = new();
-    private readonly Queue<(NodeKey Key, int Depth, List<NodeKey>? Path)> _traversalQueue = new();
+    private readonly Queue<(NodeKey Key, int Depth, int PathParent)> _traversalQueue = new();
     private readonly List<TraversalNode> _resultNodesCache = new();
+
+    // Parent-pointer path tracking: O(N) instead of O(N*D) list copies
+    private readonly List<(NodeKey Key, int Parent)> _pathNodes = new();
 
     /// <summary>
     /// Creates a new graph context from an existing b-tree reader.
@@ -107,26 +110,22 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     public IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null)
     {
         EnsureInitialized();
-        var list = new List<GraphEdge>();
         using var cursor = _relations.CreateEdgeCursor(origin, kind);
         while (cursor.MoveNext())
         {
-            list.Add(MapToEdge(cursor));
+            yield return MapToEdge(cursor);
         }
-        return list;
     }
 
     /// <inheritdoc/>
     public IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kind = null)
     {
         EnsureInitialized();
-        var list = new List<GraphEdge>();
         using var cursor = _relations.CreateIncomingEdgeCursor(target, kind);
         while (cursor.MoveNext())
         {
-            list.Add(MapToEdge(cursor));
+            yield return MapToEdge(cursor);
         }
-        return list;
     }
 
     /// <inheritdoc/>
@@ -143,22 +142,32 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
 
         var resultNodes = _resultNodesCache;
         resultNodes.Clear();
-        
+
         var visited = _visitedCache;
         visited.Clear();
-        
+
         var queue = _traversalQueue;
         queue.Clear();
 
-        List<NodeKey>? startPath = policy.IncludePaths ? new List<NodeKey> { startKey } : null;
-        queue.Enqueue((startKey, 0, startPath));
+        bool trackPaths = policy.IncludePaths;
+        var pathNodes = _pathNodes;
+        pathNodes.Clear();
+
+        int startPathIndex = -1;
+        if (trackPaths)
+        {
+            startPathIndex = pathNodes.Count;
+            pathNodes.Add((startKey, -1));
+        }
+
+        queue.Enqueue((startKey, 0, startPathIndex));
         visited.Add(startKey);
 
         RelationKind? filterKind = policy.Kind;
 
         if (_outgoingCursor == null && (policy.Direction == TraversalDirection.Outgoing || policy.Direction == TraversalDirection.Both))
             _outgoingCursor = _relations.CreateEdgeCursor(startKey, filterKind);
-            
+
         if (_incomingCursor == null && (policy.Direction == TraversalDirection.Incoming || policy.Direction == TraversalDirection.Both))
             _incomingCursor = _relations.CreateIncomingEdgeCursor(startKey, filterKind);
 
@@ -167,12 +176,12 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
 
         while (queue.Count > 0)
         {
-            var (currentKey, depth, path) = queue.Dequeue();
+            var (currentKey, depth, pathIndex) = queue.Dequeue();
 
-            // Materialize record only if requested or if we are returning it
             var record = _concepts.Get(currentKey, policy.IncludeData);
             if (record.HasValue)
             {
+                IReadOnlyList<NodeKey>? path = trackPaths ? ReconstructPath(pathNodes, pathIndex) : null;
                 resultNodes.Add(new TraversalNode(record.Value, depth, path));
             }
 
@@ -185,16 +194,16 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
             if (outgoingCursor != null)
             {
                 outgoingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
-                ProcessCursor(outgoingCursor, false, depth, path);
+                ProcessCursor(outgoingCursor, false, depth, pathIndex);
             }
 
             if (incomingCursor != null)
             {
                 incomingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
-                ProcessCursor(incomingCursor, true, depth, path);
+                ProcessCursor(incomingCursor, true, depth, pathIndex);
             }
 
-            void ProcessCursor(IEdgeCursor cursor, bool isIncoming, int currentDepth, List<NodeKey>? currentPath)
+            void ProcessCursor(IEdgeCursor cursor, bool isIncoming, int currentDepth, int currentPathIndex)
             {
                 while (cursor.MoveNext())
                 {
@@ -204,13 +213,14 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
                     var nextKey = new NodeKey(isIncoming ? cursor.OriginKey : cursor.TargetKey);
                     if (visited.Add(nextKey))
                     {
-                        List<NodeKey>? nextPath = null;
-                        if (policy.IncludePaths && currentPath != null)
+                        int nextPathIndex = -1;
+                        if (trackPaths)
                         {
-                            nextPath = new List<NodeKey>(currentPath) { nextKey };
+                            nextPathIndex = pathNodes.Count;
+                            pathNodes.Add((nextKey, currentPathIndex));
                         }
-                        
-                        queue.Enqueue((nextKey, currentDepth + 1, nextPath));
+
+                        queue.Enqueue((nextKey, currentDepth + 1, nextPathIndex));
                         fanOutCount++;
                     }
                 }
@@ -218,6 +228,30 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         }
 
         return new GraphResult(resultNodes);
+    }
+
+    private static List<NodeKey> ReconstructPath(List<(NodeKey Key, int Parent)> pathNodes, int index)
+    {
+        // Walk parent pointers to count depth, then fill in reverse
+        int count = 0;
+        int walk = index;
+        while (walk >= 0)
+        {
+            count++;
+            walk = pathNodes[walk].Parent;
+        }
+
+        var path = new List<NodeKey>(count);
+        for (int i = 0; i < count; i++) path.Add(default);
+
+        walk = index;
+        for (int i = count - 1; i >= 0; i--)
+        {
+            path[i] = pathNodes[walk].Key;
+            walk = pathNodes[walk].Parent;
+        }
+
+        return path;
     }
 
     private string GetTypeName(int kind)
@@ -240,8 +274,10 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         int kind = cursor.Kind;
         string typeStr = GetTypeName(kind);
 
+        string edgeId = string.Create(null, stackalloc char[64], $"pk:{originKey}->{targetKey}");
+
         return new GraphEdge(
-            new RecordId(typeStr, "pk:" + originKey + "->" + targetKey, new NodeKey(originKey)),
+            new RecordId(typeStr, edgeId, new NodeKey(originKey)),
             new NodeKey(originKey),
             new NodeKey(targetKey),
             kind,
@@ -249,11 +285,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         )
         {
             KindName = typeStr,
-            CVN = 1,
-            LVN = 1,
-            SyncStatus = 0,
-            Weight = cursor.Weight,
-            CreatedAt = DateTimeOffset.UtcNow
+            Weight = cursor.Weight
         };
     }
 }

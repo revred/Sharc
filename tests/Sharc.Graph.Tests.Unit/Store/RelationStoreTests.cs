@@ -32,7 +32,7 @@ public class RelationStoreTests
         while (cursor.MoveNext())
             targets.Add(cursor.TargetKey);
 
-        Assert.AreEqual(2, targets.Count);
+        Assert.HasCount(2, targets);
         Assert.AreEqual(200, targets[0]);
         Assert.AreEqual(300, targets[1]);
     }
@@ -103,9 +103,9 @@ public class RelationStoreTests
         while (cursor.MoveNext())
             origins.Add(cursor.OriginKey);
 
-        Assert.AreEqual(2, origins.Count);
-        Assert.IsTrue(origins.Contains(100));
-        Assert.IsTrue(origins.Contains(50));
+        Assert.HasCount(2, origins);
+        Assert.Contains(100L, origins);
+        Assert.Contains(50L, origins);
     }
 
     #region Test Helpers
