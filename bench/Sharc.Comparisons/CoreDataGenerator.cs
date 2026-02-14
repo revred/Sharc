@@ -71,7 +71,7 @@ public static class CoreDataGenerator
 
             pId.Value = i;
             pName.Value = $"{firstName} {lastName}";
-            pEmail.Value = $"{firstName.ToLower()}.{lastName.ToLower()}{i}@example.com";
+            pEmail.Value = $"{firstName.ToLowerInvariant()}.{lastName.ToLowerInvariant()}{i}@example.com";
             pAge.Value = rng.Next(18, 80);
             pScore.Value = Math.Round(rng.NextDouble() * 100, 2);
             pBio.Value = rng.NextDouble() < 0.3 ? DBNull.Value : $"Bio for user {i}: {firstName} works in {Departments[rng.Next(Departments.Length)]}";

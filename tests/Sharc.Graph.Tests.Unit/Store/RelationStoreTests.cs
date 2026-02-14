@@ -67,7 +67,29 @@ public class RelationStoreTests
 
         var edges = store.GetEdges(new NodeKey(999)).ToList();
 
-        Assert.IsEmpty(edges);
+        Assert.HasCount(0, edges);
+    }
+
+    [TestMethod]
+    public void GetIncomingEdges_WithMatchingTarget_ReturnsEdges()
+    {
+        var (schema, adapter) = CreateEdgeTestSetup();
+        var rows = new List<(long rowId, byte[] payload)>
+        {
+            (1, BuildEdgeRecord("e1", 100, 10, 200, "{}")), // Target 200
+            (2, BuildEdgeRecord("e2", 100, 15, 300, "{}")), // Target 300
+            (3, BuildEdgeRecord("e3", 200, 10, 100, "{}")), // Target 100
+            (4, BuildEdgeRecord("e4",  50, 20, 200, "{}"))  // Target 200
+        };
+        var reader = new FakeBTreeReader(rows);
+        var store = new RelationStore(reader, adapter);
+        store.Initialize(schema);
+
+        var edges = store.GetIncomingEdges(new NodeKey(200)).ToList();
+
+        Assert.HasCount(2, edges);
+        Assert.IsTrue(edges.Any(e => e.OriginKey.Value == 100 && e.Id.Id == "e1"));
+        Assert.IsTrue(edges.Any(e => e.OriginKey.Value == 50 && e.Id.Id == "e4"));
     }
 
     #region Test Helpers

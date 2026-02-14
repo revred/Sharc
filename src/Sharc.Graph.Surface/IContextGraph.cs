@@ -35,6 +35,11 @@ public interface IContextGraph
     IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null);
 
     /// <summary>
+    /// Retrieves edges targeting the specified node (Incoming).
+    /// </summary>
+    IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kind = null);
+
+    /// <summary>
     /// Creates a zero-allocation edge cursor for the specified origin node.
     /// Avoids <see cref="GraphEdge"/> allocation per row â€” callers read typed properties directly.
     /// Caller must dispose the cursor when done.

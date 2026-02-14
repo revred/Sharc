@@ -1,0 +1,122 @@
+using BenchmarkDotNet.Attributes;
+using Microsoft.Data.Sqlite;
+using Sharc.Core;
+using Sharc.Core.BTree;
+using Sharc.Core.Format;
+using Sharc.Core.IO;
+using Sharc.Core.Records;
+using Sharc.Core.Schema;
+using Sharc.Graph;
+using Sharc.Graph.Model;
+using Sharc.Graph.Schema;
+
+namespace Sharc.Comparisons;
+
+[BenchmarkCategory("Comparative", "GraphTraversal")]
+[MemoryDiagnoser]
+public class GraphDirectionBenchmarks
+{
+    private string _dbPath = null!;
+    private byte[] _dbBytes = null!;
+    private SqliteConnection _conn = null!;
+    private SharcContextGraph _graph = null!;
+    private IBTreeReader _bTreeReader = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sharc_graph_direction");
+        Directory.CreateDirectory(dir);
+        _dbPath = Path.Combine(dir, "graph_direction.db");
+
+        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        GraphGenerator.GenerateSQLite(_dbPath, nodeCount: 5000, edgeCount: 15000);
+        _dbBytes = File.ReadAllBytes(_dbPath);
+
+        _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
+        _conn.Open();
+
+        // Sharc Setup
+        var pageSource = new MemoryPageSource(_dbBytes);
+        var header = DatabaseHeader.Parse(pageSource.GetPage(1));
+        _bTreeReader = new BTreeReader(pageSource, header);
+        _graph = new SharcContextGraph(_bTreeReader, new NativeSchemaAdapter());
+        _graph.Initialize();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _conn?.Dispose();
+        _graph?.Dispose();
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("Incoming")]
+    public int Sharc_Incoming_1Hop()
+    {
+        int count = 0;
+        // Traversing Incoming edges for node 500 (mid-range)
+        foreach (var edge in _graph.GetIncomingEdges(new NodeKey(500)))
+        {
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("Incoming")]
+    public int SQLite_Incoming_1Hop()
+    {
+        int count = 0;
+        using (var cmd = _conn.CreateCommand())
+        {
+            // Reverse lookup: find edges where target is 500
+            cmd.CommandText = "SELECT source_key FROM _relations WHERE target_key = 500";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("Bidirectional")]
+    public int Sharc_BiDir_1Hop()
+    {
+        var policy = new TraversalPolicy
+        {
+            Direction = TraversalDirection.Both,
+            MaxDepth = 1
+        };
+        var result = _graph.Traverse(new NodeKey(500), policy);
+        return result.Nodes.Count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("Bidirectional")]
+    public int SQLite_BiDir_1Hop()
+    {
+        int count = 0;
+        var visited = new HashSet<long>();
+        visited.Add(500);
+
+        using (var cmd = _conn.CreateCommand())
+        {
+            // Outgoing
+            cmd.CommandText = "SELECT target_key FROM _relations WHERE source_key = 500 UNION SELECT source_key FROM _relations WHERE target_key = 500";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                long id = reader.GetInt64(0);
+                if (visited.Add(id))
+                {
+                    count++;
+                }
+            }
+        }
+        return visited.Count;
+    }
+}

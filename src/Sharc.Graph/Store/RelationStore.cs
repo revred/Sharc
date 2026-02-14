@@ -21,6 +21,7 @@ internal sealed class RelationStore
 
     // Index scan support
     private int _originIndexRootPage = -1;
+    private int _targetIndexRootPage = -1;
 
     // Column ordinals
     private int _colSource = -1;
@@ -56,12 +57,19 @@ internal sealed class RelationStore
         _colSync = _schema.EdgeSyncColumn != null ? GetOrdinal(table, _schema.EdgeSyncColumn) : -1;
         _colWeight = _schema.EdgeWeightColumn != null ? GetOrdinal(table, _schema.EdgeWeightColumn) : -1;
 
-        // Look for an index whose first column matches the edge origin column
+        // Origin Index
         var originIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
             idx.TableName.Equals(_schema.EdgeTableName, StringComparison.OrdinalIgnoreCase) &&
             idx.Columns.Count > 0 &&
             idx.Columns[0].Name.Equals(_schema.EdgeOriginColumn, StringComparison.OrdinalIgnoreCase));
         _originIndexRootPage = originIndex?.RootPage ?? -1;
+
+        // Target Index
+        var targetIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
+            idx.TableName.Equals(_schema.EdgeTableName, StringComparison.OrdinalIgnoreCase) &&
+            idx.Columns.Count > 0 &&
+            idx.Columns[0].Name.Equals(_schema.EdgeTargetColumn, StringComparison.OrdinalIgnoreCase));
+        _targetIndexRootPage = targetIndex?.RootPage ?? -1;
     }
     
     private static int GetOrdinal(TableInfo table, string colName)
@@ -80,20 +88,33 @@ internal sealed class RelationStore
         if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
 
         if (_originIndexRootPage > 0)
-            return GetEdgesViaIndex(origin, kindFilter);
+            return GetEdgesViaIndex(_originIndexRootPage, origin, kindFilter);
 
-        return GetEdgesViaTableScan(origin, kindFilter);
+        return GetEdgesViaTableScan(origin, kindFilter, isOrigin: true);
     }
 
-    private IEnumerable<GraphEdge> GetEdgesViaIndex(NodeKey origin, RelationKind? kindFilter)
+    /// <summary>
+    /// Gets edges targeting the given node key (Incoming).
+    /// </summary>
+    public IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kindFilter = null)
     {
-        using var indexCursor = _reader.CreateIndexCursor((uint)_originIndexRootPage);
+        if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
+
+        if (_targetIndexRootPage > 0)
+            return GetEdgesViaIndex(_targetIndexRootPage, target, kindFilter);
+
+        return GetEdgesViaTableScan(target, kindFilter, isOrigin: false);
+    }
+
+    private IEnumerable<GraphEdge> GetEdgesViaIndex(int indexRootPage, NodeKey key, RelationKind? kindFilter)
+    {
+        using var indexCursor = _reader.CreateIndexCursor((uint)indexRootPage);
         var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
         try
         {
             // Use SeekFirst for O(log n) initial positioning instead of linear scan
-            if (!indexCursor.SeekFirst(origin.Value))
-                yield break; // No entries with this origin key
+            if (!indexCursor.SeekFirst(key.Value))
+                yield break; // No entries with this key
 
             // Reuse a single table cursor for all row lookups
             using var tableCursor = _reader.CreateCursor((uint)_tableRootPage);
@@ -104,15 +125,15 @@ internal sealed class RelationStore
                 var indexRecord = _decoder.DecodeRecord(indexCursor.Payload);
                 if (indexRecord.Length < 2) continue;
 
-                long indexOriginValue = indexRecord[0].AsInt64();
+                long indexValue = indexRecord[0].AsInt64();
 
-                // Early exit: index is sorted, so if we've passed the target value, stop
-                if (indexOriginValue > origin.Value)
+                // Early exit: index is sorted
+                if (indexValue > key.Value)
                     yield break;
 
-                if (indexOriginValue != origin.Value) continue;
+                if (indexValue != key.Value) continue;
 
-                // Match found â€” seek the table row by rowid
+                // Match found — seek the table row by rowid
                 long rowId = indexRecord[^1].AsInt64();
                 if (!tableCursor.Seek(rowId)) continue;
 
@@ -131,7 +152,7 @@ internal sealed class RelationStore
         }
     }
 
-    private IEnumerable<GraphEdge> GetEdgesViaTableScan(NodeKey origin, RelationKind? kindFilter)
+    private IEnumerable<GraphEdge> GetEdgesViaTableScan(NodeKey key, RelationKind? kindFilter, bool isOrigin)
     {
         using var cursor = _reader.CreateCursor((uint)_tableRootPage);
         var buffer = ArrayPool<ColumnValue>.Shared.Rent(_columnCount);
@@ -141,8 +162,11 @@ internal sealed class RelationStore
             {
                 _decoder.DecodeRecord(cursor.Payload, buffer);
 
-                long sourceKey = _colSource >= 0 && _colSource < _columnCount ? buffer[_colSource].AsInt64() : 0;
-                if (sourceKey != origin.Value) continue;
+                // Check the correct column (Origin or Target)
+                int colIndex = isOrigin ? _colSource : _colTarget;
+                long recordKey = colIndex >= 0 && colIndex < _columnCount ? buffer[colIndex].AsInt64() : 0;
+                
+                if (recordKey != key.Value) continue;
 
                 long kindVal = _colKind >= 0 && _colKind < _columnCount ? buffer[_colKind].AsInt64() : 0;
                 if (kindFilter.HasValue && kindVal != (int)kindFilter.Value) continue;
@@ -158,7 +182,7 @@ internal sealed class RelationStore
 
     /// <summary>
     /// Creates a zero-allocation edge cursor for the given origin node.
-    /// Avoids GraphEdge allocation per row â€” caller reads typed properties directly.
+    /// Avoids GraphEdge allocation per row — caller reads typed properties directly.
     /// </summary>
     internal IEdgeCursor CreateEdgeCursor(NodeKey origin, RelationKind? kindFilter = null)
     {
@@ -169,7 +193,23 @@ internal sealed class RelationStore
                 _colSource, _colKind, _colTarget, _colData, _colWeight);
         }
         return new TableScanEdgeCursor(_reader, _decoder, _tableRootPage,
-            _columnCount, origin.Value, kindFilter,
+            _columnCount, origin.Value, _colSource, kindFilter,
+            _colSource, _colKind, _colTarget, _colData, _colWeight);
+    }
+
+    /// <summary>
+    /// Creates a zero-allocation edge cursor for the given target node (Incoming).
+    /// </summary>
+    internal IEdgeCursor CreateIncomingEdgeCursor(NodeKey target, RelationKind? kindFilter = null)
+    {
+        if (_targetIndexRootPage > 0)
+        {
+            return new IndexEdgeCursor(_reader, _decoder, _targetIndexRootPage,
+                _tableRootPage, _columnCount, target.Value, kindFilter,
+                _colSource, _colKind, _colTarget, _colData, _colWeight);
+        }
+        return new TableScanEdgeCursor(_reader, _decoder, _tableRootPage,
+            _columnCount, target.Value, _colTarget, kindFilter,
             _colSource, _colKind, _colTarget, _colData, _colWeight);
     }
 
