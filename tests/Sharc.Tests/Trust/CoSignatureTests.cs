@@ -36,6 +36,7 @@ public class CoSignatureTests : IDisposable
     {
         _db?.Dispose();
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -51,7 +52,7 @@ public class CoSignatureTests : IDisposable
         
         Action act = () => _ledger.Append(payload, signer);
         var ex = Assert.Throws<InvalidOperationException>(act);
-        Assert.Contains("requires co-signatures", ex.Message);
+        Assert.Contains("Co-signature required.", ex.Message);
     }
 
     [Fact]
@@ -94,7 +95,7 @@ public class CoSignatureTests : IDisposable
     }
     
     // Helper to avoid duplicate logic
-    private static AgentInfo CreateAgent(ISharcSigner signer, bool coSignRequired)
+    private static AgentInfo CreateAgent(SharcSigner signer, bool coSignRequired)
     {
         var pub = signer.GetPublicKey();
         var wScope = "*";

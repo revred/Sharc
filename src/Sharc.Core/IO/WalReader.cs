@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Buffers.Binary;
 using Sharc.Core.Format;
@@ -66,7 +53,7 @@ public static class WalReader
 
         // Pending frames from the current uncommitted transaction
         var pendingFrames = new List<(uint pageNumber, long dataOffset)>();
-        // Committed frame map — latest committed offset per page
+        // Committed frame map â€” latest committed offset per page
         var committedMap = new Dictionary<uint, long>();
 
         int offset = WalHeader.HeaderSize;
@@ -79,7 +66,7 @@ public static class WalReader
 
             // Validate salt matches WAL header
             if (frameHeader.Salt1 != walHeader.Salt1 || frameHeader.Salt2 != walHeader.Salt2)
-                break; // Invalid frame — stop processing
+                break; // Invalid frame â€” stop processing
 
             // Compute cumulative checksum: frame header first 8 bytes + page data
             ComputeChecksum(span.Slice(offset, 8), bigEndian, ref s0, ref s1);
@@ -88,9 +75,9 @@ public static class WalReader
 
             // Validate checksum
             if (frameHeader.Checksum1 != s0 || frameHeader.Checksum2 != s1)
-                break; // Checksum mismatch — stop processing
+                break; // Checksum mismatch â€” stop processing
 
-            // Frame is valid — add to pending
+            // Frame is valid â€” add to pending
             pendingFrames.Add((frameHeader.PageNumber, pageDataOffset));
 
             // If this is a commit frame, promote all pending frames to committed

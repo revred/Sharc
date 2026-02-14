@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.IO;
 using Microsoft.Win32.SafeHandles;
@@ -23,7 +10,7 @@ namespace Sharc.Core.IO;
 
 /// <summary>
 /// Lightweight file-backed page source using <see cref="RandomAccess"/> for on-demand reads.
-/// Opens with <see cref="File.OpenHandle"/> â€” a thin wrapper around the OS file handle with
+/// Opens with <see cref="File.OpenHandle"/> Ã¢â‚¬â€ a thin wrapper around the OS file handle with
 /// no internal buffering, async state machine, or Stream overhead. Only the 100-byte database
 /// header is read on construction; individual pages are read on demand into a reusable buffer.
 /// </summary>
@@ -32,8 +19,8 @@ namespace Sharc.Core.IO;
 /// Trade-offs vs other page sources:
 /// <list type="bullet">
 ///   <item><see cref="MemoryPageSource"/>: faster per-read (zero-copy span), but requires entire file in memory.</item>
-///   <item><see cref="SafeMemMapdPageSource"/>: faster per-read (zero-copy), but ~98 Âµs OS mapping setup.</item>
-///   <item><see cref="FilePageSource"/>: fast open (~1-5 Âµs), one syscall per page read, small fixed buffer.</item>
+///   <item><see cref="SafeMemMapdPageSource"/>: faster per-read (zero-copy), but ~98 Ã‚Âµs OS mapping setup.</item>
+///   <item><see cref="FilePageSource"/>: fast open (~1-5 Ã‚Âµs), one syscall per page read, small fixed buffer.</item>
 /// </list>
 /// </para>
 /// <para>

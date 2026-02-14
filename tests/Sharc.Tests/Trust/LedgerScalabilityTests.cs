@@ -50,13 +50,12 @@ public class LedgerScalabilityTests
                 }
                 catch (Exception ex)
                 {
-                    throw new Exception($"Failed at entry {i+1}: {ex.Message}", ex);
+                    throw new InvalidOperationException($"Failed at entry {i+1}: {ex.Message}", ex);
                 }
             }
     
             // 3. Verify integrity manually to find the break
             var deltas = ledger.ExportDeltas(1);
-
 
             byte[] expectedPrevHash = new byte[32];
             for (int i = 0; i < deltas.Count; i++)
@@ -67,10 +66,10 @@ public class LedgerScalabilityTests
                 byte[] prevHash = decoded[5].AsBytes().ToArray(); // 5
                 
                 if (seq != i + 1)
-                     throw new Exception($"Sequence mismatch at index {i}. Expected {i+1}, got {seq}");
+                     throw new InvalidOperationException($"Sequence mismatch at index {i}. Expected {i+1}, got {seq}");
                 
                 if (!prevHash.AsSpan().SequenceEqual(expectedPrevHash))
-                     throw new Exception($"Hash chain break at index {i} (Seq {seq})");
+                     throw new InvalidOperationException($"Hash chain break at index {i} (Seq {seq})");
 
                 expectedPrevHash = payloadHash;
             }

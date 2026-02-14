@@ -7,6 +7,7 @@
 
 using System.Text;
 using Sharc.Core;
+using Sharc.Core.Query;
 using Sharc.Core.Schema;
 using Xunit;
 
@@ -287,6 +288,8 @@ public class SchemaReaderTests
             return _index < _rows.Length;
         }
 
+        public void Reset() => _index = -1;
+
         public bool MoveLast()
         {
             if (_rows.Length == 0) return false;
@@ -324,6 +327,7 @@ public class SchemaReaderTests
     /// </summary>
     private sealed class PassThroughRecordDecoder : IRecordDecoder
     {
+        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters) => true;
         private readonly ColumnValue[][] _rows;
         public PassThroughRecordDecoder(ColumnValue[][] rows) => _rows = rows;
 

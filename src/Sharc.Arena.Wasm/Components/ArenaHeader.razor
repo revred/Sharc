@@ -15,6 +15,12 @@
 
     @* Run controls *@
     <div class="arena-controls">
+        <label class="arena-live-toggle" title="When enabled, benchmarks run actual code in your browser. When disabled, reference data is shown.">
+            <input type="checkbox" checked="@IsLive" @onchange="@(e => OnLiveToggle.InvokeAsync((bool)e.Value!))" disabled="@(State == BenchmarkState.Running)" />
+            <span class="arena-live-toggle-slider"></span>
+            <span class="arena-live-toggle-label">LIVE HARDWARE</span>
+        </label>
+
         <button class="@RunButtonClass" @onclick="@OnRunClick">
             @RunButtonText
         </button>
@@ -52,6 +58,8 @@
     [Parameter] public required BenchmarkState State { get; set; }
     [Parameter] public required int DoneCount { get; set; }
     [Parameter] public required double ElapsedMs { get; set; }
+    [Parameter] public required bool IsLive { get; set; }
+    [Parameter] public required EventCallback<bool> OnLiveToggle { get; set; }
     [Parameter] public required EventCallback<string> OnPresetChange { get; set; }
     [Parameter] public required EventCallback OnRun { get; set; }
     [Parameter] public required EventCallback OnStop { get; set; }

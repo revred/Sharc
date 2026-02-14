@@ -1,9 +1,9 @@
-using System;
 using System.Text;
 using System.Security.Cryptography;
 using Sharc.Core;
 using Sharc.Core.Records;
 using Sharc.Core.Trust;
+using Sharc.Core.Storage;
 
 namespace Sharc.Trust;
 
@@ -63,70 +63,42 @@ public class AuditManager
     }
 
     /// <summary>
-    /// Logs a security event to the audit trail.
+    /// Logs a security event to the persistent audit trail.
     /// </summary>
+    /// <param name="e">The security event arguments.</param>
+    /// <param name="tx">Optional active transaction.</param>
     public void LogEvent(SecurityEventArgs e, Transaction? tx = null)
     {
         lock (_lock)
         {
             _lastEventId++;
-            
             long timestamp = e.Timestamp;
-            int eventType = (int)e.EventType;
             byte[] agentIdBytes = Encoding.UTF8.GetBytes(e.AgentId);
             byte[] detailsBytes = Encoding.UTF8.GetBytes(e.Details);
-            byte[] prevHash = _lastHash; 
+            byte[] currentHash = ComputeHash(_lastEventId, timestamp, (int)e.EventType, agentIdBytes, detailsBytes, _lastHash);
             
-            byte[] currentHash = ComputeHash(_lastEventId, timestamp, eventType, agentIdBytes, detailsBytes, prevHash);
-            
-            _lastHash = currentHash;
-            
-            // Note: We must include the INTEGER PRIMARY KEY column as NULL in the payload.
-            // SharcDataReader expects the payload structure to match the table columns.
-            // Column 0 is EventId (PK).
             var cols = new[]
             {
                 ColumnValue.Null(), // EventId (implied RowId)
                 ColumnValue.FromInt64(1, timestamp),
-                ColumnValue.FromInt64(2, eventType),
+                ColumnValue.FromInt64(2, (int)e.EventType),
                 ColumnValue.Text(3, agentIdBytes),
                 ColumnValue.Text(4, detailsBytes),
-                ColumnValue.Blob(5, prevHash),
+                ColumnValue.Blob(5, _lastHash),
                 ColumnValue.Blob(6, currentHash)
             };
             
+            var rootPage = SystemStore.GetRootPage(_db.Schema, TableName);
             bool localTx = tx == null;
-            Transaction? activeTx = tx ?? _db.BeginTransaction();
+            var activeTx = tx ?? _db.BeginTransaction();
             
             try
             {
-                var table = _db.Schema.GetTable(TableName);
-                
-                // IWritablePageSource is in Sharc.Core namespace
-                if (activeTx.PageSource is not Core.IWritablePageSource writable)
-                {
-                    throw new InvalidOperationException("Transaction page source is not writable.");
-                }
-
-                var mutator = new Core.BTree.BTreeMutator(writable, _db.Header.PageSize); 
-                
-                int recordSize = RecordEncoder.ComputeEncodedSize(cols);
-                byte[] recordData = new byte[recordSize];
-                RecordEncoder.EncodeRecord(cols, recordData);
-                
-                mutator.Insert((uint)table.RootPage, _lastEventId, recordData);
-                
+                SystemStore.InsertRecord(activeTx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, _lastEventId, cols);
+                _lastHash = currentHash;
                 if (localTx) activeTx.Commit();
             }
-            catch
-            {
-                if (localTx) activeTx.Rollback();
-                throw;
-            }
-            finally
-            {
-                if (localTx) activeTx.Dispose();
-            }
+            finally { if (localTx) activeTx.Dispose(); }
         }
     }
 

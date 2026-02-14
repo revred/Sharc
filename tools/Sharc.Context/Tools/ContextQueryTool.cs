@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using Sharc.Core;
+using Sharc.Core.Query;
 using System.Text;
 using ModelContextProtocol.Server;
 

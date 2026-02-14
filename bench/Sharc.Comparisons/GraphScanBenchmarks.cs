@@ -7,6 +7,7 @@
 
 using BenchmarkDotNet.Attributes;
 using Microsoft.Data.Sqlite;
+using Sharc.Core.Query;
 
 namespace Sharc.Comparisons;
 
@@ -22,6 +23,7 @@ public class GraphScanBenchmarks
     private string _dbPath = null!;
     private byte[] _dbBytes = null!;
     private SqliteConnection _conn = null!;
+    private SharcDatabase _sharcDb = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -36,12 +38,15 @@ public class GraphScanBenchmarks
 
         _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         _conn.Open();
+
+        _sharcDb = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
         _conn?.Dispose();
+        _sharcDb?.Dispose();
     }
 
     // --- Scan all nodes (concepts) ---
@@ -50,8 +55,7 @@ public class GraphScanBenchmarks
     [BenchmarkCategory("NodeScan")]
     public long Sharc_ScanAllNodes()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("_concepts");
+        using var reader = _sharcDb.CreateReader("_concepts");
         long count = 0;
         while (reader.Read())
         {
@@ -89,8 +93,7 @@ public class GraphScanBenchmarks
     [BenchmarkCategory("EdgeScan")]
     public long Sharc_ScanAllEdges()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("_relations");
+        using var reader = _sharcDb.CreateReader("_relations");
         long count = 0;
         while (reader.Read())
         {
@@ -128,8 +131,7 @@ public class GraphScanBenchmarks
     [BenchmarkCategory("NodeProjection")]
     public long Sharc_ScanNodes_Projection()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("_concepts", "id", "type_id");
+        using var reader = _sharcDb.CreateReader("_concepts", "id", "type_id");
         long count = 0;
         while (reader.Read())
         {
@@ -158,13 +160,47 @@ public class GraphScanBenchmarks
     }
 
     // --- Scan edges and count by kind (filter simulation) ---
+    
+    [Benchmark]
+    [BenchmarkCategory("EdgeFilter")]
+    public long Sharc_ScanEdges_ZeroAlloc()
+    {
+        var filters = new[]
+        {
+            new SharcFilter("kind", SharcOperator.Equal, (long)15),
+        };
+        // Using projection ("kind" only) ensures TEXT columns like "id" are never decoded/allocated.
+        using var reader = _sharcDb.CreateReader("_relations", ["kind"], filters);
+        long matchCount = 0;
+        while (reader.Read())
+        {
+            matchCount++;
+        }
+        return matchCount;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("EdgeFilter")]
+    public long Sharc_ScanEdges_PushdownKind()
+    {
+        var filters = new[]
+        {
+            new SharcFilter("kind", SharcOperator.Equal, (long)15),
+        };
+        using var reader = _sharcDb.CreateReader("_relations", filters);
+        long matchCount = 0;
+        while (reader.Read())
+        {
+            matchCount++;
+        }
+        return matchCount;
+    }
 
     [Benchmark]
     [BenchmarkCategory("EdgeFilter")]
     public long Sharc_ScanEdges_CountByKind()
     {
-        using var db = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 0 });
-        using var reader = db.CreateReader("_relations");
+        using var reader = _sharcDb.CreateReader("_relations");
         long matchCount = 0;
         while (reader.Read())
         {
