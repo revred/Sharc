@@ -75,6 +75,12 @@ public class AllocationFixTests
     {
         var bytes = TestDatabaseFactory.CreateMultiTableDatabase();
 
+        // Warmup: open Once to trigger static initializers (ConcurrentDictionary, SharcBufferPool)
+        using (var db = SharcDatabase.OpenMemory(bytes))
+        {
+            _ = db.Info;
+        }
+
         // Measure allocation for Info-only access (schema NOT parsed)
         var before = GC.GetAllocatedBytesForCurrentThread();
         using (var db = SharcDatabase.OpenMemory(bytes))
