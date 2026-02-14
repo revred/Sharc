@@ -406,6 +406,14 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public long GetInt64(int ordinal)
     {
+        // Fast path: decode directly from page span (skip ColumnValue construction)
+        if (_lazyMode)
+        {
+            int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            if (actualOrdinal == _rowidAliasOrdinal)
+                return _cursor.RowId;
+            return _recordDecoder.DecodeInt64Direct(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+        }
         return GetColumnValue(ordinal).AsInt64();
     }
 
@@ -422,6 +430,12 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public double GetDouble(int ordinal)
     {
+        // Fast path: decode directly from page span (skip ColumnValue construction)
+        if (_lazyMode)
+        {
+            int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            return _recordDecoder.DecodeDoubleDirect(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+        }
         return GetColumnValue(ordinal).AsDouble();
     }
 
@@ -430,6 +444,12 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public string GetString(int ordinal)
     {
+        // Fast path: decode UTF-8 directly from page span (eliminates intermediate byte[] allocation)
+        if (_lazyMode)
+        {
+            int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            return _recordDecoder.DecodeStringDirect(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+        }
         return GetColumnValue(ordinal).AsString();
     }
 

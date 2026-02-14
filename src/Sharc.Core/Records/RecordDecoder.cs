@@ -256,4 +256,73 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
 
         throw new ArgumentOutOfRangeException(nameof(serialType), serialType, "Invalid serial type.");
     }
+
+    /// <summary>
+    /// Computes the byte offset within the payload body for the given column index.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ComputeColumnOffset(ReadOnlySpan<long> serialTypes, int columnIndex, int bodyOffset)
+    {
+        int offset = bodyOffset;
+        for (int i = 0; i < columnIndex; i++)
+            offset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+        return offset;
+    }
+
+    /// <inheritdoc />
+    [SuppressMessage("Performance", "CA1822:Mark members as static")]
+    public string DecodeStringDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        int offset = ComputeColumnOffset(serialTypes, columnIndex, bodyOffset);
+        int size = SerialTypeCodec.GetContentSize(serialTypes[columnIndex]);
+        // Decode UTF-8 directly from the page span — one string allocation, zero byte[] intermediates
+        return System.Text.Encoding.UTF8.GetString(payload.Slice(offset, size));
+    }
+
+    /// <inheritdoc />
+    [SuppressMessage("Performance", "CA1822:Mark members as static")]
+    public long DecodeInt64Direct(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        long st = serialTypes[columnIndex];
+        // Constant integer serial types (0, 1) — no body bytes needed
+        if (st == 8) return 0;
+        if (st == 9) return 1;
+        if (st == 0) return 0; // NULL → 0
+
+        int offset = ComputeColumnOffset(serialTypes, columnIndex, bodyOffset);
+        var data = payload.Slice(offset, SerialTypeCodec.GetContentSize(st));
+
+        return st switch
+        {
+            1 => (sbyte)data[0],
+            2 => BinaryPrimitives.ReadInt16BigEndian(data),
+            3 => ((data[0] & 0x80) != 0)
+                ? (int)((uint)(data[0] << 16) | (uint)(data[1] << 8) | data[2]) | unchecked((int)0xFF000000)
+                : (data[0] << 16) | (data[1] << 8) | data[2],
+            4 => BinaryPrimitives.ReadInt32BigEndian(data),
+            5 => DecodeInt48Raw(data),
+            6 => BinaryPrimitives.ReadInt64BigEndian(data),
+            _ => 0
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long DecodeInt48Raw(ReadOnlySpan<byte> data)
+    {
+        long raw = ((long)data[0] << 40) | ((long)data[1] << 32) |
+                   ((long)data[2] << 24) | ((long)data[3] << 16) |
+                   ((long)data[4] << 8) | data[5];
+        if ((raw & 0x800000000000L) != 0)
+            raw |= unchecked((long)0xFFFF000000000000L);
+        return raw;
+    }
+
+    /// <inheritdoc />
+    [SuppressMessage("Performance", "CA1822:Mark members as static")]
+    public double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
+    {
+        int offset = ComputeColumnOffset(serialTypes, columnIndex, bodyOffset);
+        int size = SerialTypeCodec.GetContentSize(serialTypes[columnIndex]);
+        return BinaryPrimitives.ReadDoubleBigEndian(payload.Slice(offset, size));
+    }
 }

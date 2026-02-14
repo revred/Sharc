@@ -87,6 +87,27 @@ public interface IRecordDecoder
     /// <param name="bodyOffset">Receives the byte offset where the record body begins.</param>
     /// <returns>The number of columns found in the record.</returns>
     int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset);
+
+    /// <summary>
+    /// Decodes a TEXT column directly to a string without intermediate byte[] allocation.
+    /// Reads UTF-8 bytes from the page span and produces a string in one allocation.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="columnIndex">0-based column index.</param>
+    /// <param name="serialTypes">Pre-parsed serial types.</param>
+    /// <param name="bodyOffset">Byte offset where the body begins.</param>
+    /// <returns>The decoded string value.</returns>
+    string DecodeStringDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
+    /// Decodes an INTEGER column directly to a long without intermediate ColumnValue construction.
+    /// </summary>
+    long DecodeInt64Direct(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
+    /// Decodes a REAL column directly to a double without intermediate ColumnValue construction.
+    /// </summary>
+    double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
 }
 
 /// <summary>

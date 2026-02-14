@@ -6,6 +6,7 @@ using Sharc.Core.IO;
 using Sharc.Core.Records;
 using Sharc.Core.Trust;
 using Sharc.Trust;
+using Sharc.Tests.Trust;
 using Xunit;
 
 namespace Sharc.Tests;
@@ -61,7 +62,7 @@ public class LedgerTests
             ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.FromInt64(3, 2), // Root page 2
-            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
         };
 
         int schemaRecordSize = RecordEncoder.ComputeEncodedSize(schemaColumns);
@@ -120,9 +121,9 @@ public class LedgerTests
         // Check hash link: entry 2 prevHash == entry 1 payloadHash
         using var reader2 = db.CreateReader("_sharc_ledger");
         Assert.True(reader2.Read());
-        byte[] hash1 = reader2.GetBlob(3).ToArray();
+        byte[] hash1 = reader2.GetBlob(4).ToArray(); // PayloadHash (ordinal 4 with Payload column)
         Assert.True(reader2.Read());
-        byte[] prevHash2 = reader2.GetBlob(4).ToArray();
+        byte[] prevHash2 = reader2.GetBlob(5).ToArray(); // PreviousHash (ordinal 5 with Payload column)
         Assert.Equal(hash1, prevHash2);
     }
 
@@ -171,14 +172,14 @@ public class LedgerTests
 
     private static byte[] CreateTrustDatabase(int pageSize = 4096)
     {
-        var data = new byte[pageSize * 3]; // 3 pages: 1 schema, 1 ledger, 1 agents
+        var data = new byte[pageSize * 4]; // 4 pages: 1 schema, 1 ledger, 1 agents, 1 scores
         var dbHeader = new DatabaseHeader(
             pageSize: pageSize,
             writeVersion: 1,
             readVersion: 1,
             reservedBytesPerPage: 0,
             changeCounter: 1,
-            pageCount: 3,
+            pageCount: 4,
             firstFreelistPage: 0,
             freelistPageCount: 0,
             schemaCookie: 1,
@@ -191,7 +192,7 @@ public class LedgerTests
         DatabaseHeader.Write(data, dbHeader);
 
         // -- Page 1: Schema Leaf --
-        var schemaHeader = new BTreePageHeader(BTreePageType.LeafTable, 0, 2, (ushort)pageSize, 0, 0);
+        var schemaHeader = new BTreePageHeader(BTreePageType.LeafTable, 0, 3, (ushort)pageSize, 0, 0);
         BTreePageHeader.Write(data.AsSpan(100), schemaHeader);
 
         // 1. _sharc_ledger
@@ -201,7 +202,7 @@ public class LedgerTests
             ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.FromInt64(3, 2),
-            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
         };
 
         // 2. _sharc_agents
@@ -211,7 +212,17 @@ public class LedgerTests
             ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.FromInt64(3, 3),
-            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents (AgentId TEXT PRIMARY KEY, PublicKey BLOB, ValidityStart INTEGER, ValidityEnd INTEGER, Signature BLOB)"))
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents (AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB)"))
+        };
+
+        // 3. _sharc_scores
+        var scoresCols = new[]
+        {
+            ColumnValue.Text(0, System.Text.Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.FromInt64(3, 4),
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores (AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, LastRatingCount INTEGER)"))
         };
 
         int r1Size = RecordEncoder.ComputeEncodedSize(ledgerCols);
@@ -221,6 +232,10 @@ public class LedgerTests
         int r2Size = RecordEncoder.ComputeEncodedSize(agentsCols);
         byte[] r2 = new byte[r2Size];
         RecordEncoder.EncodeRecord(agentsCols, r2);
+
+        int r3Size = RecordEncoder.ComputeEncodedSize(scoresCols);
+        byte[] r3 = new byte[r3Size];
+        RecordEncoder.EncodeRecord(scoresCols, r3);
 
         Span<byte> cell1 = stackalloc byte[r1Size + 10];
         int l1 = CellBuilder.BuildTableLeafCell(1, r1, cell1, pageSize);
@@ -232,15 +247,24 @@ public class LedgerTests
         ushort o2 = (ushort)(o1 - l2);
         cell2[..l2].CopyTo(data.AsSpan(o2));
 
+        Span<byte> cell3 = stackalloc byte[r3Size + 10];
+        int l3 = CellBuilder.BuildTableLeafCell(3, r3, cell3, pageSize);
+        ushort o3 = (ushort)(o2 - l3);
+        cell3[..l3].CopyTo(data.AsSpan(o3));
+
         BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(108), o1);
         BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(110), o2);
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(105), o2);
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(112), o3);
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(105), o3);
 
         // -- Page 2: Ledger Leaf (Empty) --
         BTreePageHeader.Write(data.AsSpan(pageSize), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
         
         // -- Page 3: Agents Leaf (Empty) --
         BTreePageHeader.Write(data.AsSpan(pageSize * 2), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
+
+        // -- Page 4: Scores Leaf (Empty) --
+        BTreePageHeader.Write(data.AsSpan(pageSize * 3), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
 
         return data;
     }
@@ -252,16 +276,15 @@ public class LedgerTests
         using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
         
         var registry = new AgentRegistry(db);
-        var pubKey = new byte[] { 0xAA, 0xBB, 0xCC };
-        var sig = new byte[] { 0x11, 0x22 };
-        var agent = new AgentInfo("agent-1", pubKey, 1000, 2000, sig);
+        var signer = new SharcSigner("agent-1");
+        var agent = TrustTestFixtures.CreateValidAgent(signer);
 
         registry.RegisterAgent(agent);
         
         var retrieved = registry.GetAgent("agent-1");
         Assert.NotNull(retrieved);
         Assert.Equal("agent-1", retrieved.AgentId);
-        Assert.Equal(pubKey, retrieved.PublicKey);
+        Assert.Equal(signer.GetPublicKey(), retrieved.PublicKey);
     }
 
     [Fact]
@@ -277,8 +300,8 @@ public class LedgerTests
         var bob = new SharcSigner("bob");
 
         // Register agents in A
-        registryA.RegisterAgent(new AgentInfo("alice", alice.GetPublicKey(), 0, 0, Array.Empty<byte>()));
-        registryA.RegisterAgent(new AgentInfo("bob", bob.GetPublicKey(), 0, 0, Array.Empty<byte>()));
+        registryA.RegisterAgent(TrustTestFixtures.CreateValidAgent(alice));
+        registryA.RegisterAgent(TrustTestFixtures.CreateValidAgent(bob));
 
         // Alice and Bob append to A
         ledgerA.Append("Alice's first thought", alice);
@@ -294,8 +317,8 @@ public class LedgerTests
         var registryB = new AgentRegistry(dbB);
 
         // We MUST register agents in B too for verification to pass during import
-        registryB.RegisterAgent(new AgentInfo("alice", alice.GetPublicKey(), 0, 0, Array.Empty<byte>()));
-        registryB.RegisterAgent(new AgentInfo("bob", bob.GetPublicKey(), 0, 0, Array.Empty<byte>()));
+        registryB.RegisterAgent(TrustTestFixtures.CreateValidAgent(alice));
+        registryB.RegisterAgent(TrustTestFixtures.CreateValidAgent(bob));
 
         // 3. Export from A, Import into B
         var deltas = ledgerA.ExportDeltas(1);

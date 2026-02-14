@@ -27,22 +27,15 @@ public class AgentRegistryTests
             using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
             var registry = new AgentRegistry(db);
             
-            byte[] publicKey = new byte[32];
-            RandomNumberGenerator.Fill(publicKey);
-            
-            var agent = new AgentInfo("agent-007", publicKey, 1000, 2000, new byte[0]);
+            var signer = new SharcSigner("agent-007");
+            var agent = TrustTestFixtures.CreateValidAgent(signer);
             
             registry.RegisterAgent(agent);
-            
-            // Re-read from another instance to verify persistence/flushing
-            // But RegisterAgent commits via BTreeMutator if no transaction.
-            // However, SharcDatabase might cache pages? 
-            // AgentRegistry uses _cache.
             
             var retrieved = registry.GetAgent("agent-007");
             Assert.NotNull(retrieved);
             Assert.Equal("agent-007", retrieved.AgentId);
-            Assert.Equal(publicKey, retrieved.PublicKey);
+            Assert.Equal(signer.GetPublicKey(), retrieved.PublicKey);
         }
         finally
         {
@@ -60,9 +53,8 @@ public class AgentRegistryTests
             using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
             var registry = new AgentRegistry(db);
             
-            byte[] publicKey = new byte[32];
-            RandomNumberGenerator.Fill(publicKey);
-            var agent = new AgentInfo("agent-tx-commit", publicKey, 1000, 2000, new byte[0]);
+            var signer = new SharcSigner("agent-tx-commit");
+            var agent = TrustTestFixtures.CreateValidAgent(signer);
             
             using (var tx = db.BeginTransaction())
             {
@@ -90,9 +82,8 @@ public class AgentRegistryTests
             using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
             var registry = new AgentRegistry(db);
             
-            byte[] publicKey = new byte[32];
-            RandomNumberGenerator.Fill(publicKey);
-            var agent = new AgentInfo("agent-tx-rollback", publicKey, 1000, 2000, new byte[0]);
+            var signer = new SharcSigner("agent-tx-rollback");
+            var agent = TrustTestFixtures.CreateValidAgent(signer);
             
             using (var tx = db.BeginTransaction())
             {
@@ -112,14 +103,14 @@ public class AgentRegistryTests
 
     private static void CreateTrustDatabase(string path, int pageSize = 4096)
     {
-        var data = new byte[pageSize * 3]; // Start small, let it grow
+        var data = new byte[pageSize * 4];
         var dbHeader = new DatabaseHeader(
             pageSize: pageSize,
             writeVersion: 1,
             readVersion: 1,
             reservedBytesPerPage: 0,
             changeCounter: 1,
-            pageCount: 3,
+            pageCount: 4,
             firstFreelistPage: 0,
             freelistPageCount: 0,
             schemaCookie: 1,
@@ -132,7 +123,7 @@ public class AgentRegistryTests
         DatabaseHeader.Write(data, dbHeader);
 
         // -- Page 1: Schema Leaf --
-        var schemaHeader = new BTreePageHeader(BTreePageType.LeafTable, 0, 2, (ushort)pageSize, 0, 0);
+        var schemaHeader = new BTreePageHeader(BTreePageType.LeafTable, 0, 3, (ushort)pageSize, 0, 0);
         BTreePageHeader.Write(data.AsSpan(100), schemaHeader);
 
         // 1. _sharc_ledger
@@ -142,7 +133,7 @@ public class AgentRegistryTests
             ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.FromInt64(3, 2),
-            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger (SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
         };
 
         // 2. _sharc_agents
@@ -152,7 +143,17 @@ public class AgentRegistryTests
             ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.FromInt64(3, 3),
-            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents (AgentId TEXT PRIMARY KEY, PublicKey BLOB, ValidityStart INTEGER, ValidityEnd INTEGER, Signature BLOB)"))
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents (AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB)"))
+        };
+
+        // 3. _sharc_scores
+        var scoresCols = new[]
+        {
+            ColumnValue.Text(0, System.Text.Encoding.UTF8.GetBytes("table")),
+            ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("_sharc_scores")),
+            ColumnValue.FromInt64(3, 4),
+            ColumnValue.Text(4, System.Text.Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores (AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, LastRatingCount INTEGER)"))
         };
 
         int r1Size = RecordEncoder.ComputeEncodedSize(ledgerCols);
@@ -162,6 +163,10 @@ public class AgentRegistryTests
         int r2Size = RecordEncoder.ComputeEncodedSize(agentsCols);
         byte[] r2 = new byte[r2Size];
         RecordEncoder.EncodeRecord(agentsCols, r2);
+
+        int r3Size = RecordEncoder.ComputeEncodedSize(scoresCols);
+        byte[] r3 = new byte[r3Size];
+        RecordEncoder.EncodeRecord(scoresCols, r3);
 
         Span<byte> cell1 = stackalloc byte[r1Size + 10];
         int l1 = CellBuilder.BuildTableLeafCell(1, r1, cell1, pageSize);
@@ -173,15 +178,24 @@ public class AgentRegistryTests
         ushort o2 = (ushort)(o1 - l2);
         cell2[..l2].CopyTo(data.AsSpan(o2));
 
+        Span<byte> cell3 = stackalloc byte[r3Size + 10];
+        int l3 = CellBuilder.BuildTableLeafCell(3, r3, cell3, pageSize);
+        ushort o3 = (ushort)(o2 - l3);
+        cell3[..l3].CopyTo(data.AsSpan(o3));
+
         BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(108), o1);
         BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(110), o2);
-        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(105), o2); // CellContentOffset
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(112), o3);
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(105), o3); // CellContentOffset
 
         // -- Page 2: Ledger Leaf (Empty) --
         BTreePageHeader.Write(data.AsSpan(pageSize), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
         
         // -- Page 3: Agents Leaf (Empty) --
         BTreePageHeader.Write(data.AsSpan(pageSize * 2), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
+
+        // -- Page 4: Scores Leaf (Empty) --
+        BTreePageHeader.Write(data.AsSpan(pageSize * 3), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
 
         File.WriteAllBytes(path, data);
     }
