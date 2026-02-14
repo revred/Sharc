@@ -64,7 +64,7 @@ internal sealed class SchemaReader
                 case "table":
                     if (sql != null)
                     {
-                        var columnInfos = CreateTableParser.ParseColumns(sql);
+                        var columnInfos = CreateTableParser.ParseColumns(sql.AsSpan());
                         tables.Add(new TableInfo
                         {
                             Name = name,
@@ -101,6 +101,21 @@ internal sealed class SchemaReader
                     });
                     break;
             }
+        }
+
+        // Link indexes to their tables to avoid runtime lookups/allocations
+        foreach (var table in tables)
+        {
+            List<IndexInfo>? tableIndexes = null;
+            for (int i = 0; i < indexes.Count; i++)
+            {
+                if (indexes[i].TableName.Equals(table.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    tableIndexes ??= new List<IndexInfo>();
+                    tableIndexes.Add(indexes[i]);
+                }
+            }
+            table.Indexes = tableIndexes ?? (IReadOnlyList<IndexInfo>)Array.Empty<IndexInfo>();
         }
 
         return new SharcSchema

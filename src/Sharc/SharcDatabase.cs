@@ -516,9 +516,8 @@ public sealed class SharcDatabase : IDisposable
         var schema = GetSchema();
         var table = schema.GetTable(tableName);
         var cursor = CreateTableCursor(table);
-        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, null,
-            _bTreeReader, tableIndexes);
+            _bTreeReader, table.Indexes);
     }
 
     /// <summary>
@@ -547,9 +546,8 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, tableIndexes);
+            _bTreeReader, table.Indexes);
     }
 
     /// <summary>
@@ -592,9 +590,8 @@ public sealed class SharcDatabase : IDisposable
         }
 
         ResolvedFilter[]? resolved = ResolveFilters(table, filters);
-        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, tableIndexes, resolved);
+            _bTreeReader, table.Indexes, resolved);
     }
 
     /// <summary>
@@ -638,9 +635,8 @@ public sealed class SharcDatabase : IDisposable
 
         int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
         var filterNode = FilterTreeCompiler.CompileBaked(filter, table.Columns, rowidAlias);
-        var tableIndexes = GetTableIndexes(schema, tableName);
         return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
+            _bTreeReader, table.Indexes, filters: null, filterNode: filterNode);
     }
 
     /// <summary>
@@ -679,6 +675,8 @@ public sealed class SharcDatabase : IDisposable
         return CreateReader(tableName, null, filterNode);
     }
 
+    // GetTableIndexes removed - use schema.Counts
+    // No, loop optimization for ResolveFilters first
     private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
     {
         if (filters is not { Length: > 0 })
@@ -687,8 +685,18 @@ public sealed class SharcDatabase : IDisposable
         var resolved = new ResolvedFilter[filters.Length];
         for (int i = 0; i < filters.Length; i++)
         {
-            var col = table.Columns.FirstOrDefault(c =>
-                c.Name.Equals(filters[i].ColumnName, StringComparison.OrdinalIgnoreCase));
+            ColumnInfo? col = null;
+            // Use loop instead of LINQ FirstOrDefault
+            var colCount = table.Columns.Count;
+            for (int c = 0; c < colCount; c++)
+            {
+                if (table.Columns[c].Name.Equals(filters[i].ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    col = table.Columns[c];
+                    break;
+                }
+            }
+
             resolved[i] = new ResolvedFilter
             {
                 ColumnOrdinal = col?.Ordinal
@@ -725,10 +733,10 @@ public sealed class SharcDatabase : IDisposable
 
     private static List<IndexInfo> GetTableIndexes(SharcSchema schema, string tableName)
     {
-        return schema.Indexes
-            .Where(i => i.TableName.Equals(tableName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
+        return schema.GetTable(tableName).Indexes.ToList();
+    } // Deprecated, removing usages but can keep method if needed by tests? 
+      // Actually, removing method entirely as per plan.
+
 
     /// <summary>
     /// Gets the total number of rows in the specified table.

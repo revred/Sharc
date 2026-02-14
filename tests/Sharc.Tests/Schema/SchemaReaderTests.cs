@@ -356,5 +356,15 @@ public class SchemaReaderTests
         {
             return DecodeColumn(payload, columnIndex);
         }
+
+        public int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset)
+        {
+            bodyOffset = 0;
+            throw new NotSupportedException();
+        }
+
+        public string DecodeStringDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => throw new NotSupportedException();
+        public long DecodeInt64Direct(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => throw new NotSupportedException();
+        public double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset) => throw new NotSupportedException();
     }
 }

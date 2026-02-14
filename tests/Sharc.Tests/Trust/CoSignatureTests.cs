@@ -108,7 +108,7 @@ public class CoSignatureTests : IDisposable
         byte[] data = new byte[bufferSize];
         int offset = 0;
         offset += Encoding.UTF8.GetBytes(signer.AgentId, data.AsSpan(offset));
-        data[offset++] = (byte)AgentClass.Human;
+        data[offset++] = (byte)AgentClass.User;
         pub.CopyTo(data.AsSpan(offset));
         offset += pub.Length;
         BinaryPrimitives.WriteUInt64BigEndian(data.AsSpan(offset), ulong.MaxValue);
@@ -123,6 +123,6 @@ public class CoSignatureTests : IDisposable
         data[offset++] = coSignRequired ? (byte)1 : (byte)0;
         
         var sig = signer.Sign(data);
-        return new AgentInfo(signer.AgentId, AgentClass.Human, pub, ulong.MaxValue, wScope, rScope, 0, 0, parent, coSignRequired, sig);
+        return new AgentInfo(signer.AgentId, AgentClass.User, pub, ulong.MaxValue, wScope, rScope, 0, 0, parent, coSignRequired, sig);
     }
 }
