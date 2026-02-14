@@ -271,8 +271,6 @@ public sealed class SharcDatabase : IDisposable
         return CreateReader(tableName, null, filterNode);
     }
 
-    // GetTableIndexes removed - use schema.Counts
-    // No, loop optimization for ResolveFilters first
     private static ResolvedFilter[]? ResolveFilters(TableInfo table, SharcFilter[]? filters)
     {
         if (filters is not { Length: > 0 })
@@ -330,8 +328,7 @@ public sealed class SharcDatabase : IDisposable
     private static List<IndexInfo> GetTableIndexes(SharcSchema schema, string tableName)
     {
         return schema.GetTable(tableName).Indexes.ToList();
-    } // Deprecated, removing usages but can keep method if needed by tests? 
-      // Actually, removing method entirely as per plan.
+    }
 
 
     /// <summary>
