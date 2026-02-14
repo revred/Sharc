@@ -1,9 +1,5 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
-
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
@@ -54,7 +50,7 @@ internal sealed class BTreeMutator
         while (true)
         {
             var page = ReadPageBuffer(currentPage);
-            int hdrOff = currentPage == 1 ? 100 : 0;
+            int hdrOff = currentPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var hdr = BTreePageHeader.Parse(page.AsSpan(hdrOff));
 
             if (hdr.IsLeaf)
@@ -84,7 +80,7 @@ internal sealed class BTreeMutator
         while (true)
         {
             var page = ReadPageBuffer(pageNum);
-            int hdrOff = pageNum == 1 ? 100 : 0;
+            int hdrOff = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             var hdr = BTreePageHeader.Parse(page.AsSpan(hdrOff));
 
             if (hdr.IsLeaf)
@@ -169,7 +165,7 @@ internal sealed class BTreeMutator
     {
         var (pageNum, insertIdx) = path[pathIndex];
         var pageBuf = ReadPageBuffer(pageNum);
-        int hdrOff = pageNum == 1 ? 100 : 0;
+        int hdrOff = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
         var hdr = BTreePageHeader.Parse(pageBuf.AsSpan(hdrOff));
 
         // Try to insert into existing page
@@ -291,7 +287,7 @@ internal sealed class BTreeMutator
                 newPageNum // right child = newRightPage
             );
 
-            int rootHdrOff = pageNum == 1 ? 100 : 0;
+            int rootHdrOff = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
             BTreePageHeader.Write(rootBuf.AsSpan(rootHdrOff), newRootHdr);
 
             // Write cell pointer
@@ -336,7 +332,7 @@ internal sealed class BTreeMutator
     {
         var (parentPageNum, parentCellIdx) = path[parentPathIndex];
         var parentBuf = ReadPageBuffer(parentPageNum);
-        int hdrOff = parentPageNum == 1 ? 100 : 0;
+        int hdrOff = parentPageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
         var hdr = BTreePageHeader.Parse(parentBuf.AsSpan(hdrOff));
 
         // If the descent was through the right-child pointer (cellIdx == cellCount),

@@ -1,64 +1,115 @@
 # Getting Started with Sharc
 
-Sharc is a high-performance SQLite format reader for .NET. This guide will get you up and running in under 5 minutes.
+Sharc reads SQLite files 2-56x faster than Microsoft.Data.Sqlite, in pure C#, with zero native dependencies. This guide gets you from zero to working code in under 5 minutes.
 
-## 1. Installation
-
-Install the core package via NuGet:
+## Install
 
 ```bash
 dotnet add package Sharc
 ```
 
-## 2. Basic Reading
+Optional packages:
 
-Open a database and read all rows from a table. Sharc handles the B-tree traversal automatically.
+```bash
+dotnet add package Sharc.Crypto   # AES-256-GCM encryption
+dotnet add package Sharc.Graph    # Graph traversal + trust layer
+```
+
+## Pattern 1: Open and Scan
 
 ```csharp
 using Sharc;
 
-using var db = SharcDatabase.Open("data.db");
+using var db = SharcDatabase.Open("mydata.db");
+
+foreach (var table in db.Schema.Tables)
+    Console.WriteLine($"{table.Name}: {table.Columns.Count} columns");
+
 using var reader = db.CreateReader("users");
+while (reader.Read())
+{
+    long id = reader.GetInt64(0);
+    string name = reader.GetString(1);
+    Console.WriteLine($"{id}: {name}");
+}
+```
+
+## Pattern 2: Point Lookup (Seek)
+
+Sub-microsecond O(log N) B-tree seek — **40-60x faster** than SQLite.
+
+```csharp
+using var reader = db.CreateReader("users");
+
+if (reader.Seek(42))
+{
+    Console.WriteLine($"Found: {reader.GetString(1)}");
+}
+```
+
+## Pattern 3: Column Projection
+
+Decode only the columns you need. Everything else is skipped at the byte level.
+
+```csharp
+using var reader = db.CreateReader("users", "id", "email");
+while (reader.Read())
+{
+    long id = reader.GetInt64(0);
+    string email = reader.GetString(1);
+}
+```
+
+## Pattern 4: Filtered Scan
+
+Apply WHERE-style predicates that evaluate directly on raw page bytes.
+
+```csharp
+using var reader = db.CreateReader("users",
+    new SharcFilter("age", SharcOperator.GreaterOrEqual, 18L));
 
 while (reader.Read())
 {
-    Console.WriteLine($"User: {reader.GetString("name")} (ID: {reader.GetInt64("id")})");
+    Console.WriteLine($"{reader.GetString(1)}, age {reader.GetInt64(2)}");
 }
 ```
 
-## 3. High-Speed Point Lookups (Seek)
-
-If your table has a Primary Key or a unique index, use `Seek` for O(log N) performance. This is **40-60x faster** than standard SQLite queries.
+For complex filters, use FilterStar:
 
 ```csharp
-using var reader = db.CreateReader("users");
+var filter = FilterStar.And(
+    FilterStar.Column("age").Gte(18L),
+    FilterStar.Column("status").Eq("active")
+);
 
-// Seek directly to a row by ID in < 1 microsecond
-if (reader.Seek(1234))
-{
-    Console.WriteLine($"Found: {reader.GetString("email")}");
-}
+using var reader = db.CreateReader("users", filter);
 ```
 
-## 4. Efficient Filtering
-
-Filter rows without loading them into memory. Sharc's zero-allocation filter engine (FilterStar) executes directly on the page data.
+## Pattern 5: Encrypted Database
 
 ```csharp
-var filtered = db.CreateReader("orders")
-                .Where("status", FilterOp.Equals, "pending")
-                .Where("amount", FilterOp.GreaterThan, 500.0);
+using Sharc;
 
-while (filtered.Read())
+var options = new SharcOpenOptions
 {
-    Console.WriteLine($"Large Pending Order: {filtered.GetInt64("order_id")}");
-}
+    Encryption = new SharcEncryptionOptions { Password = "your-password" }
+};
+
+using var db = SharcDatabase.Open("secure.db", options);
+using var reader = db.CreateReader("secrets");
+// Reads are transparently decrypted at the page level
 ```
 
-## 5. Summary of Built-in Layers
+## Pattern 6: In-Memory
 
-- **Core**: High-speed B-tree navigation and record decoding.
-- **Crypto**: `Sharc.Crypto` for AES-256-GCM encrypted databases.
-- **Graph**: `Sharc.Graph` for relationship traversal and trust-based auditing.
+```csharp
+byte[] dbBytes = await File.ReadAllBytesAsync("mydata.db");
+using var db = SharcDatabase.OpenMemory(dbBytes);
+```
 
-[View Full Cookbook](COOKBOOK.md) | [Benchmarks](BENCHMARKS.md)
+## Next Steps
+
+- [Cookbook](COOKBOOK.md) — 15 recipes for common patterns
+- [Benchmarks](BENCHMARKS.md) — Full performance comparison with SQLite and IndexedDB
+- [Architecture](ARCHITECTURE.md) — How Sharc achieves zero-allocation reads
+- [When NOT to Use Sharc](WHEN_NOT_TO_USE.md) — Honest limitations

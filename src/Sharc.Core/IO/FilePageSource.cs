@@ -70,8 +70,8 @@ public sealed class FilePageSource : IWritablePageSource
 
         if (_fileLength > 0)
         {
-            // Read only the 100-byte database header
-            Span<byte> headerBuf = stackalloc byte[100];
+            // Read the database header
+            Span<byte> headerBuf = stackalloc byte[SQLiteLayout.DatabaseHeaderSize];
             RandomAccess.Read(_handle, headerBuf, fileOffset: 0);
 
             try

@@ -158,7 +158,8 @@ internal static class SchemaParser
     private static bool IsTableConstraint(ReadOnlySpan<char> s) =>
         s.StartsWith("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) ||
         s.StartsWith("UNIQUE", StringComparison.OrdinalIgnoreCase) ||
-        s.StartsWith("FOREIGN KEY", StringComparison.OrdinalIgnoreCase);
+        s.StartsWith("FOREIGN KEY", StringComparison.OrdinalIgnoreCase) ||
+        s.StartsWith("CONSTRAINT", StringComparison.OrdinalIgnoreCase);
 
     private static int IndexOfKeyword(ReadOnlySpan<char> s, string kw) {
         for (int i = 0; i <= s.Length - kw.Length; i++) {

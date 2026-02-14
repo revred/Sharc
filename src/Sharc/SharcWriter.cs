@@ -19,7 +19,7 @@ public sealed class SharcWriter : IDisposable
     /// </summary>
     public static SharcWriter Open(string path)
     {
-        var db = SharcDatabase.Open(path);
+        var db = SharcDatabase.Open(path, new SharcOpenOptions { Writable = true });
         return new SharcWriter(db, ownsDb: true);
     }
 

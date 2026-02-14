@@ -7,11 +7,11 @@ namespace Sharc.Graph.Model;
 /// <summary>
 /// The final output of a graph traversal operation.
 /// </summary>
-public sealed class GraphResult
+public readonly record struct GraphResult
 {
     /// <summary>The ordered list of visited nodes.</summary>
     public IReadOnlyList<TraversalNode> Nodes { get; }
-    
+
     /// <summary>
     /// Creates a new GraphResult.
     /// </summary>

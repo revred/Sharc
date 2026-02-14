@@ -19,9 +19,9 @@ namespace Sharc.Comparisons;
 ///
 /// Tiers:
 ///   micro    ~4 benchmarks,  ~1 min   Engine load + one scan pair
-///   mini     ~10 benchmarks, ~3 min   Core pairs + graph seek
-///   standard ~26 benchmarks, ~8 min   Core + graph scan + graph seek
-///   mega     all benchmarks, ~12 min  Everything incl. GC pressure + traversal
+///   mini     ~12 benchmarks, ~4 min   Core pairs + graph seek + write pair
+///   standard ~38 benchmarks, ~12 min  Core + graph + write benchmarks
+///   mega     all benchmarks, ~15 min  Everything incl. GC pressure + traversal
 ///   full     (same as mega for this project)
 /// </summary>
 internal static class BenchmarkTiers
@@ -46,7 +46,7 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*SequentialScan*",
     ];
 
-    // ── Mini: ~10 benchmarks, ~3 min ──
+    // ── Mini: ~12 benchmarks, ~4 min ──
     private static readonly string[] Mini =
     [
         "*CoreBenchmarks.*EngineLoad*",
@@ -54,10 +54,11 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*SequentialScan*",
         "*CoreBenchmarks.*PointLookup*",
         "*GraphSeekBenchmarks.*SingleSeek*",
+        "*WriteBenchmarks.*_100Rows*",
     ];
 
-    // ── Standard: ~26 benchmarks, ~8 min ──
-    // All core + graph scan + graph seek (skip GC pressure + traversal)
+    // ── Standard: ~38 benchmarks, ~12 min ──
+    // All core + graph scan + graph seek + write benchmarks
     private static readonly string[] Standard =
     [
         "*CoreBenchmarks.*EngineLoad*",
@@ -70,6 +71,7 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*WhereFilter*",
         "*GraphScanBenchmarks*",
         "*GraphSeekBenchmarks*",
+        "*WriteBenchmarks*",
     ];
 
     // Mega/Full: null (no filter) — runs everything

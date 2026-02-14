@@ -2,13 +2,15 @@
 // Licensed under the MIT License.
 
 
+using System.Runtime.InteropServices;
 using Sharc.Core.Format;
 
 namespace Sharc.Core.IO;
 
 /// <summary>
 /// Page source backed by an in-memory byte buffer.
-/// All page reads are zero-copy span slices Ã¢â‚¬â€ no allocation, no I/O.
+/// All page reads are zero-copy span slices — no allocation, no I/O.
+/// When constructed from a byte[], writes propagate back to the original buffer.
 /// </summary>
 public sealed class MemoryPageSource : IWritablePageSource
 {
@@ -24,12 +26,13 @@ public sealed class MemoryPageSource : IWritablePageSource
     /// <summary>
     /// Creates a page source over a pre-loaded database buffer.
     /// Parses the database header to determine page size and count.
+    /// If the memory is backed by a byte[], writes propagate to the original array.
     /// </summary>
     /// <param name="data">Complete SQLite database bytes.</param>
     /// <exception cref="Sharc.Exceptions.InvalidDatabaseException">Header is invalid.</exception>
     public MemoryPageSource(ReadOnlyMemory<byte> data)
     {
-        _data = data.ToArray();
+        _data = ExtractOrCopy(data);
         var header = DatabaseHeader.Parse(_data);
         PageSize = header.PageSize;
         _pageCount = header.PageCount;
@@ -41,7 +44,7 @@ public sealed class MemoryPageSource : IWritablePageSource
     /// </summary>
     internal MemoryPageSource(ReadOnlyMemory<byte> data, int pageSize, int pageCount)
     {
-        _data = data.ToArray();
+        _data = ExtractOrCopy(data);
         PageSize = pageSize;
         _pageCount = pageCount;
     }
@@ -88,9 +91,21 @@ public sealed class MemoryPageSource : IWritablePageSource
     }
 
     /// <summary>
-    /// No-op Ã¢â‚¬â€ in-memory source owns no unmanaged resources.
+    /// No-op — in-memory source owns no unmanaged resources.
     /// </summary>
     public void Dispose() { }
+
+    private static byte[] ExtractOrCopy(ReadOnlyMemory<byte> data)
+    {
+        if (MemoryMarshal.TryGetArray(data, out ArraySegment<byte> segment)
+            && segment.Array is not null
+            && segment.Offset == 0
+            && segment.Count == segment.Array.Length)
+        {
+            return segment.Array;
+        }
+        return data.ToArray();
+    }
 
     private void ValidatePageNumber(uint pageNumber)
     {
