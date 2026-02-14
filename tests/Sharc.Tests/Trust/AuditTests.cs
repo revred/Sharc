@@ -10,7 +10,7 @@ namespace Sharc.Tests.Trust;
 public class AuditTests : IDisposable
 {
     private const string DbPath = "audit_test.sharc";
-    private SharcDatabase _db;
+    private SharcDatabase? _db;
     private AuditManager _audit;
 
     public AuditTests()
@@ -27,6 +27,7 @@ public class AuditTests : IDisposable
         {
             try { File.Delete(DbPath); } catch { }
         }
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class AuditTests : IDisposable
         Assert.True(_audit.VerifyIntegrity());
 
         // 3. Close DB to ensure flush
-        _db.Dispose();
+        _db?.Dispose();
         _db = null;
 
         // 4. Corrupt the file
@@ -81,7 +82,7 @@ public class AuditTests : IDisposable
     public void HashChain_PersistsAcrossSessions()
     {
         _audit.LogEvent(new SecurityEventArgs(SecurityEventType.RegistrationSuccess, "agent1", "session1"));
-        _db.Dispose();
+        _db?.Dispose();
         _db = null;
 
         using var db2 = SharcDatabase.Open(DbPath, new SharcOpenOptions { Writable = true });

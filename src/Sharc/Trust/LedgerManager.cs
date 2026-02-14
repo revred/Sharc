@@ -106,7 +106,7 @@ public sealed class LedgerManager
             throw new InvalidOperationException("Agent key is not valid.");
 
         if (payload.EconomicValue > agent.AuthorityCeiling)
-            throw new InvalidOperationException("Authority ceiling exceeded.");
+            throw new InvalidOperationException($"Authority ceiling exceeded. limit: {agent.AuthorityCeiling}");
 
         if (agent.CoSignRequired) VerifyCoSignatures(agent, payload, signer);
     }

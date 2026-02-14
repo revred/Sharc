@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 
+using Sharc.Core.Query;
+
 namespace Sharc.Core;
 
 /// <summary>
@@ -95,6 +97,14 @@ public interface IRecordDecoder
     /// Decodes a REAL column directly to a double without intermediate ColumnValue construction.
     /// </summary>
     double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
+    /// Evaluates filters directly against the raw payload without decoding the full row.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="filters">The filters to evaluate.</param>
+    /// <returns>True if the record matches all filters; otherwise, false.</returns>
+    bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters);
 }
 
 /// <summary>

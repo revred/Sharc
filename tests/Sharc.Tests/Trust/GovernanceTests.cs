@@ -71,6 +71,7 @@ public class GovernanceTests
         Assert.NotNull(decoded);
         Assert.Equal(PayloadType.Financial, decoded.Type);
         Assert.Equal("Audit Record", decoded.Content);
+        Assert.NotNull(decoded.Evidence);
         Assert.Single(decoded.Evidence);
         Assert.Equal("Invoices", decoded.Evidence[0].Table);
     }

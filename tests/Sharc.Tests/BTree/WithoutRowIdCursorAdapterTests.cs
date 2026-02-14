@@ -1,4 +1,5 @@
 using Sharc.Core;
+using Sharc.Core.Query;
 using Sharc.Core.BTree;
 using Xunit;
 
@@ -124,6 +125,7 @@ public sealed class WithoutRowIdCursorAdapterTests
 
     private sealed class StubRecordDecoder : IRecordDecoder
     {
+        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters) => true;
         private readonly ColumnValue[] _columnValues;
         private int _decodeIndex = -1;
 

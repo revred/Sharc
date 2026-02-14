@@ -27,7 +27,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(3, columns.Count);
         Assert.Equal("id", columns[0].Name);
@@ -40,7 +40,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE items (id INTEGER, label TEXT, price REAL)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal("INTEGER", columns[0].DeclaredType);
         Assert.Equal("TEXT", columns[1].DeclaredType);
@@ -52,7 +52,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.True(columns[0].IsPrimaryKey);
         Assert.True(columns[0].IsNotNull); // PK is implicitly NOT NULL
@@ -64,7 +64,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE users (id INTEGER, name TEXT NOT NULL)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.False(columns[0].IsNotNull);
         Assert.True(columns[1].IsNotNull);
@@ -75,7 +75,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE items (id INTEGER, label VARCHAR(255))";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal("VARCHAR(255)", columns[1].DeclaredType);
     }
@@ -85,7 +85,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE users (id INTEGER, name TEXT, PRIMARY KEY (id))";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(2, columns.Count);
         Assert.Equal("id", columns[0].Name);
@@ -97,7 +97,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t (\"my column\" TEXT, normal INTEGER)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(2, columns.Count);
         Assert.Equal("my column", columns[0].Name);
@@ -109,7 +109,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t ([my column] TEXT)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Single(columns);
         Assert.Equal("my column", columns[0].Name);
@@ -120,7 +120,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t (`my column` TEXT)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Single(columns);
         Assert.Equal("my column", columns[0].Name);
@@ -131,7 +131,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t (a INTEGER, b TEXT, c REAL)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(0, columns[0].Ordinal);
         Assert.Equal(1, columns[1].Ordinal);
@@ -143,7 +143,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t (id, name)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(2, columns.Count);
         Assert.Equal("", columns[0].DeclaredType);
@@ -155,7 +155,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(2, columns.Count);
         Assert.Equal("id", columns[0].Name);
@@ -166,7 +166,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE orders (id INTEGER, user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id))";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal(2, columns.Count);
     }
@@ -176,7 +176,7 @@ public class CreateTableParserTests
     {
         const string sql = "CREATE TABLE t (id INTEGER, status TEXT DEFAULT 'active')";
 
-        var columns = CreateTableParser.ParseColumns(sql);
+        var columns = SchemaParser.ParseTableColumns(sql);
 
         Assert.Equal("TEXT", columns[1].DeclaredType);
     }

@@ -90,7 +90,7 @@ public class TrustSimulationTests
             ColumnValue.FromInt64(1, 2), // Sequence 2
             ColumnValue.FromInt64(2, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
             ColumnValue.Text(2, System.Text.Encoding.UTF8.GetBytes("alice-oncology")), // Claim identity
-            ColumnValue.Blob(2, new byte[0]), // Empty Payload
+            ColumnValue.Blob(2, Array.Empty<byte>()), // Empty Payload
             ColumnValue.Blob(2, new byte[32]), // Fake payload hash
             ColumnValue.Blob(2, aliceDeltas[0].AsSpan().Slice(aliceDeltas[0].Length - 32).ToArray()), // Link to Alice's last hash (fake)
             ColumnValue.Blob(2, mallory.Sign(new byte[64])) // Signed by Mallory's key

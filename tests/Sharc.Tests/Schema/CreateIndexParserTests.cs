@@ -8,7 +8,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_SingleColumn_ReturnsOneColumn()
     {
-        var columns = CreateIndexParser.ParseColumns("CREATE INDEX idx_name ON users (name)");
+        var columns = SchemaParser.ParseIndexColumns("CREATE INDEX idx_name ON users (name)");
 
         Assert.Single(columns);
         Assert.Equal("name", columns[0].Name);
@@ -19,7 +19,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_MultipleColumns_ReturnsAllInOrder()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx_multi ON events (user_id, created_at, event_type)");
 
         Assert.Equal(3, columns.Count);
@@ -34,7 +34,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_ExplicitAsc_NotDescending()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (col ASC)");
 
         Assert.Single(columns);
@@ -45,7 +45,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_ExplicitDesc_IsDescending()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (col DESC)");
 
         Assert.Single(columns);
@@ -56,7 +56,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_MixedSortOrder_ParsesCorrectly()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (a ASC, b DESC, c)");
 
         Assert.Equal(3, columns.Count);
@@ -68,7 +68,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_UniqueIndex_ParsesColumns()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE UNIQUE INDEX idx_email ON users (email)");
 
         Assert.Single(columns);
@@ -78,7 +78,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_IfNotExists_ParsesColumns()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX IF NOT EXISTS idx ON t (x, y)");
 
         Assert.Equal(2, columns.Count);
@@ -89,7 +89,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_QuotedIdentifiers_UnquotesCorrectly()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX \"my_idx\" ON \"my table\" (\"my col\", [another col])");
 
         Assert.Equal(2, columns.Count);
@@ -100,7 +100,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_BacktickQuotes_UnquotesCorrectly()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (`col name`)");
 
         Assert.Single(columns);
@@ -110,7 +110,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_PartialIndex_IgnoresWhereClause()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (status) WHERE status > 0");
 
         Assert.Single(columns);
@@ -120,7 +120,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_EmptySql_ReturnsEmpty()
     {
-        var columns = CreateIndexParser.ParseColumns("");
+        var columns = SchemaParser.ParseIndexColumns("");
 
         Assert.Empty(columns);
     }
@@ -128,7 +128,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_NoParentheses_ReturnsEmpty()
     {
-        var columns = CreateIndexParser.ParseColumns("CREATE INDEX idx ON t");
+        var columns = SchemaParser.ParseIndexColumns("CREATE INDEX idx ON t");
 
         Assert.Empty(columns);
     }
@@ -136,7 +136,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_CaseInsensitive_ParsesCorrectly()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "create index idx on t (col desc)");
 
         Assert.Single(columns);
@@ -147,7 +147,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_ExtraWhitespace_ParsesCorrectly()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE  INDEX  idx  ON  t  (  a  ,  b  DESC  )");
 
         Assert.Equal(2, columns.Count);
@@ -159,7 +159,7 @@ public class CreateIndexParserTests
     [Fact]
     public void ParseColumns_CollateClause_IgnoresCollate()
     {
-        var columns = CreateIndexParser.ParseColumns(
+        var columns = SchemaParser.ParseIndexColumns(
             "CREATE INDEX idx ON t (name COLLATE NOCASE)");
 
         Assert.Single(columns);
