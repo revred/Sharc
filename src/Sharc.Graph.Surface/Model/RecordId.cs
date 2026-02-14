@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                         |
---------------------------------------------------------------------------------------------------*/
 
 using System.Globalization;
 
@@ -23,22 +10,23 @@ namespace Sharc.Graph.Model;
 /// A typed record identifier supporting both "table:id" format (SurrealDB-style)
 /// and integer key addressing (Maker.AI-style). Immutable value object.
 /// </summary>
-public readonly record struct RecordId
+public record struct RecordId
 {
-    private readonly string _fullId;
+    private string? _id;
+    private string? _fullId;
     private readonly bool _hasKey;
 
     /// <summary>The table or type name part of the ID.</summary>
     public string Table { get; }
     
     /// <summary>The unique identifier part of the ID (string GUID or user ID).</summary>
-    public string Id { get; }
+    public string Id => _id ??= "pk:" + Key.Value;
     
     /// <summary>The optimized integer key for this record, if available.</summary>
     public NodeKey Key { get; }
     
     /// <summary>The full "table:id" string representation.</summary>
-    public string FullId => _fullId;
+    public string FullId => _fullId ??= $"{Table}:{Id}";
     
     /// <summary>True if this ID has an associated integer key (including zero).</summary>
     public bool HasIntegerKey => _hasKey;
@@ -49,16 +37,15 @@ public readonly record struct RecordId
     /// <param name="table">Table name.</param>
     /// <param name="id">String ID.</param>
     /// <param name="key">Optional integer key.</param>
-    public RecordId(string table, string id, NodeKey? key = null)
+    public RecordId(string table, string? id, NodeKey? key = null)
     {
         if (string.IsNullOrWhiteSpace(table)) throw new ArgumentException("Table cannot be empty", nameof(table));
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty", nameof(id));
         
         Table = table;
-        Id = id;
+        _id = id;
         Key = key ?? default;
         _hasKey = key.HasValue;
-        _fullId = $"{table}:{id}";
+        _fullId = null;
     }
 
     /// <summary>
@@ -67,15 +54,13 @@ public readonly record struct RecordId
     /// <param name="typeId">The integer type ID (becomes Table).</param>
     /// <param name="idString">The string ID.</param>
     /// <param name="key">The integer key (BarID).</param>
-    public RecordId(int typeId, string idString, NodeKey key)
+    public RecordId(int typeId, string? idString, NodeKey key)
     {
-        if (string.IsNullOrWhiteSpace(idString)) throw new ArgumentException("ID string cannot be empty", nameof(idString));
-        
         Table = typeId.ToString(CultureInfo.InvariantCulture);
-        Id = idString;
+        _id = idString;
         Key = key;
         _hasKey = true;
-        _fullId = $"{Table}:{Id}";
+        _fullId = null;
     }
 
     /// <summary>

@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using Microsoft.Data.Sqlite;
 
@@ -109,6 +96,48 @@ public sealed class DataGenerator
 
             CREATE INDEX idx_relations_source_kind ON _relations(source_key, kind, target_key);
             CREATE INDEX idx_relations_target_kind ON _relations(target_key, kind, source_key);
+
+            CREATE TABLE _sharc_ledger (
+                SequenceNumber INTEGER PRIMARY KEY,
+                Timestamp      INTEGER NOT NULL,
+                AgentId        TEXT NOT NULL,
+                Payload        BLOB NOT NULL,
+                PayloadHash    BLOB NOT NULL,
+                PreviousHash   BLOB NOT NULL,
+                Signature      BLOB NOT NULL
+            );
+
+            CREATE TABLE _sharc_agents (
+                AgentId          TEXT PRIMARY KEY,
+                Class            INTEGER NOT NULL,
+                PublicKey        BLOB NOT NULL,
+                AuthorityCeiling INTEGER NOT NULL,
+                WriteScope       TEXT NOT NULL,
+                ReadScope        TEXT NOT NULL,
+                ValidityStart    INTEGER NOT NULL,
+                ValidityEnd      INTEGER NOT NULL,
+                ParentAgent      TEXT,
+                CoSignRequired   INTEGER NOT NULL,
+                Signature        BLOB NOT NULL
+            );
+
+            CREATE TABLE _sharc_scores (
+                AgentId          TEXT PRIMARY KEY,
+                Score            REAL NOT NULL,
+                Confidence       REAL NOT NULL,
+                LastUpdated      INTEGER NOT NULL,
+                LastRatingCount  INTEGER NOT NULL
+            );
+
+            CREATE TABLE _sharc_audit (
+                EventId      INTEGER PRIMARY KEY,
+                Timestamp    INTEGER NOT NULL,
+                EventType    INTEGER NOT NULL,
+                AgentId      TEXT NOT NULL,
+                Details      TEXT NOT NULL,
+                PreviousHash BLOB NOT NULL,
+                Hash         BLOB NOT NULL
+            );
             """;
         cmd.ExecuteNonQuery();
     }

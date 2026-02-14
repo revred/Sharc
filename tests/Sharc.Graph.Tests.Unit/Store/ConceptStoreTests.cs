@@ -42,8 +42,8 @@ public class ConceptStoreTests
         var result = store.Get(new NodeKey(200));
 
         Assert.IsNotNull(result);
-        Assert.AreEqual(200, result.Key.Value);
-        Assert.AreEqual("{\"name\":\"B\"}", result.JsonData);
+        Assert.AreEqual(200, result.Value.Key.Value);
+        Assert.AreEqual("{\"name\":\"B\"}", result.Value.JsonData);
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public class ConceptStoreTests
         var result = store.Get(new NodeKey(100));
 
         Assert.IsNotNull(result);
-        Assert.AreEqual(500, result.Tokens);
+        Assert.AreEqual(500, result.Value.Tokens);
     }
 
     [TestMethod]
@@ -103,7 +103,7 @@ public class ConceptStoreTests
         var result = store.Get(new NodeKey(50));
 
         Assert.IsNotNull(result);
-        Assert.AreEqual("{\"first\":true}", result.JsonData);
+        Assert.AreEqual("{\"first\":true}", result.Value.JsonData);
     }
 
     #region Test Helpers
@@ -351,6 +351,7 @@ public class ConceptStoreTests
             return true;
         }
 
+        public void Reset() { _index = -1; }
         public void Dispose() { }
     }
 

@@ -1,26 +1,13 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                         |
---------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Graph.Model;
 
 /// <summary>
 /// A typed, directed edge connecting two graph nodes using integer keys.
 /// </summary>
-public sealed class GraphEdge
+public readonly record struct GraphEdge
 {
     /// <summary>The unique Edge ID.</summary>
     public RecordId Id { get; init; }
@@ -35,10 +22,10 @@ public sealed class GraphEdge
     public int Kind { get; init; }
     
     /// <summary>The human-readable edge kind ("has_operation").</summary>
-    public string KindName { get; init; } = "";
+    public string KindName { get; init; }
     
     /// <summary>Edge properties as JSON.</summary>
-    public string JsonData { get; init; } = "{}";
+    public string JsonData { get; init; }
     
     /// <summary>Cloud Version Number.</summary>
     public int CVN { get; init; }
@@ -53,7 +40,7 @@ public sealed class GraphEdge
     public DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>Edge relevance weight (0.0 to 1.0).</summary>
-    public float Weight { get; init; } = 1.0f;
+    public float Weight { get; init; }
 
     /// <summary>
     /// Creates a new GraphEdge connecting origin and target.
@@ -65,6 +52,11 @@ public sealed class GraphEdge
         TargetKey = targetKey;
         Kind = kind;
         JsonData = jsonData;
+        KindName = "";
+        CVN = 0;
+        LVN = 0;
+        SyncStatus = 0;
         CreatedAt = default;
+        Weight = 1.0f;
     }
 }

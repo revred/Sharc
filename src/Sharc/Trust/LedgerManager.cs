@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
-using System.Security.Cryptography;
+using System.Text;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
-using Sharc.Core.IO;
 using Sharc.Core.Records;
-using Sharc.Crypto;
 using Sharc.Core.Trust;
+using Sharc.Core.Storage;
+using Sharc.Crypto;
 
 namespace Sharc.Trust;
 
@@ -52,115 +52,24 @@ public sealed class LedgerManager
     /// </summary>
     /// <param name="payload">The structured payload to append.</param>
     /// <param name="signer">The signer to use for attribution.</param>
-    /// <param name="transaction">Optional active transaction. If null, a new one is created and committed.</param>
+    /// <param name="transaction">Optional active transaction.</param>
     public void Append(TrustPayload payload, ISharcSigner signer, Transaction? transaction = null)
     {
-        var table = _db.Schema.GetTable(LedgerTableName);
-        
+        var rootPage = SystemStore.GetRootPage(_db.Schema, LedgerTableName);
         bool ownsTransaction = transaction == null;
         var tx = transaction ?? _db.BeginTransaction();
-        
-        // F2: Serialize Structured Payload
         byte[] payloadData = payload.ToBytes();
         
         try
         {
-            var source = tx.GetShadowSource();
-            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
-            
-            // Get last entry to link the hash chain
-            var lastEntry = GetLastEntry(table.RootPage);
-    
+            var lastEntry = GetLastEntry((int)rootPage);
             long nextSequence = (lastEntry?.SequenceNumber ?? 0) + 1;
             byte[] prevHash = lastEntry?.PayloadHash ?? new byte[32];
             byte[] payloadHash = SharcHash.Compute(payloadData);
-    
-            // F7: Validity Check
-            // F6: Use Microseconds for higher precision
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000; 
 
-            // Ensure the signer's key is valid at the time of signing.
             var agentInfo = _registry.GetAgent(signer.AgentId);
-            
-            // If we have agent info, check validity window AND AuthorityCeiling
-            if (agentInfo != null)
-            {
-                long validStart = agentInfo.ValidityStart;
-                long validEnd = agentInfo.ValidityEnd;
-                
-                // Ledger uses microseconds, AgentInfo/Tests use seconds (mostly).
-                // Standardizing on seconds for the check.
-                long tsSeconds = timestamp / 1000000;
-                if (tsSeconds < validStart || (validEnd > 0 && tsSeconds > validEnd))
-                {
-                    var msg = $"Agent key is not valid at this time (Valid: {validStart}-{validEnd}, Current: {tsSeconds})";
-                    SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendRejected, signer.AgentId, msg));
-                    throw new InvalidOperationException(msg);
-                }
-
-                // F7: Authority Ceiling Enforcement
-                if (payload.EconomicValue.HasValue)
-                {
-                    // Convert decimal to ulong (assuming base currency units) or comparison logic.
-                    // AgentInfo.AuthorityCeiling is ulong (e.g. cents or whole units).
-                    // We treat EconomicValue as the amount to check.
-                    // If EconomicValue is negative, it might be a refund, but usually authority limits absolute value.
-                    // For now, we assume positive checks.
-                    
-                    if (payload.EconomicValue.Value > agentInfo.AuthorityCeiling)
-                    {
-                         var msg = $"Authority ceiling exceeded. Agent {signer.AgentId} limit: {agentInfo.AuthorityCeiling}, Requested: {payload.EconomicValue.Value}";
-                         SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendRejected, signer.AgentId, msg));
-                         throw new InvalidOperationException(msg);
-                    }
-                }
-
-                // F7: Co-Signing Enforcement
-                if (agentInfo.CoSignRequired)
-                {
-                    if (payload.CoSignatures == null || payload.CoSignatures.Count == 0)
-                    {
-                        var msg = $"Agent {signer.AgentId} requires co-signatures but none provided.";
-                        SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendRejected, signer.AgentId, msg));
-                        throw new InvalidOperationException(msg);
-                    }
-
-                    // Verify Co-Signatures
-                    // Co-Signers sign the payload WITHOUT the CoSignatures field (to avoid circularity).
-                    // We reconstruct the base payload to verify.
-                    var basePayload = payload with { CoSignatures = null };
-                    var baseData = basePayload.ToBytes();
-                    var baseHash = SharcHash.Compute(baseData);
-
-                    foreach (var sig in payload.CoSignatures)
-                    {
-                        var coSigner = _registry.GetAgent(sig.SignerId);
-                        if (coSigner == null)
-                            throw new InvalidOperationException($"Unknown co-signer: {sig.SignerId}");
-
-                        // Check co-signer validity at time of THEIR signing
-                        // Use microsecond precision for ledger compatibility if needed, but sig.Timestamp is just long.
-                        // Assuming sig.Timestamp is Unix Milliseconds similar to payload generation time
-                        long sigTsSeconds = sig.Timestamp / 1000;
-                        if (sigTsSeconds < coSigner.ValidityStart || (coSigner.ValidityEnd > 0 && sigTsSeconds > coSigner.ValidityEnd))
-                             throw new InvalidOperationException($"Co-signer {sig.SignerId} key expired or invalid at signing time.");
-
-                        // Verify Signature
-                        // They sign: BaseHash + Timestamp
-                        byte[] signedData = new byte[baseHash.Length + 8];
-                        baseHash.CopyTo(signedData, 0);
-                        BinaryPrimitives.WriteInt64BigEndian(signedData.AsSpan(baseHash.Length), sig.Timestamp);
-
-                        if (!SharcSigner.Verify(signedData, sig.Signature, coSigner.PublicKey))
-                            throw new InvalidOperationException($"Invalid co-signature from {sig.SignerId}");
-                            
-                        // Prevent self-cosigning?
-                        if (sig.SignerId == signer.AgentId)
-                            throw new InvalidOperationException($"Agent {signer.AgentId} cannot co-sign their own payload.");
-                    }
-                }
-            }
-
+            if (agentInfo != null) ValidateAgent(agentInfo, payload, signer, timestamp);
 
             byte[] dataToSign = new byte[prevHash.Length + payloadHash.Length + 8];
             prevHash.CopyTo(dataToSign, 0);
@@ -169,45 +78,58 @@ public sealed class LedgerManager
             
             byte[] signature = signer.Sign(dataToSign);
 
-            // F2: Store Payload
-            // Payload is already serialized in 'payloadData'
-            
-            var entry = new LedgerEntry(
-                nextSequence,
-                timestamp,
-                signer.AgentId,
-                payloadData, 
-                payloadHash,
-                prevHash,
-                signature);
-    
             var columns = new[]
             {
-                ColumnValue.FromInt64(1, entry.SequenceNumber),
-                ColumnValue.FromInt64(2, entry.Timestamp),
-                ColumnValue.Text(entry.SequenceNumber, System.Text.Encoding.UTF8.GetBytes(entry.AgentId)),
-                ColumnValue.Blob(entry.SequenceNumber, entry.Payload),
-                ColumnValue.Blob(entry.SequenceNumber, entry.PayloadHash),
-                ColumnValue.Blob(entry.SequenceNumber, entry.PreviousHash),
-                ColumnValue.Blob(entry.SequenceNumber, entry.Signature)
+                ColumnValue.FromInt64(1, nextSequence),
+                ColumnValue.FromInt64(2, timestamp),
+                ColumnValue.Text(3, Encoding.UTF8.GetBytes(signer.AgentId)),
+                ColumnValue.Blob(4, payloadData),
+                ColumnValue.Blob(5, payloadHash),
+                ColumnValue.Blob(6, prevHash),
+                ColumnValue.Blob(7, signature)
             };
     
-            int recordSize = RecordEncoder.ComputeEncodedSize(columns);
-            byte[] recordBuffer = new byte[recordSize];
-            RecordEncoder.EncodeRecord(columns, recordBuffer);
-    
-            // F1: Use BTreeMutator to handle page splits
-            // F4: Removed custom page split logic duplication
-            mutator.Insert((uint)table.RootPage, entry.SequenceNumber, recordBuffer);
-            
+            SystemStore.InsertRecord(tx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, nextSequence, columns);
             if (ownsTransaction) tx.Commit();
-
-            // Success Event
-            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendSuccess, signer.AgentId, $"seq={entry.SequenceNumber}"));
+            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendSuccess, signer.AgentId, $"seq={nextSequence}"));
         }
         finally
         {
             if (ownsTransaction) tx.Dispose();
+        }
+    }
+
+    private void ValidateAgent(AgentInfo agent, TrustPayload payload, ISharcSigner signer, long timestamp)
+    {
+        long tsSeconds = timestamp / 1000000;
+        if (tsSeconds < agent.ValidityStart || (agent.ValidityEnd > 0 && tsSeconds > agent.ValidityEnd))
+            throw new InvalidOperationException("Agent key is not valid.");
+
+        if (payload.EconomicValue > agent.AuthorityCeiling)
+            throw new InvalidOperationException($"Authority ceiling exceeded. limit: {agent.AuthorityCeiling}");
+
+        if (agent.CoSignRequired) VerifyCoSignatures(agent, payload, signer);
+    }
+
+    private void VerifyCoSignatures(AgentInfo agent, TrustPayload payload, ISharcSigner primary)
+    {
+        if (payload.CoSignatures == null || payload.CoSignatures.Count == 0)
+            throw new InvalidOperationException("Co-signature required.");
+
+        var baseData = (payload with { CoSignatures = null }).ToBytes();
+        var baseHash = SharcHash.Compute(baseData);
+
+        foreach (var sig in payload.CoSignatures)
+        {
+            var coSigner = _registry.GetAgent(sig.SignerId) ?? throw new InvalidOperationException("Unknown co-signer.");
+            if (sig.SignerId == primary.AgentId) throw new InvalidOperationException("Cannot self-cosign.");
+
+            byte[] signedData = new byte[baseHash.Length + 8];
+            baseHash.CopyTo(signedData, 0);
+            BinaryPrimitives.WriteInt64BigEndian(signedData.AsSpan(baseHash.Length), sig.Timestamp);
+
+            if (!SharcSigner.Verify(signedData, sig.Signature, coSigner.PublicKey))
+                throw new InvalidOperationException("Invalid co-signature.");
         }
     }
 
@@ -388,82 +310,34 @@ public sealed class LedgerManager
     }
 
     /// <summary>
-    /// Imports ledger deltas into the local ledger.
+    /// Imports a sequence of ledger deltas into the local ledger.
     /// </summary>
-    /// <param name="deltas">The raw record bytes to import.</param>
+    /// <param name="deltas">Enumerable of raw record payloads.</param>
     /// <param name="transaction">Optional active transaction.</param>
     public void ImportDeltas(IEnumerable<byte[]> deltas, Transaction? transaction = null)
     {
-        var table = _db.Schema.GetTable(LedgerTableName);
-        
+        var rootPage = SystemStore.GetRootPage(_db.Schema, LedgerTableName);
         bool ownsTransaction = transaction == null;
         var tx = transaction ?? _db.BeginTransaction();
         
         try
         {
-            var source = tx.GetShadowSource();
-            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
-
             foreach (var delta in deltas)
             {
-                var decoded = _db.RecordDecoder.DecodeRecord(delta);
-                long seq = decoded[0].AsInt64();
-                long ts = decoded[1].AsInt64();
-                string agentId = decoded[2].AsString();
-                byte[] payload = decoded[3].AsBytes().ToArray();
-                byte[] payloadHash = decoded[4].AsBytes().ToArray();
-                byte[] prevHash = decoded[5].AsBytes().ToArray();
-                byte[] signature = decoded[6].AsBytes().ToArray();
-    
-                var lastEntry = GetLastEntry(table.RootPage);
-                if (lastEntry != null)
-                {
-                    if (seq != lastEntry.SequenceNumber + 1)
-                        throw new InvalidOperationException($"Out of sequence delta: expected {lastEntry.SequenceNumber + 1}, got {seq}");
-                    if (!prevHash.AsSpan().SequenceEqual(lastEntry.PayloadHash))
-                        throw new InvalidOperationException($"Hash chain break in delta at sequence {seq}");
-                }
-                else if (seq != 1)
-                {
-                    throw new InvalidOperationException("First imported delta must have sequence 1");
-                }
+                var entry = SystemStore.Decode(delta, _db.RecordDecoder, v => new LedgerEntry(
+                    v[0].AsInt64(), v[1].AsInt64(), v[2].AsString(), v[3].AsBytes().ToArray(),
+                    v[4].AsBytes().ToArray(), v[5].AsBytes().ToArray(), v[6].AsBytes().ToArray()));
+
+                var last = GetLastEntry((int)rootPage);
+                if (last != null && (entry.SequenceNumber != last.SequenceNumber + 1 ||
+                    !entry.PreviousHash.SequenceEqual(last.PayloadHash)))
+                    throw new InvalidOperationException("Chain break.");
                 
-                // Verify Payload Hash
-                byte[] computedHash = SharcHash.Compute(payload);
-                if (!computedHash.AsSpan().SequenceEqual(payloadHash))
-                    throw new InvalidOperationException($"Payload integrity failure at sequence {seq}");
-    
-                byte[] dataToVerify = new byte[prevHash.Length + payloadHash.Length + 8];
-                prevHash.CopyTo(dataToVerify, 0);
-                payloadHash.CopyTo(dataToVerify, prevHash.Length);
-                BinaryPrimitives.WriteInt64BigEndian(dataToVerify.AsSpan(prevHash.Length + payloadHash.Length), seq);
-    
-                var agent = _registry.GetAgent(agentId);
-                if (agent == null)
-                {
-                     throw new InvalidOperationException($"Unknown agent in delta: {agentId}");
-                }
-                
-                // F7: Validity Check
-                long tsSeconds = ts / 1000000;
-                if (tsSeconds < agent.ValidityStart || (agent.ValidityEnd > 0 && tsSeconds > agent.ValidityEnd))
-                    throw new InvalidOperationException($"Agent key expired or not yet valid (Seq {seq})");
-    
-                if (!SharcSigner.Verify(dataToVerify, signature, agent.PublicKey))
-                {
-                    throw new InvalidOperationException($"Invalid signature in delta at sequence {seq}");
-                }
-    
-                // F1: Use BTreeMutator
-                mutator.Insert((uint)table.RootPage, seq, delta);
+                SystemStore.InsertRecord(tx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, entry.SequenceNumber, RecordEncoder.ToColumnValues(delta, _db.RecordDecoder));
             }
-            
             if (ownsTransaction) tx.Commit();
         }
-        finally
-        {
-            if (ownsTransaction) tx.Dispose();
-        }
+        finally { if (ownsTransaction) tx.Dispose(); }
     }
 
     private LedgerEntry? GetLastEntry(int rootPage)

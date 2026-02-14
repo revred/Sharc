@@ -1,11 +1,10 @@
 using System.Buffers.Binary;
 using System.Text;
 using Sharc.Core;
-using Sharc.Core.BTree;
-using Sharc.Core.Format;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Core.Trust;
+using Sharc.Core.Storage;
 
 namespace Sharc.Trust;
 
@@ -22,7 +21,9 @@ public sealed class AgentRegistry
     /// <summary>
     /// Occurs when a security-relevant event happens (registration success/failure).
     /// </summary>
+#pragma warning disable CS0067
     public event EventHandler<SecurityEventArgs>? SecurityAudit;
+#pragma warning restore CS0067
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentRegistry"/> class.
@@ -34,113 +35,43 @@ public sealed class AgentRegistry
     }
 
     /// <summary>
-    /// Registers an agent in the local registry.
+    /// Registers a new agent in the system registry.
     /// </summary>
     /// <param name="agent">The agent information to register.</param>
-    /// <param name="transaction">Optional active transaction. If null, a new one is created and committed.</param>
+    /// <param name="transaction">Optional active transaction.</param>
     public void RegisterAgent(AgentInfo agent, Transaction? transaction = null)
     {
-        // F8: Self-Attestation Verification
-        // Verify that the signer actually holds the private key for the claimed Public Key.
-        // We reconstruct the data they should have signed:
-        // (AgentId + Class + PublicKey + AuthorityCeiling + WriteScope + ReadScope + ValidityStart + ValidityEnd + ParentAgent + CoSignRequired)
-        
-        int bufferSize = Encoding.UTF8.GetByteCount(agent.AgentId) + 
-                         1 + // Class (byte)
-                         agent.PublicKey.Length + 
-                         8 + // AuthorityCeiling
-                         Encoding.UTF8.GetByteCount(agent.WriteScope) + 
-                         Encoding.UTF8.GetByteCount(agent.ReadScope) + 
-                         8 + // ValidityStart
-                         8 + // ValidityEnd
-                         Encoding.UTF8.GetByteCount(agent.ParentAgent) +
-                         1;  // CoSignRequired
+        if (!SharcSigner.Verify(GetVerificationBuffer(agent), agent.Signature, agent.PublicKey))
+             throw new InvalidOperationException("Invalid signature.");
 
-        byte[] verificationData = new byte[bufferSize];
-        int offset = 0;
-        
-        offset += Encoding.UTF8.GetBytes(agent.AgentId, verificationData.AsSpan(offset));
-        verificationData[offset++] = (byte)agent.Class;
-        agent.PublicKey.CopyTo(verificationData.AsSpan(offset));
-        offset += agent.PublicKey.Length;
-        BinaryPrimitives.WriteUInt64BigEndian(verificationData.AsSpan(offset), agent.AuthorityCeiling);
-        offset += 8;
-        offset += Encoding.UTF8.GetBytes(agent.WriteScope, verificationData.AsSpan(offset));
-        offset += Encoding.UTF8.GetBytes(agent.ReadScope, verificationData.AsSpan(offset));
-        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityStart);
-        offset += 8;
-        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityEnd);
-        offset += 8;
-        offset += Encoding.UTF8.GetBytes(agent.ParentAgent, verificationData.AsSpan(offset));
-        verificationData[offset++] = agent.CoSignRequired ? (byte)1 : (byte)0;
-
-            if (!SharcSigner.Verify(verificationData, agent.Signature, agent.PublicKey))
-        {
-             SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.RegistrationFailed, agent.AgentId, "Invalid self-attestation signature."));
-             throw new InvalidOperationException("Agent registration failed: Invalid self-attestation signature.");
-        }
-
-        var table = GetTable(AgentsTableName);
-        if (table == null) throw new InvalidOperationException($"System table {AgentsTableName} not found.");
-        
-        var columns = new[]
+        var rootPage = SystemStore.GetRootPage(_db.Schema, AgentsTableName);
+        var cols = new[]
         {
             ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.AgentId)),
-            ColumnValue.FromInt64(0, (long)agent.Class),            // 1: Class
-            ColumnValue.Blob(0, agent.PublicKey),                   // 2: PublicKey
-            ColumnValue.FromInt64(0, (long)agent.AuthorityCeiling), // 3: AuthorityCeiling
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.WriteScope)), // 4: WriteScope
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.ReadScope)),  // 5: ReadScope
-            ColumnValue.FromInt64(0, agent.ValidityStart),          // 6: ValidityStart
-            ColumnValue.FromInt64(0, agent.ValidityEnd),            // 7: ValidityEnd
-            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.ParentAgent)), // 8: ParentAgent
-            ColumnValue.FromInt64(0, agent.CoSignRequired ? 1 : 0), // 9: CoSignRequired
-            ColumnValue.Blob(0, agent.Signature)                    // 10: Signature
+            ColumnValue.FromInt64(0, (long)agent.Class),
+            ColumnValue.Blob(0, agent.PublicKey),
+            ColumnValue.FromInt64(0, (long)agent.AuthorityCeiling),
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.WriteScope)),
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.ReadScope)),
+            ColumnValue.FromInt64(0, agent.ValidityStart),
+            ColumnValue.FromInt64(0, agent.ValidityEnd),
+            ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.ParentAgent)),
+            ColumnValue.FromInt64(0, agent.CoSignRequired ? 1 : 0),
+            ColumnValue.Blob(0, agent.Signature)
         };
-
-        int recordSize = RecordEncoder.ComputeEncodedSize(columns);
-        byte[] recordBuffer = new byte[recordSize];
-        RecordEncoder.EncodeRecord(columns, recordBuffer);
 
         EnsureCacheLoaded();
         long rowId = ++_maxRowId;
-
         bool ownsTransaction = transaction == null;
         var tx = transaction ?? _db.BeginTransaction();
 
         try
         {
-            var source = tx.GetShadowSource();
-            var mutator = new BTreeMutator(source, _db.Header.UsablePageSize);
-            
-            mutator.Insert((uint)table.RootPage, rowId, recordBuffer);
-            
-            if (ownsTransaction) 
-            {
-                tx.Commit();
-                // Update cache only on separate commit
-                _cache![agent.AgentId] = agent;
-            }
-            else
-            {
-                // If external transaction, we don't know if it will commit.
-                // Invalidate cache so subsequent reads force a reload from DB
-                // (which will see the transaction's view or the original state).
-                _cache = null;
-            }
-            
-            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.RegistrationSuccess, agent.AgentId, "Agent registered successfully."));
+            SystemStore.InsertRecord(tx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, rowId, cols);
+            if (ownsTransaction) { tx.Commit(); _cache![agent.AgentId] = agent; }
+            else _cache = null;
         }
-        catch (Exception ex)
-        {
-             // If we caught an exception here (e.g. duplicate key from BTree), log it as failed
-             SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.RegistrationFailed, agent.AgentId, $"Registration failed: {ex.Message}"));
-             throw;
-        }
-        finally
-        {
-            if (ownsTransaction) tx.Dispose();
-        }
+        finally { if (ownsTransaction) tx.Dispose(); }
     }
 
     /// <summary>
@@ -185,6 +116,43 @@ public sealed class AgentRegistry
             );
             _cache[info.AgentId] = info;
         }
+    }
+
+    /// <summary>
+    /// Constructs the verification buffer for an agent registration.
+    /// </summary>
+    public static byte[] GetVerificationBuffer(AgentInfo agent)
+    {
+        int bufferSize = Encoding.UTF8.GetByteCount(agent.AgentId) + 
+                         1 + // Class (byte)
+                         agent.PublicKey.Length + 
+                         8 + // AuthorityCeiling
+                         Encoding.UTF8.GetByteCount(agent.WriteScope) + 
+                         Encoding.UTF8.GetByteCount(agent.ReadScope) + 
+                         8 + // ValidityStart
+                         8 + // ValidityEnd
+                         Encoding.UTF8.GetByteCount(agent.ParentAgent) +
+                         1;  // CoSignRequired
+
+        byte[] verificationData = new byte[bufferSize];
+        int offset = 0;
+        
+        offset += Encoding.UTF8.GetBytes(agent.AgentId, verificationData.AsSpan(offset));
+        verificationData[offset++] = (byte)agent.Class;
+        agent.PublicKey.CopyTo(verificationData.AsSpan(offset));
+        offset += agent.PublicKey.Length;
+        BinaryPrimitives.WriteUInt64BigEndian(verificationData.AsSpan(offset), agent.AuthorityCeiling);
+        offset += 8;
+        offset += Encoding.UTF8.GetBytes(agent.WriteScope, verificationData.AsSpan(offset));
+        offset += Encoding.UTF8.GetBytes(agent.ReadScope, verificationData.AsSpan(offset));
+        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityStart);
+        offset += 8;
+        BinaryPrimitives.WriteInt64BigEndian(verificationData.AsSpan(offset), agent.ValidityEnd);
+        offset += 8;
+        offset += Encoding.UTF8.GetBytes(agent.ParentAgent, verificationData.AsSpan(offset));
+        verificationData[offset++] = agent.CoSignRequired ? (byte)1 : (byte)0;
+
+        return verificationData;
     }
 
     private TableInfo? GetTable(string name)

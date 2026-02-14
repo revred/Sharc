@@ -21,6 +21,11 @@ public static class SQLiteLayout
     public const int PagePointerSize = 4;
 
     /// <summary>
+    /// The size of a cell pointer (ushort).
+    /// </summary>
+    public const int CellPointerSize = 2;
+
+    /// <summary>
     /// The offset of the first overflow page pointer in a leaf cell.
     /// </summary>
     public const int OverflowPointerSize = 4;

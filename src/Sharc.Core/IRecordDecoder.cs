@@ -1,19 +1,8 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
 
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
+using Sharc.Core.Query;
 
 namespace Sharc.Core;
 
@@ -108,6 +97,14 @@ public interface IRecordDecoder
     /// Decodes a REAL column directly to a double without intermediate ColumnValue construction.
     /// </summary>
     double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
+
+    /// <summary>
+    /// Evaluates filters directly against the raw payload without decoding the full row.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="filters">The filters to evaluate.</param>
+    /// <returns>True if the record matches all filters; otherwise, false.</returns>
+    bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters);
 }
 
 /// <summary>

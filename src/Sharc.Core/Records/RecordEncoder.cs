@@ -88,6 +88,11 @@ internal static class RecordEncoder
         return headerSize + bodySize;
     }
 
+    public static ColumnValue[] ToColumnValues(ReadOnlySpan<byte> record, IRecordDecoder decoder)
+    {
+        return decoder.DecodeRecord(record);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int WriteValue(Span<byte> destination, ColumnValue value, long serialType)
     {

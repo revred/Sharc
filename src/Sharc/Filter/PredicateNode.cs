@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message — or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 using System.Runtime.CompilerServices;
 using Sharc.Core.Primitives;
@@ -21,7 +8,7 @@ using Sharc.Core.Primitives;
 namespace Sharc;
 
 /// <summary>
-/// Leaf filter node — evaluates a single column predicate against raw record bytes.
+/// Leaf filter node â€” evaluates a single column predicate against raw record bytes.
 /// Zero allocation on the evaluation path.
 /// </summary>
 internal sealed class PredicateNode : IFilterNode
@@ -47,7 +34,7 @@ internal sealed class PredicateNode : IFilterNode
 
         long serialType = serialTypes[_columnOrdinal];
 
-        // ── Phase 1: Serial-type-only predicates (zero body access) ──
+        // â”€â”€ Phase 1: Serial-type-only predicates (zero body access) â”€â”€
         if (_operator == FilterOp.IsNull)
             return serialType == 0 && _columnOrdinal != _rowidAliasOrdinal;
 
@@ -63,7 +50,7 @@ internal sealed class PredicateNode : IFilterNode
             return false;
         }
 
-        // ── Phase 2: Byte-level predicates ──
+        // â”€â”€ Phase 2: Byte-level predicates â”€â”€
         var (offset, length) = GetColumnBodyPosition(serialTypes, bodyOffset, _columnOrdinal);
         var columnData = payload.Slice(offset, length);
 

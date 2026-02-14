@@ -1,19 +1,6 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Software here is treated not as static text, but as a living system designed to learn and evolve.
-  Built on the belief that architecture and context often define outcomes before code is written.
-
-  This file reflects an AI-aware, agentic, context-driven, and continuously evolving approach
-  to modern engineering. If you seek to transform a traditional codebase into an adaptive,
-  intelligence-guided system, you may find resonance in these patterns and principles.
-
-  Subtle conversations often begin with a single message â€” or a prompt with the right context.
-  https://www.linkedin.com/in/revodoc/
-
-  Licensed under the MIT License â€” free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
 
 namespace Sharc.Core;
 
@@ -47,6 +34,11 @@ public interface IBTreeCursor : IDisposable
     /// </summary>
     /// <returns>True if a cell is available; false at end of tree.</returns>
     bool MoveNext();
+
+    /// <summary>
+    /// Resets the cursor to its initial state before the first cell.
+    /// </summary>
+    void Reset();
 
     /// <summary>
     /// Moves the cursor to the last cell in the table (highest rowid).
@@ -89,6 +81,11 @@ public interface IIndexBTreeCursor : IDisposable
     /// </summary>
     /// <returns>True if an entry is available; false at end of tree.</returns>
     bool MoveNext();
+
+    /// <summary>
+    /// Resets the cursor to its initial state before the first entry.
+    /// </summary>
+    void Reset();
 
     /// <summary>
     /// Seeks to the first index entry whose first column (integer) equals or exceeds

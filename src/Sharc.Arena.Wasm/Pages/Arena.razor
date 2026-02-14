@@ -1,6 +1,5 @@
 @page "/"
 @using System.Diagnostics
-@inject IBenchmarkEngine BenchmarkEngine
 
 <div class="arena-bg-gradient"></div>
 <div class="arena-bg-grid"></div>
@@ -15,6 +14,8 @@
         State="@_state"
         DoneCount="@_doneSlides.Count"
         ElapsedMs="@_elapsedMs"
+        IsLive="@_isLive"
+        OnLiveToggle="@(live => _isLive = live)"
         OnPresetChange="@ApplyPreset"
         OnRun="@RunAll"
         OnStop="@Stop" />
@@ -79,10 +80,14 @@
 </div>
 
 @code {
+    [Inject] private BenchmarkRunner LiveEngine { get; set; } = default!;
+    [Inject] private ReferenceEngine StaticEngine { get; set; } = default!;
+
     private IReadOnlyList<SlideDefinition> _slides = SlideData.CreateSlides();
     private string _preset = "quick";
     private BenchmarkState _state = BenchmarkState.Idle;
     private int _currentIndex = -1;
+    private bool _isLive = true;
     private HashSet<string> _doneSlides = new();
     private Dictionary<string, IReadOnlyDictionary<string, EngineBaseResult>> _results = new();
     private Dictionary<string, string> _tileDensities = new();
@@ -188,7 +193,8 @@
 
             // Run benchmark
             var scale = GetScaleForSlide(slide);
-            var data = await BenchmarkEngine.RunSlideAsync(slide, scale, token);
+            IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
+            var data = await engine.RunSlideAsync(slide, scale, token);
 
             _results[slide.Id] = data;
             _doneSlides.Add(slide.Id);

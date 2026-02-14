@@ -1,0 +1,38 @@
+name: Publish NuGet Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x # Or 10.0.x if available in GA
+
+      - name: Restore dependencies
+        run: dotnet restore Sharc.sln
+
+      - name: Build
+        run: dotnet build Sharc.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Sharc.sln --configuration Release --no-build --verbosity normal
+
+      - name: Pack Sharc
+        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist
+
+      - name: Pack Sharc.Crypto
+        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist
+
+      - name: Pack Sharc.Graph
+        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist
+
+      - name: Push to NuGet
+        run: dotnet nuget push "dist/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
