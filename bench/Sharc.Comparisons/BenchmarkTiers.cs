@@ -55,6 +55,8 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*PointLookup*",
         "*GraphSeekBenchmarks.*SingleSeek*",
         "*WriteBenchmarks.*_100Rows*",
+        "*SharQlParser*Parse_Simple*",
+        "*SharQlParser*Parse_Medium*",
     ];
 
     // ── Standard: ~38 benchmarks, ~12 min ──
@@ -72,6 +74,7 @@ internal static class BenchmarkTiers
         "*GraphScanBenchmarks*",
         "*GraphSeekBenchmarks*",
         "*WriteBenchmarks*",
+        "*SharQlParser*",
     ];
 
     // Mega/Full: null (no filter) — runs everything

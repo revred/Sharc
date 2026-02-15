@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 
-using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using Sharc.Core.Schema;
 
 namespace Sharc;
@@ -29,15 +29,28 @@ internal static class FilterTreeCompiler
     }
 
     /// <summary>
-    /// Compiles a filter expression into a JIT-optimized "Baked" evaluation node.
-    /// This is the high-performance path that eliminates virtual dispatch and redundant header parsing.
+    /// Compiles a filter expression into a JIT-optimized "Baked" evaluation node (Tier 2).
+    /// Falls back to Tier 1 interpreted evaluation when dynamic code generation is unavailable (AOT/WASM).
     /// </summary>
     internal static IFilterNode CompileBaked(IFilterStar expression, IReadOnlyList<ColumnInfo> columns,
                                              int rowidAliasOrdinal = -1)
     {
+        // AOT/WASM: dynamic code generation unavailable — fall back to Tier 1 interpreter
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+            return CompileNode(expression, columns, rowidAliasOrdinal, 0);
+
         var ordinals = GetReferencedColumns(expression, columns);
-        var compiled = FilterStarCompiler.Compile(expression, columns, rowidAliasOrdinal);
-        return new FilterNode(compiled, ordinals);
+
+        try
+        {
+            var compiled = FilterStarCompiler.Compile(expression, columns, rowidAliasOrdinal);
+            return new FilterNode(compiled, ordinals);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Safety net: fall back to Tier 1 if JIT fails at runtime
+            return CompileNode(expression, columns, rowidAliasOrdinal, 0);
+        }
     }
 
     private static IFilterNode CompileNode(IFilterStar expr, IReadOnlyList<ColumnInfo> columns,

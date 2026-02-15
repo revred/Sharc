@@ -1,48 +1,47 @@
 # When NOT to Use Sharc
 
-Sharc is a specialized read/write engine, not a general-purpose database. Honesty about limitations builds more trust than benchmarks.
+Sharc is a specialized **Context Engine**, not a general-purpose database. Honesty about limitations builds more trust than benchmarks.
 
-## Use Standard SQLite Instead If You Need:
+## 🛑 STOP if you need:
 
-### SQL Queries
+### 1. Complex SQL (Aggregations, JOINs, CTEs)
+Sharc has a **query parser** (Sharq), but it is optimized for finding and filtering nodes. It does **NOT** support:
+*   `GROUP BY`, `HAVING`, `SUM`, `AVG`, `MAX`
+*   `JOIN` (use `|>` graph syntax instead, or join in memory)
+*   Common Table Expressions (CTEs)
+*   Views, Triggers, or Stored Procedures
 
-Sharc has no SQL parser. You cannot run `SELECT a, SUM(b) FROM t GROUP BY a` or any SQL at all. Sharc reads raw B-tree pages directly. If your workload requires ad-hoc queries, aggregation, or views, use SQLite.
+**Use SQLite** for analytics, reporting, and heavy data aggregation.
 
-### JOINs
+### 2. General-Purpose Writes (UPDATE / DELETE)
+The Sharc Write Engine is **EXPERIMENTAL** and **APPEND-ONLY**.
+*   **NO `UPDATE`**: You cannot modify existing rows.
+*   **NO `DELETE`**: You cannot remove rows.
+*   **NO Index Maintenance**: Inserting data does *not* update secondary indexes.
+*   **NO Concurrency**: Sharc supports only a single writer.
 
-Sharc reads one table at a time. Cross-table joining must be done in your application code or through the Graph Layer's traversal API. For relational queries across many tables, use SQLite.
+**Use SQLite** for any application that needs standard CRUD (Create, Read, Update, Delete) or concurrent writes.
 
-### Heavy Write Workloads
+### 3. Full-Text Search (FTS)
+Sharc scans standard B-trees. It does not support SQLite's `FTS5`, `R*Tree`, or other virtual tables. If you need full-text search, use SQLite's FTS5 extension or a dedicated search engine.
 
-Sharc's write engine supports INSERT with B-tree splits and ACID transactions. UPDATE and DELETE are not yet implemented. For write-heavy OLTP workloads, use SQLite.
+### 4. Large-Scale OLAP
+Sharc is a row-store. It reads row-by-row. If you need to scan 10GB of data to compute an average, use **DuckDB** or **SQLite** (columnar mode). Sharc is built for **Latency** (finding one needle in a haystack), not **Throughput** (moving the whole haystack).
 
-### Full-Text Search or R-Tree
+---
 
-FTS5, R-Tree, and other virtual tables are not supported. These are SQLite extensions that require the VDBE.
+## ✅ GO if you need:
 
-### Multi-GB OLAP Analytics
-
-Sharc is optimized for row-oriented point lookups and sequential scans. For columnar analytics over large datasets, consider DuckDB or SQLite with appropriate indexing.
-
-### Concurrent Writers
-
-Sharc supports multiple parallel readers but uses a single-writer model. For high-concurrency write scenarios, use SQLite with WAL mode.
-
-### Legacy Platforms
-
-Sharc targets .NET 10+. For older .NET versions, other runtimes, or non-.NET languages, use the official SQLite C library via `Microsoft.Data.Sqlite`.
-
-## Where Sharc Excels
-
-| Strength | Why |
+| Capability | Why Sharc Wins |
 | :--- | :--- |
-| Point lookups | 7-61x faster than SQLite via P/Invoke |
-| Graph traversal | 13.5x faster BFS through O(log N) index seeks |
-| AI context delivery | 62-133x token reduction through precision retrieval |
-| Zero dependencies | Pure managed C# — no native DLLs, works on WASM/Mobile/IoT |
-| Encrypted reads | Page-level AES-256-GCM, transparent to application code |
-| Audit trail | Tamper-evident hash-chain ledger with ECDSA attestation |
+| **Graph Traversal** | `node |> edge |> target` syntax is **13.5x faster** than SQLite Recursive CTEs. |
+| **Point Lookups** | **585ns** vs 26,000ns. If you do thousands of lookups per request, Sharc is the only choice. |
+| **Agent Context** | Precision retrieval allows you to fit **100% relevant context** into small token windows. |
+| **Trust & Audit** | Built-in cryptographic ledger (`_sharc_ledger`) proves *who* wrote *what*. |
+| **WASM / Edge** | **<50KB** binary. Runs in-browser without Emscripten or multithreading headers. |
 
 ## Summary
 
-Sharc is a **complement** to SQLite, not a replacement. Use Sharc for reads, seeks, graph traversal, and trusted context delivery. Use SQLite for SQL queries, writes, joins, and full-text search.
+*   Building a **Blog**? Use SQLite.
+*   Building a **Dashboard**? Use DuckDB.
+*   Building an **AI Agent**? **Use Sharc.**

@@ -53,6 +53,7 @@ public sealed class SharcDatabase : IDisposable
     private readonly ISharcBufferPool _bufferPool = SharcBufferPool.Shared;
     private SharcSchema? _schema;
     private bool _disposed;
+    private global::Sharc.Query.QueryPlanCache? _queryCache;
 
     /// <summary>
     /// Gets the extension registry for this database instance.
@@ -234,6 +235,100 @@ public sealed class SharcDatabase : IDisposable
     /// <summary>Creates a reader with column projection and a FilterStar expression.</summary>
     public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter) => CreateReader(tableName, columns, null, filter);
 
+    /// <summary>
+    /// Executes a Sharq query string and returns a data reader.
+    /// Compiled plans are cached for zero-overhead repeat queries.
+    /// </summary>
+    /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT name FROM users WHERE age > 18").</param>
+    /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
+    /// <exception cref="Sharc.Query.Sharq.SharqParseException">The query string is invalid.</exception>
+    /// <exception cref="ArgumentException">Referenced table or column not found in schema.</exception>
+    public SharcDataReader Query(string sharqQuery) => QueryCore(null, sharqQuery, null);
+
+    /// <summary>
+    /// Executes a Sharq query string with parameter bindings and returns a data reader.
+    /// Compiled plans are cached; parameters are resolved at execution time.
+    /// </summary>
+    /// <param name="parameters">Named parameters to bind (e.g. { ["minAge"] = 25L }).</param>
+    /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT * FROM users WHERE age = $minAge").</param>
+    /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
+    public SharcDataReader Query(IReadOnlyDictionary<string, object>? parameters, string sharqQuery)
+        => QueryCore(parameters, sharqQuery, null);
+
+    /// <summary>
+    /// Executes a Sharq query string with agent entitlement enforcement.
+    /// The agent's <see cref="Core.Trust.AgentInfo.ReadScope"/> is validated
+    /// against the requested table and columns before execution.
+    /// </summary>
+    /// <param name="sharqQuery">A Sharq SELECT statement.</param>
+    /// <param name="agent">The agent whose read scope will be enforced.</param>
+    /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
+    /// <exception cref="UnauthorizedAccessException">The agent's scope does not permit this query.</exception>
+    public SharcDataReader Query(string sharqQuery, Core.Trust.AgentInfo agent)
+        => QueryCore(null, sharqQuery, agent);
+
+    /// <summary>
+    /// Executes a Sharq query string with parameter bindings and agent entitlement enforcement.
+    /// Compiled plans are cached; parameters are resolved at execution time.
+    /// The agent's <see cref="Core.Trust.AgentInfo.ReadScope"/> is validated
+    /// against the requested table and columns before execution.
+    /// </summary>
+    /// <param name="parameters">Named parameters to bind (e.g. { ["minAge"] = 25L }).</param>
+    /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT * FROM users WHERE age = $minAge").</param>
+    /// <param name="agent">The agent whose read scope will be enforced.</param>
+    /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
+    /// <exception cref="UnauthorizedAccessException">The agent's scope does not permit this query.</exception>
+    /// <exception cref="ArgumentException">A referenced parameter was not provided.</exception>
+    public SharcDataReader Query(
+        IReadOnlyDictionary<string, object>? parameters,
+        string sharqQuery,
+        Core.Trust.AgentInfo agent)
+        => QueryCore(parameters, sharqQuery, agent);
+
+    private SharcDataReader QueryCore(
+        IReadOnlyDictionary<string, object>? parameters,
+        string sharqQuery,
+        Core.Trust.AgentInfo? agent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
+        var plan = cache.GetOrCompilePlan(sharqQuery);
+
+        // Enforce entitlements when an agent is specified
+        if (agent is not null)
+        {
+            if (plan.IsCompound || plan.HasCtes)
+            {
+                var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
+                Trust.EntitlementEnforcer.EnforceAll(agent, tables);
+            }
+            else
+            {
+                var simpleIntent = plan.Simple!;
+                Trust.EntitlementEnforcer.Enforce(agent, simpleIntent.TableName,
+                    simpleIntent.ColumnsArray);
+            }
+        }
+
+        // Compound or CTE queries go through the compound executor
+        if (plan.IsCompound || plan.HasCtes)
+            return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
+
+        // Simple query — direct execution
+        var intent = plan.Simple!;
+
+        string[]? columns = intent.HasAggregates
+            ? global::Sharc.Query.AggregateProjection.Compute(intent)
+            : intent.ColumnsArray;
+
+        IFilterStar? filter = intent.Filter.HasValue
+            ? global::Sharc.Query.IntentToFilterBridge.Build(intent.Filter.Value, parameters)
+            : null;
+
+        var reader = CreateReader(intent.TableName, columns, null, filter);
+        return global::Sharc.Query.QueryPostProcessor.Apply(reader, intent);
+    }
 
     /// <summary>
     /// Internal overload to support pre-compiled filter nodes with projection.
