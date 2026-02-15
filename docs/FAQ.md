@@ -8,7 +8,7 @@ Sharc is a **high-performance, managed context engine** for AI agents. It reads 
 ### Why not just use SQLite?
 If you need complex SQL (JOINs, GROUP BY, CTEs) or legacy compatibility, use SQLite.
 **Use Sharc when:**
-*   **Latency matters:** You need 585ns point lookups (vs 26Âµs in SQLite).
+*   **Latency matters:** You need 585ns point lookups (vs 26µs in SQLite).
 *   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
 *   **Context matters:** You need to traverse graphs (`node |> edge`) instantly.
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
@@ -83,3 +83,4 @@ Sharc is strict. If a page checksum fails or a pointer is out of bounds, it thro
 
 ### Column index out of range?
 If you use **projections** (`db.CreateReader("table", "colA", "colB")`), the reader only sees those 2 columns as index 0 and 1. The original table schema indices are ignored for performance.
+

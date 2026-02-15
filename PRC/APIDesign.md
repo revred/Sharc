@@ -1,4 +1,4 @@
-# API Design â€” Sharc
+# API Design — Sharc
 
 ## 1. Design Principles
 
@@ -13,9 +13,9 @@ All resource-owning types implement `IDisposable`. The `using` pattern is the ex
 
 ### 1.4 Progressive Disclosure
 Simple things are simple; advanced things are possible:
-- **Simple**: `SharcDatabase.Open(path)` â€” no options needed
-- **Intermediate**: `SharcDatabase.Open(path, options)` â€” cache tuning, file sharing
-- **Advanced**: `SharcDatabase.OpenMemory(buffer, options)` â€” in-memory, encrypted
+- **Simple**: `SharcDatabase.Open(path)` — no options needed
+- **Intermediate**: `SharcDatabase.Open(path, options)` — cache tuning, file sharing
+- **Advanced**: `SharcDatabase.OpenMemory(buffer, options)` — in-memory, encrypted
 
 ## 2. Public API Surface
 
@@ -32,7 +32,7 @@ SharcDatabase.OpenMemory(ReadOnlyMemory<byte> data, SharcOpenOptions? options = 
 SharcDatabase.Create(string path)
 ```
 
-### 2.2 SharcDatabase â€” Core Object
+### 2.2 SharcDatabase — Core Object
 
 ```csharp
 public sealed class SharcDatabase : IDisposable
@@ -52,7 +52,7 @@ public sealed class SharcDatabase : IDisposable
 }
 ```
 
-### 2.3 SharcDataReader â€” Row Iterator
+### 2.3 SharcDataReader — Row Iterator
 
 ```csharp
 public sealed class SharcDataReader : IDisposable
@@ -72,7 +72,7 @@ public sealed class SharcDataReader : IDisposable
 }
 ```
 
-### 2.4 SharcWriter â€” Write Engine (Experimental)
+### 2.4 SharcWriter — Write Engine (Experimental)
 
 ```csharp
 public sealed class SharcWriter : IDisposable
@@ -91,7 +91,7 @@ public sealed class SharcWriter : IDisposable
 }
 ```
 
-### 2.5 Graph API â€” Context Traversal
+### 2.5 Graph API — Context Traversal
 
 ```csharp
 public sealed class SharcContextGraph : IDisposable
@@ -112,7 +112,7 @@ public record TraversalPolicy
 }
 ```
 
-### 2.6 Trust Layer â€” Agent Identity
+### 2.6 Trust Layer — Agent Identity
 
 ```csharp
 public record AgentInfo
@@ -148,3 +148,4 @@ Sharc follows SemVer.
 | **Graph** | `Traverse`, `GetEdges` | Stable |
 | **Trust** | `AgentInfo`, `Insert(Agent...)` | Stable |
 | **Writes** | `SharcWriter.Insert` | **Experimental** (Append-Only) |
+
