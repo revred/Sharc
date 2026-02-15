@@ -106,14 +106,10 @@ The trust layer today consists of 4 source files and 2 test files:
 ### GAP-6: Ledger Stores Hashes But Not Payloads
 
 **Severity**: 🟡 P1 — Blocks inter-agent communication  
-**Status**: 🔧 READY  
-**File**: `LedgerManager.cs:44-60`
+**Status**: ✅ FIXED
 
-**Problem**: The `Append` method computes `SHA-256(payload)` and stores the hash, but discards the actual payload bytes. Agents can verify *that* a decision was made, but cannot read *what* was decided.
+**What was done**: Implemented `TrustPayload` record which serializes to JSON. The ledger now stores the full payload blob, allowing retrieval and deserialization. `LedgerManager.Append` takes `TrustPayload` or string (wrapped as Text payload).
 
-**Impact on vision**: The entire sandbox interaction model depends on agents reading each other's decisions. Without payloads, the ledger is a proof of existence, not a communication medium.
-
-**Fix path**: Add a 7th column to the ledger schema: `payload BLOB`. Store the UTF-8 encoded payload alongside the hash. The hash remains for integrity verification; the payload enables reading.
 
 **Schema change**:
 ```
@@ -128,17 +124,10 @@ Proposed: seq | timestamp | agent_id | payload_hash | prev_hash | signature | pa
 ### GAP-7: No Authority Ceiling Enforcement
 
 **Severity**: 🟡 P1 — Required for game theory  
-**Status**: 📋 DESIGN
+**Status**: ✅ FIXED
 
-**Problem**: The `AgentRegistry` stores agents with `ValidityStart` and `ValidityEnd` but has no concept of authority ceiling, write scope, or spending limits. The game theory document defines these as foundational, but they don't exist in code.
+**What was done**: `AgentInfo` now includes `AuthorityCeiling`, `WriteScope`, `ReadScope`, and `CoSignRequired`. `LedgerManager.Append` enforces these limits before accepting a payload.
 
-**Impact on vision**: Without authority enforcement, any registered agent can write to any table and approve any amount. The entire anti-overreach mechanism is theoretical.
-
-**Fix path**:
-1. Extend `AgentInfo` record to include `AuthorityCeiling`, `WriteScope`, `ReadScope`, `CoSignRequired`
-2. Extend the `_sharc_agents` table schema to include these columns
-3. Add enforcement checks in `LedgerManager.Append` — validate the signer's authority before accepting the entry
-4. Add enforcement checks in `ImportDeltas` — validate imported entries against the local agent registry
 
 **Schema extension**:
 ```csharp
@@ -163,17 +152,10 @@ public record AgentInfo(
 ### GAP-8: No Evidence-Linking
 
 **Severity**: 🟡 P1 — Required for anti-hallucination  
-**Status**: 📋 DESIGN
+**Status**: ✅ FIXED
 
-**Problem**: The vision requires every decision to reference evidence rows in domain tables. Currently, `Append` takes a free-text `contextPayload` with no structure or validation.
+**What was done**: `TrustPayload` includes `List<EvidenceRef> Evidence`. Each evidence reference contains Table, RowId, and RowHash. `LedgerManager` verifies evidence exists if required (though full row-hash verification at append time is an optional check).
 
-**Impact on vision**: Without evidence-linking, agents can make arbitrary claims. The anti-hallucination mechanism in the game theory document is purely aspirational.
-
-**Fix path**:
-1. Define an `EvidenceReference` type: `(tableName: string, rowId: long)`
-2. Modify `Append` to accept `IReadOnlyList<EvidenceReference>` in addition to the payload
-3. Validate that each referenced row actually exists in the sandbox at append time
-4. Serialize evidence references into the payload or as a separate column
 
 **Append signature change**:
 ```csharp
@@ -209,11 +191,10 @@ public void Append(
 ### GAP-10: No Agent Class Distinction
 
 **Severity**: 🟠 P2 — Required for taxonomy support  
-**Status**: 📋 DESIGN
+**Status**: ✅ FIXED
 
-**Problem**: The agent taxonomy defines five classes (human, AI, machine, third-party, composite). The `AgentInfo` record has no `AgentClass` field. All agents are treated identically.
+**What was done**: `AgentInfo` now includes an `AgentClass` enum (Human, AI, Machine, etc.). This is stored in the registry and signed as part of the agent identity.
 
-**Impact on vision**: Without class distinction, the system can't apply class-specific policies (e.g., machine agents write to ingestion tables only, composite agents require dual signatures).
 
 **Fix path**: Add `AgentClass` enum and field to `AgentInfo`. Add class-specific validation rules in `LedgerManager.Append` and `ImportDeltas`.
 
@@ -224,9 +205,11 @@ public void Append(
 ### GAP-11: No Cross-Verification Enforcement
 
 **Severity**: 🟠 P2 — Required for anti-collusion  
-**Status**: 📋 DESIGN
+**Status**: ⚠️ PARTIAL
 
-**Problem**: The game theory document defines verification pairs (CFO decisions verified by COO, etc.). No mechanism exists to enforce this.
+**What was done**: `TrustPayload` includes `List<CoSignature> CoSignatures`. `LedgerManager.Append` verifies that if `AgentInfo.CoSignRequired` is true, the payload must contain valid co-signatures from other registered agents.
+**Remaining**: The dynamic policy engine ("CFO needs COO") is not yet implemented; rudimentary co-signing is.
+
 
 **Fix path**:
 1. Create a `_sharc_rules` system table storing verification pair definitions

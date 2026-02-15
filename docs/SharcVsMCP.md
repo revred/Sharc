@@ -10,13 +10,14 @@ This document provides a strategic comparison between the **Model Context Protoc
 
 While MCP is a valuable standard for connecting LLMs to external tools, it operates as a **transport protocol**. Sharc operates as a **Context Engine**.
 
-| Feature | Model Context Protocol (MCP) | Sharc Agent Trust Layer |
+| Feature | Model Context Protocol (MCP) | Sharc Context Engine |
 | :--- | :--- | :--- |
 | **Philosophy** | "Bridge to Silos" | "Foundation for Context" |
 | **Format** | Textual (JSON-RPC 2.0) | Binary (RecordEncoded B-trees) |
+| **Structure** | Unstructured JSON blobs | **Typed Graph + Relational Tables** |
 | **Latency** | High (Serialization overhead) | Ultra-Low (Direct memory access) |
 | **Persistence** | Ephemeral/Session-based | Permanent/ACID-compliant |
-| **Trust Source** | Connection (OAuth/Stdio) | Cryptographic (Ledger/Lineage) |
+| **Trust Source** | Connection (OAuth/Stdio) | **Cryptographic (Ledger/Registry)** |
 
 ---
 
@@ -48,6 +49,9 @@ Every row in Sharc can be bound to an agent's identity via **ECDsa P-256 signatu
 
 ### D. ACID Reliability
 Context in Sharc is durable. Using **Rollback Journals** and **Shadow Paging**, Sharc ensures that trust data is never in a corrupted state, even during system crashes or network interruptions. Sharc guarantees that the "Global Context" remains consistent and auditable at all times.
+
+### E. The Graph Advantage (Structured Context)
+MCP resources are typically flat files or JSON blobs. Sharc includes a native **Graph Engine** (`Sharc.Graph`) that allows agents to traverse relationships (e.g., `Paper -> cites -> Paper`) with O(log N) efficiency. This means an agent can request "all papers cited by X within 2 hops" without retrieving the entire dataset, a capability that raw MCP lacks.
 
 ---
 
@@ -85,9 +89,16 @@ While the vision for Sharc is compelling, a rigorous critique reveals significan
 - **The "Distributed" Illusion**: The document claims a "Distributed Ledger," but the current implementation is **Local-First**. Synchronizing B-trees across GitHub (as mentioned in the Oncology case study) is prone to binary merge conflicts. True distribution requires a consensus or merging layer (CRDT or similar) which is absent from the core engine.
 
 ### B. Implementation Gaps: Code Realities
-- **The Bootstrap Problem**: `VerifyIntegrity` requires a dictionary of `activeSigners` (Public Keys). In a true trust layer, these keys cannot be passed as an optional method argument; they must be managed by a secure, decentralized **Agent Registry**. Until C3 (Trust Scoring) and a registry are implemented, the ledger is "tamper-evident" but not yet "self-sovereign."
-- **Conceptual Grandstanding (C4)**: The document touts **Row-Level Entitlement (RLE)** as a core differentiator. However, at the code level, C4 is still an empty placeholder in the task list. The claim that Sharc provides granular security for context is currently a "future feature," not a tangible reality.
+- **Discovery vs. Delivery**: MCP provides a standardized way for agents to *discover* tools (ListTools). Sharc provides the *data delivery* (Ledger/B-tree). Currently, Sharc lacks a standardized way for a new agent to arrive at a database and "know" what context domains are available without out-of-band schema documentation.
 - **Contention and Locking**: Direct B-tree appends are fast, but they assume low concurrency. In a multi-agent CLI environment (Gemini, Claude, and Codex interacting simultaneously), the single-writer lock of the B-tree becomes a bottleneck that MCP’s server-based abstractions can more easily mitigate via queueing.
+
+### C. The Synthesis: Sharc *via* MCP
+The winning architecture is likely **Sharc-backed MCP Servers**.
+1.  **MCP as the Pipe**: Provides the standard discovery and transport protocol that all LLMs speak.
+2.  **Sharc as the State**: Before the MCP server sends context, it queries the local Sharc database. This gives the "Pipe" a "Brain"—persistent, verifiable, and graph-structured memory.
+
+> **Correction**: Previous versions of this document listed the Agent Registry and Authority Ceilings as missing. As of Feb 2026, `_sharc_agents` and `AuthorityCeiling` are fully implemented and verified.
+
 
 ### C. Final Verdict
 Sharc is currently a **superior data-integrity engine**, but it is not yet a **protocol replacement**. To bridge this gap, Sharc must move beyond "efficient reading" and solve the hard problems of decentralized key management and multi-master synchronization.

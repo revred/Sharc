@@ -74,15 +74,18 @@ internal sealed class TopNHeap
 
     /// <summary>
     /// Extracts all rows sorted in the desired order (ascending by the original comparison).
+    /// Returns a flat array — no intermediate List, no Reverse.
     /// </summary>
-    internal List<QueryValue[]> ExtractSorted()
+    internal QueryValue[][] ExtractSorted()
     {
-        var result = new List<QueryValue[]>(_count);
-        // Heap-sort: repeatedly extract the root (worst remaining) to get sorted order
+        var result = new QueryValue[_count][];
+        // Heap-sort: repeatedly extract the root (worst remaining).
+        // Write directly into reversed position to produce best-first order.
         int remaining = _count;
+        int writeIndex = remaining - 1;
         while (remaining > 0)
         {
-            result.Add(_heap[0]);
+            result[writeIndex--] = _heap[0];
             remaining--;
             if (remaining > 0)
             {
@@ -91,8 +94,6 @@ internal sealed class TopNHeap
                 SiftDownRange(0, remaining);
             }
         }
-        // Result is in worst-first order — reverse for best-first (desired sort order)
-        result.Reverse();
         return result;
     }
 

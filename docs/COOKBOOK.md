@@ -238,4 +238,79 @@ Console.WriteLine(valid ? "Chain intact" : "Chain compromised!");
 
 ---
 
+### 16. Enforcing Authority Limits
+
+Demonstrates how the trust layer rejects transactions that exceed an agent's authority.
+
+```csharp
+// Agent has a ceiling of 10,000 units
+var limitedAgent = new AgentInfo(..., AuthorityCeiling: 10000, ...);
+registry.RegisterAgent(limitedAgent);
+
+// Try to append a high-value transaction
+var bigSpend = new TrustPayload(
+    PayloadType.Financial, 
+    "Transfer 50,000", 
+    EconomicValue: 50000
+);
+
+try 
+{
+    ledger.Append(bigSpend, signer);
+}
+catch (InvalidOperationException ex)
+{
+    Console.WriteLine($"Blocked: {ex.Message}"); // "Authority ceiling exceeded."
+}
+```
+
+### 17. Evidence Linking (Anti-Hallucination)
+
+Link a decision to specific rows in the database to provide an audit trail.
+
+```csharp
+var evidence = new List<EvidenceRef>
+{
+    new EvidenceRef("lab_results", 1042, HashRow("lab_results", 1042))
+};
+
+var diagnosis = new TrustPayload(
+    PayloadType.Approval,
+    "Patient diagnosis: Positive",
+    Evidence: evidence
+);
+
+ledger.Append(diagnosis, signer);
+```
+
+### 18. Co-Signatures (Multi-Party Approval)
+
+Require a second agent to sign a payload before it is accepted.
+
+```csharp
+// 1. Primary agent creates payload and signs base
+var proposal = new TrustPayload(PayloadType.Approval, "Deploy to Prod");
+byte[] baseHash = SharcHash.Compute(proposal.ToBytes());
+
+// 2. Secondary agent (approver) signs the base hash
+var approverSigner = new SharcSigner("admin-01");
+long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+byte[] toSign = [..baseHash, ..BitConverter.GetBytes(BinaryPrimitives.ReverseEndianness(timestamp))];
+byte[] signature = approverSigner.Sign(toSign);
+
+// 3. Attach co-signature
+proposal = proposal with 
+{ 
+    CoSignatures = new List<CoSignature> 
+    { 
+        new CoSignature("admin-01", timestamp, signature) 
+    } 
+};
+
+// 4. Submit to ledger
+ledger.Append(proposal, primarySigner);
+```
+
+---
+
 [Getting Started](GETTING_STARTED.md) | [Benchmarks](BENCHMARKS.md) | [Architecture](ARCHITECTURE.md)

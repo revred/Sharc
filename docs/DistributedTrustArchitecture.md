@@ -30,8 +30,21 @@ To move beyond manual key passing, Sharc implements a native **Agent Registry** 
 
 ### A. The `_sharc_agents` System Table
 A reserved table that acts as a local Public Key Infrastructure (PKI).
-- **Schema**: `(AgentId TEXT PRIMARY KEY, PublicKey BLOB, ValidityStart INTEGER, ValidityEnd INTEGER, Signature BLOB)`
-- **Self-Attestation**: Agents self-register by signing their own registration entry.
+- **Schema**:
+  ```sql
+  (AgentId TEXT PRIMARY KEY,
+   Class INTEGER,           -- Root=1, Intermediate=2, User=3
+   PublicKey BLOB,          -- ECDsa P-256 SubjectPublicKeyInfo
+   AuthorityCeiling INTEGER,-- Max economic value per transaction
+   WriteScope TEXT,         -- Comma-separated tables or "*"
+   ReadScope TEXT,          -- Comma-separated tables or "*"
+   ValidityStart INTEGER,   -- Unix timestamp
+   ValidityEnd INTEGER,     -- Unix timestamp
+   ParentAgent TEXT,        -- Issuer Agent ID (for chain of trust)
+   CoSignRequired INTEGER,  -- 1=True, 0=False
+   Signature BLOB)          -- Self-signature or Issuer-signature
+  ```
+- **Self-Attestation**: Root agents self-register. User agents are signed by an Issuer.
 - **Root of Trust**: The first entry can be anchored to an external source (e.g., a GitHub commit signature or a DID document).
 
 ### B. DID Integration
@@ -52,6 +65,20 @@ Sharc avoids merging binary B-tree pages by synchronizing at the **Operation Lev
 
 ### A. The Ledger as a Causal Stream
 Each entry in `_sharc_ledger` is a deterministic state change.
+- **Schema**:
+  | Column | Type | Description |
+  |--------|------|-------------|
+  | `SequenceNumber` | INTEGER (PK) | Monotonically increasing index starting at 1. |
+  | `Timestamp` | INTEGER | Unix epoch (milliseconds) of the entry creation. |
+  | `AgentId` | TEXT | Unique identifier of the agent providing the context. |
+  | `PayloadHash` | BLOB (32 bytes)| SHA-256 hash of the context payload. |
+  | `PreviousHash` | BLOB (32 bytes)| `PayloadHash` of the entry with `SequenceNumber - 1`. |
+  | `Signature` | BLOB | ECDsa signature of `(PrevHash + PayloadHash + Seq)`. |
+- **Trust Payload**: The `Payload` column stores a structured JSON object (`TrustPayload`):
+  - **Type**: Text, Financial, Approval, System
+  - **Content**: The actual data or command
+  - **Evidence**: List of `(Table, RowId, RowHash)` references
+  - **CoSignatures**: List of `(SignerId, Timestamp, Signature)` for multi-party approval
 - **Forks**: Duplicate `SequenceNumber` with different `PayloadHash` = fork detected.
 - **Resolution**: **Deterministic Fork Resolution (DFR)** — lower lexicographical SHA-256 hash wins. The losing branch is preserved in `_sharc_forks` for reconciliation.
 
@@ -176,7 +203,7 @@ The core primitives of CSE are:
 | C3 | Agent Registry (`_sharc_agents`) | ✅ Complete |
 | C5 | Cryptographic Attribution (ECDsa P-256) | ✅ Complete |
 | C6 | Delta Replication (Export/Import) | ✅ Complete |
-| C7 | Multi-Bot Trust Simulation | 🔄 In Progress |
+| C7 | Multi-Bot Trust Simulation | ✅ Complete |
 | C4 | Row-Level Entitlement (RLE) | ⬜ Planned |
 | D1 | Native CRDT merge support | ⬜ Planned |
 | D2 | Cross-language SDK (Python, TypeScript) | ⬜ Planned |
