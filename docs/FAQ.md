@@ -6,11 +6,13 @@
 Sharc is a **high-performance, managed context engine** for AI agents. It reads and writes the standard SQLite file format (Format 3) but bypasses the SQLite library entirely to achieve **2-75x faster read performance**. It is built in pure C# with no native dependencies.
 
 ### Why not just use SQLite?
-If you need complex SQL (JOINs, GROUP BY, CTEs) or legacy compatibility, use SQLite.
+If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now supports `GROUP BY`, CTEs, and compound queries (`UNION`/`INTERSECT`/`EXCEPT`) via the Query API.
+
 **Use Sharc when:**
-*   **Latency matters:** You need 585ns point lookups (vs 26µs in SQLite).
+
+*   **Latency matters:** You need sub-microsecond point lookups (392ns vs 24,011ns in SQLite).
 *   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
-*   **Context matters:** You need to traverse graphs (`node |> edge`) instantly.
+*   **Context matters:** You need to traverse graphs at 13.5x the speed of SQLite recursive CTEs.
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
@@ -38,16 +40,21 @@ Use the Write Engine *only* for:
 *   See [Deep Dive: Parsing](DeepDive_Parsing.md) for the architecture.
 
 ### What is "Arrow Syntax" (`|>`)?
+
+> **Parsed but not yet executable.** Arrow syntax is recognized by the Sharq parser but graph traversal execution via SQL is planned for a future release. Use the Graph API directly (`SharcContextGraph`) for graph traversal today.
+
 Sharq extends SQL with graph traversal operators.
 Instead of complicated `JOIN` syntax, you can write:
 ```sql
 SELECT id |> friend |> name FROM users
 ```
-This compiles to a direct B-tree graph scan, which is ~13.5x faster than a recursive CTE in SQLite.
+The Graph API already achieves ~13.5x faster traversal than SQLite recursive CTEs.
 See [Sharq Reference](ParsingTsql.md).
 
 ### Can I just use regular SQL?
-Yes! Sharq supports standard `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `LIMIT`, and `OFFSET`. You only need to learn the new syntax if you want to use the Graph Engine features.
+Yes! Sharq supports `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, CTEs (`WITH ... AS`), and parameterized queries (`$param`). You only need the arrow syntax for Graph Engine features.
+
+> **Note:** `CASE` expressions and window functions (`OVER`, `PARTITION BY`) are parsed but not yet executable. `JOIN` is not supported â€” use `UNION`/CTE for multi-table workflows.
 
 ---
 
