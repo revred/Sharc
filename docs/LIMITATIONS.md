@@ -12,19 +12,29 @@ This document summarizes what is **missing**, **experimental**, or **intentional
     *   ? **No Concurrency**: No WAL locking. Single thread/process only.
 
 ## 2. Querying Capabilities
-*   **Status**: `Sharq` parser + `JIT` filter.
+*   **Status**: `Sharq` parser + `JIT` filter + streaming query pipeline.
+*   **Supported (via Query API)**:
+    *   `SELECT`, `WHERE`, `ORDER BY`, `LIMIT`, `OFFSET`
+    *   `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
+    *   `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`
+    *   Common Table Expressions (`WITH ... AS`)
+    *   Parameterized queries (`$param`)
 *   **Missing Features**:
-    *   ? **No Aggregations**: `SUM`, `AVG`, `COUNT`, `GROUP BY`, `HAVING`.
-    *   ? **No SQL Joins**: Standard `JOIN` syntax is not supported. Use arrow syntax `|>` for graph traversal or join in memory.
-    *   ? **No CTEs**: Recursive Common Table Expressions are replaced by native graph traversal.
-    *   ? **No Virtual Tables**: `FTS5`, `R*Tree`, `json_each` are not supported.
+    *   **No SQL JOINs**: Standard `JOIN` syntax is not supported. Use `UNION`/CTE for multi-table workflows or the Graph API for relationship traversal.
+    *   **No Virtual Tables**: `FTS5`, `R*Tree`, `json_each` are not supported.
+    *   **No CASE execution**: `CASE` expressions are parsed but not yet executable.
+    *   **No Window Functions**: `OVER`, `PARTITION BY` are parsed but not yet executable.
+*   **Performance Notes**:
+    *   Aggregations are streaming (O(groups) memory).
+    *   CTEs materialize the CTE result before re-scanning.
+    *   `UNION`/`INTERSECT`/`EXCEPT` materialize both sides into managed arrays (1.5-1.8 MB for 2.5K rows). SQLite does set ops in native C at near-zero managed allocation.
 
 ## 3. Workload Suitability (OLAP vs OLTP)
 *   **Status**: Optimized for Context Engineering (Latency).
 *   **Hard Stops**:
     *   ?? **Analytics (OLAP)**: Sharc is a row-store. Scanning 1M rows to compute an average is slow compared to DuckDB.
     *   ?? **Heavy Write OLTP**: Lack of MVCC and locking means Sharc cannot handle high-throughput concurrent writes.
-    *   ?? **Complex Reporting**: Lack of `GROUP BY` and window functions makes Sharc unsuitable for report generation.
+    *   ?? **Complex Reporting**: `GROUP BY` and aggregations are now supported but window functions are not yet executable. For heavy reporting, use SQLite or DuckDB.
 
 ## 4. Platform
 *   **Status**: .NET 10+ Managed Only.

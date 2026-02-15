@@ -538,4 +538,73 @@ public class IntentCompilerTests
         Assert.Equal("b", plan.Ctes[1].Name);
         Assert.Equal("t2", plan.Ctes[1].Query.TableName);
     }
+
+    // ─── Negative path tests (P0 Item 20) ───────────────────────
+
+    [Fact]
+    public void Compile_UnsupportedAggregateFunction_ThrowsNotSupported()
+    {
+        Assert.Throws<NotSupportedException>(() =>
+            Compile("SELECT MEDIAN(age) FROM users"));
+    }
+
+    [Fact]
+    public void Compile_LikeWithNonStringPattern_ThrowsNotSupported()
+    {
+        Assert.Throws<NotSupportedException>(() =>
+            Compile("SELECT * FROM users WHERE name LIKE 42"));
+    }
+
+    [Fact]
+    public void Compile_InWithNonLiteralValues_ThrowsNotSupported()
+    {
+        // IN list with only a parameter — not supported
+        Assert.Throws<NotSupportedException>(() =>
+            Compile("SELECT * FROM users WHERE age IN ($param)"));
+    }
+
+    [Fact]
+    public void Compile_OrderByColumnName_PopulatesOrderBy()
+    {
+        var intent = Compile("SELECT * FROM users ORDER BY name ASC");
+        Assert.NotNull(intent.OrderBy);
+        Assert.Single(intent.OrderBy!);
+        Assert.Equal("name", intent.OrderBy![0].ColumnName);
+        Assert.False(intent.OrderBy[0].Descending);
+    }
+
+    [Fact]
+    public void Compile_OrderByDescending_SetsFlag()
+    {
+        var intent = Compile("SELECT * FROM users ORDER BY age DESC");
+        Assert.NotNull(intent.OrderBy);
+        Assert.True(intent.OrderBy![0].Descending);
+    }
+
+    [Fact]
+    public void Compile_LimitAndOffset_BothPopulated()
+    {
+        var intent = Compile("SELECT * FROM users LIMIT 10 OFFSET 20");
+        Assert.Equal(10L, intent.Limit);
+        Assert.Equal(20L, intent.Offset);
+    }
+
+    [Fact]
+    public void Compile_GroupByWithoutAggregate_PopulatesGroupBy()
+    {
+        var intent = Compile("SELECT dept FROM employees GROUP BY dept");
+        Assert.NotNull(intent.GroupBy);
+        Assert.Single(intent.GroupBy!);
+        Assert.Equal("dept", intent.GroupBy![0]);
+    }
+
+    [Fact]
+    public void CompilePlan_CompoundWithFinalOrderByAndLimit_Hoisted()
+    {
+        var plan = CompilePlan(
+            "SELECT * FROM t1 UNION ALL SELECT * FROM t2 ORDER BY id LIMIT 5");
+        Assert.True(plan.IsCompound);
+        Assert.NotNull(plan.Compound!.FinalOrderBy);
+        Assert.Equal(5L, plan.Compound.FinalLimit);
+    }
 }

@@ -192,4 +192,93 @@ public class SharqEdgeCaseTests
         Assert.Throws<SharqParseException>(
             () => SharqParser.ParseExpression("CAST(x AS INTEGER"));
     }
+
+    // ─── Additional negative path tests (P0 Item 19) ─────────────
+
+    [Fact]
+    public void Parse_SelectWithoutColumns_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT FROM users"));
+    }
+
+    [Fact]
+    public void Parse_WhereWithoutPredicate_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT * FROM users WHERE"));
+    }
+
+    [Fact]
+    public void Parse_OrderByWithoutColumn_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT * FROM users ORDER BY"));
+    }
+
+    [Fact]
+    public void Parse_GroupByWithoutColumn_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT * FROM users GROUP BY"));
+    }
+
+    [Fact]
+    public void Parse_BetweenMissingAnd_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.ParseExpression("x BETWEEN 1 2"));
+    }
+
+    [Fact]
+    public void Parse_InWithoutCloseParen_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.ParseExpression("x IN (1, 2, 3"));
+    }
+
+    [Fact]
+    public void Parse_LimitWithoutNumber_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT * FROM users LIMIT"));
+    }
+
+    [Fact]
+    public void Parse_NestedParensDeep_HandledWithoutStackOverflow()
+    {
+        // 50 levels of nested parentheses — should parse cleanly (not stack overflow)
+        var nested = new string('(', 50) + "1" + new string(')', 50);
+        var expr = SharqParser.ParseExpression(nested);
+        Assert.IsType<LiteralStar>(expr);
+    }
+
+    [Fact]
+    public void Parse_OnlyWhitespace_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("   \t\n  "));
+    }
+
+    [Fact]
+    public void Parse_JustKeyword_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("FROM"));
+    }
+
+    [Fact]
+    public void Parse_DoubleCommaInSelect_Throws()
+    {
+        Assert.Throws<SharqParseException>(
+            () => SharqParser.Parse("SELECT a,, b FROM t"));
+    }
+
+    [Fact]
+    public void Parse_HavingWithoutGroupBy_Accepted()
+    {
+        // SQL allows HAVING without GROUP BY (applies to whole result as one group)
+        var stmt = SharqParser.Parse("SELECT COUNT(*) FROM users HAVING COUNT(*) > 0");
+        Assert.NotNull(stmt.Having);
+    }
 }
