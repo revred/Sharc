@@ -9,8 +9,13 @@ Console.WriteLine("Sharc Trust Layer - Advanced Capabilities Demo");
 Console.WriteLine("--------------------------------------------");
 
 // 1. Setup Database
-if (File.Exists("trust_complex.db")) File.Delete("trust_complex.db");
-using var db = SharcDatabase.Create("trust_complex.db");
+// 1. Setup Database
+string artifactsPath = Path.Combine(AppContext.BaseDirectory, "../../../../../artifacts/data");
+if (!Directory.Exists(artifactsPath)) Directory.CreateDirectory(artifactsPath);
+string dbPath = Path.Combine(artifactsPath, "trust_complex.db");
+
+if (File.Exists(dbPath)) File.Delete(dbPath);
+using var db = SharcDatabase.Create(dbPath);
 
 var registry = new AgentRegistry(db);
 var ledger = new LedgerManager(db);
