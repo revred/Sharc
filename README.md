@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-1%2C593_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-1%2C646_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -89,31 +89,34 @@ using var cte = db.Query(
 
 | Category | Operation | Sharc | SQLite | Speedup |
 | :--- | :--- | ---: | ---: | ---: |
-| **Simple** | `SELECT * FROM t` (2.5K rows) | **461 us** | 603 us | **1.3x** |
-| **Filtered** | `SELECT WHERE age > 30` | 1,122 us | 850 us | 0.8x |
-| **Medium** | `WHERE + ORDER BY + LIMIT 100` | 2,054 us | 277 us | 0.1x |
-| **Aggregate** | `GROUP BY + COUNT + AVG` | 913 us | 477 us | 0.5x |
-| **Compound** | `UNION ALL` (2x2.5K rows) | **930 us** | 2,419 us | **2.6x** |
-| | `UNION` (deduplicated) | 2,384 us | 1,925 us | 0.8x |
-| | `INTERSECT` | 1,606 us | 1,374 us | 0.9x |
-| | `EXCEPT` | 1,544 us | 1,074 us | 0.7x |
-| | `UNION ALL + ORDER BY + LIMIT` | 1,786 us | 428 us | 0.2x |
-| | `3-way UNION ALL` | **1,096 us** | 1,313 us | **1.2x** |
-| **CTE** | `WITH ... AS SELECT WHERE` | 1,268 us | 367 us | 0.3x |
-| | `CTE + UNION ALL` | 1,365 us | 697 us | 0.5x |
-| **Parameterized** | `WHERE $param AND $param` | 1,679 us | 605 us | 0.4x |
+| **Simple** | `SELECT * FROM t` (2.5K rows) | **713 us** | 747 us | **1.05x** |
+| **Filtered** | `SELECT WHERE age > 30` | 1,682 us | 1,012 us | 0.6x |
+| **Medium** | `WHERE + ORDER BY + LIMIT 100` | 3,298 us | 326 us | 0.1x |
+| **Aggregate** | `GROUP BY + COUNT + AVG` | 602 us | 558 us | 0.9x |
+| **Compound** | `UNION ALL` (2x2.5K rows) | **710 us** | 2,926 us | **4.1x** |
+| | `UNION` (deduplicated) | 8,562 us | 2,170 us | 0.2x |
+| | `INTERSECT` | 2,561 us | 1,442 us | 0.6x |
+| | `EXCEPT` | 2,872 us | 1,212 us | 0.4x |
+| | `UNION ALL + ORDER BY + LIMIT` | **465 us** | 482 us | **1.04x** |
+| | `3-way UNION ALL` | 2,070 us | 1,481 us | 0.7x |
+| **CTE** | `WITH ... AS SELECT WHERE` | 2,154 us | 437 us | 0.2x |
+| | `CTE + UNION ALL` | 3,013 us | 791 us | 0.3x |
+| **Parameterized** | `WHERE $param AND $param` | 2,615 us | 780 us | 0.3x |
 
 **Memory per query** (managed heap):
 
 | Query Type | Sharc | SQLite | Notes |
 | :--- | ---: | ---: | :--- |
 | `SELECT *` (2.5K rows) | 414 KB | 688 B | Sharc materializes all column values |
-| `WHERE` filter | 105 KB | 96 KB | Near parity — both allocate result strings |
-| `UNION ALL` | 1,323 KB | 404 KB | Both sides materialized in managed arrays |
-| `UNION` / `INTERSECT` / `EXCEPT` | 1.3–1.6 MB | 744 B | SQLite does set ops in native C |
-| `CTE` | 282 KB | 31 KB | CTE rows materialized then re-scanned |
+| `WHERE` filter | 104 KB | 96 KB | Near parity — both allocate result strings |
+| `WHERE + ORDER BY + LIMIT` | 54 KB | 5.5 KB | Streaming TopN heap avoids full materialization |
+| `UNION ALL` | 405 KB | 405 KB | Both sides materialized in managed arrays |
+| `UNION` / `INTERSECT` / `EXCEPT` | 1.5–1.8 MB | 744 B | SQLite does set ops in native C |
+| `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3 KB | Streaming concat → TopN, no full materialization |
+| `GROUP BY + COUNT + AVG` | 169 KB | 920 B | Streaming hash aggregator, O(G) memory |
+| `CTE` | 281 KB | 31 KB | CTE rows materialized then re-scanned |
 
-> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) wins on raw scans and UNION ALL where in-process materialization avoids interop overhead, but trails on ORDER BY + LIMIT and set deduplication where SQLite's native query optimizer excels. Memory allocation in compound queries is the primary optimization target.
+> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) wins on raw scans and UNION ALL where in-process materialization avoids interop overhead. Streaming optimizations (TopN heap, streaming aggregator) keep memory low for ORDER BY + LIMIT and GROUP BY queries. SQLite's native C query optimizer still excels on complex filtered + sorted queries and set deduplication.
 
 [**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc/)
 
@@ -145,13 +148,13 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 1,593 tests
+dotnet test                                             # Run all 1,646 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
 ## Current Limitations
 
-- **Query pipeline materializes results** -- compound queries (UNION/INTERSECT/EXCEPT) and CTEs allocate managed arrays; no streaming top-N optimization yet
+- **Query pipeline materializes results** -- compound queries (UNION/INTERSECT/EXCEPT) and CTEs allocate managed arrays. Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
 - **Write support** -- INSERT with B-tree splits. UPDATE/DELETE planned
 - **No JOIN support** -- single-table queries only; use UNION/CTE for multi-table workflows
 - **No virtual tables** -- FTS5, R-Tree not supported
