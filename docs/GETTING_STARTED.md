@@ -107,6 +107,55 @@ byte[] dbBytes = await File.ReadAllBytesAsync("mydata.db");
 using var db = SharcDatabase.OpenMemory(dbBytes);
 ```
 
+## Pattern 7: Trust Layer (Agents & Ledger)
+
+Sharc includes a cryptographic ledger for provenance and multi-agent coordination.
+
+```csharp
+// 1. Create a database with system tables
+using var db = SharcDatabase.Create("trusted.db");
+var registry = new AgentRegistry(db);
+var ledger = new LedgerManager(db);
+
+// 2. Register an Agent Identity
+var signer = new SharcSigner("agent-007");
+var agentInfo = new AgentInfo(
+    AgentId: "agent-007",
+    Class: AgentClass.User,
+    PublicKey: signer.GetPublicKey(),
+    // ... validation rules ...
+    Signature: signer.Sign(...) 
+);
+registry.RegisterAgent(agentInfo);
+
+// 3. Append to the Immutable Ledger
+var payload = new TrustPayload(PayloadType.Text, "Mission Complete");
+ledger.Append(payload, signer);
+```
+
+## Pattern 8: Graph Traversal
+
+Traverse relationships with the `Sharc.Graph` extension.
+
+```csharp
+using Sharc.Graph;
+
+// Initialize graph engine
+var graph = new SharcContextGraph(db);
+
+// Traverse: Find all "papers" cited by "paper:123" (1 hop)
+var citedPapers = graph.Traverse(
+    startNode: "papers:123",
+    edgeLabel: "cites",
+    direction: ArrowDirection.Forward
+);
+
+foreach (var node in citedPapers)
+{
+    Console.WriteLine($"Cited: {node.Id}");
+}
+```
+
 ## Next Steps
 
 - [Cookbook](COOKBOOK.md) — 15 recipes for common patterns
