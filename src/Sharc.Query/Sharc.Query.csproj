@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Sharc.Query</RootNamespace>
+    <AssemblyName>Sharc.Query</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sharc" />
+    <InternalsVisibleTo Include="Sharc.Tests" />
+    <InternalsVisibleTo Include="Sharc.Query.Tests" />
+    <InternalsVisibleTo Include="Sharc.Comparisons" />
+  </ItemGroup>
+</Project>

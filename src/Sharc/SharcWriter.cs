@@ -1,6 +1,7 @@
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Records;
+using Sharc.Core.Trust;
 
 namespace Sharc;
 
@@ -58,12 +59,46 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Inserts a single record with agent write-scope enforcement. Auto-commits.
+    /// Throws <see cref="UnauthorizedAccessException"/> if the agent's WriteScope denies access.
+    /// </summary>
+    public long Insert(AgentInfo agent, string tableName, params ColumnValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+
+        using var tx = _db.BeginTransaction();
+        long rowId = InsertCore(tx, tableName, values);
+        tx.Commit();
+        return rowId;
+    }
+
+    /// <summary>
     /// Inserts multiple records in a single transaction.
     /// Returns the assigned rowids.
     /// </summary>
     public long[] InsertBatch(string tableName, IEnumerable<ColumnValue[]> records)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var rowIds = new List<long>();
+        using var tx = _db.BeginTransaction();
+        foreach (var values in records)
+        {
+            rowIds.Add(InsertCore(tx, tableName, values));
+        }
+        tx.Commit();
+        return rowIds.ToArray();
+    }
+
+    /// <summary>
+    /// Inserts multiple records with agent write-scope enforcement.
+    /// Throws <see cref="UnauthorizedAccessException"/> if the agent's WriteScope denies access.
+    /// </summary>
+    public long[] InsertBatch(AgentInfo agent, string tableName, IEnumerable<ColumnValue[]> records)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
         var rowIds = new List<long>();
         using var tx = _db.BeginTransaction();

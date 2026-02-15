@@ -3,65 +3,83 @@
 ## General
 
 ### What is Sharc?
-
-Sharc is a high-performance, managed reader and writer for the SQLite database file format (Format 3). It is built in pure C# with no native dependencies.
+Sharc is a **high-performance, managed context engine** for AI agents. It reads and writes the standard SQLite file format (Format 3) but bypasses the SQLite library entirely to achieve **2-75x faster read performance**. It is built in pure C# with no native dependencies.
 
 ### Why not just use SQLite?
-
-If you need SQL queries, JOINs, GROUP BY, or write-heavy workloads, use SQLite directly. Sharc is for when you need **fast reads** — point lookups in sub-microsecond time, sequential scans 2-4x faster, graph traversal 13.5x faster — without shipping a native DLL.
+If you need complex SQL (JOINs, GROUP BY, CTEs) or legacy compatibility, use SQLite.
+**Use Sharc when:**
+*   **Latency matters:** You need 585ns point lookups (vs 26µs in SQLite).
+*   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
+*   **Context matters:** You need to traverse graphs (`node |> edge`) instantly.
+*   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
+The **Core Read Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready (Phase 2).
 
-The read engine is mature: 1,067 tests pass, benchmarks are honest, and the core pipeline has been extensively tested. The write engine (INSERT only) and trust layer are beta. See [When NOT to Use Sharc](WHEN_NOT_TO_USE.md) for honest limitations.
+**The Write Engine is EXPERIMENTAL and has severe limitations:**
+*   **Insert-Only**: `UPDATE` and `DELETE` are not implemented.
+*   **No Index Updates**: Inserting into a table does *not* update its secondary indexes.
+*   **No Overflow Support**: Records larger than the page size will fail or corrupt the page.
+*   **Single-Writer**: No concurrency control (WAL/Locking Byte) is implemented.
+*   **Root Split Issues**: Tables are not resilient to root page splits.
 
-### Can I write data?
+Use the Write Engine *only* for:
+1.  Appending rigid logs (Trust Ledger).
+2.  Creating simple, non-indexed datasets from scratch.
 
-Yes. `SharcWriter` supports INSERT with B-tree splits and ACID transactions. UPDATE and DELETE are planned but not yet implemented.
+---
 
-### What's the trust layer?
+## Parsing & Querying
 
-A built-in cryptographic audit system. Agents register with public keys, sign data entries, and append to a tamper-evident hash-chain ledger. When an AI agent makes a recommendation, you can verify who contributed the underlying data and whether it's been modified. See [Cookbook Recipe 15](COOKBOOK.md#15-register-agent-append-ledger-verify-chain).
+### Does Sharc use a standard SQL parser?
+**No.** Sharc uses **Sharq** (Sharc Query), a custom recursive descent parser built on .NET 8's `SearchValues<T>`.
+*   **Why?** Standard SQL parsers allocate memory for every token. Sharq is **allocation-free**.
+*   **How?** It uses SIMD-accelerated character scanning to process queries at memory bandwidth speeds (GB/s).
+*   See [Deep Dive: Parsing](DeepDive_Parsing.md) for the architecture.
+
+### What is "Arrow Syntax" (`|>`)?
+Sharq extends SQL with graph traversal operators.
+Instead of complicated `JOIN` syntax, you can write:
+```sql
+SELECT id |> friend |> name FROM users
+```
+This compiles to a direct B-tree graph scan, which is ~13.5x faster than a recursive CTE in SQLite.
+See [Sharq Reference](ParsingTsql.md).
+
+### Can I just use regular SQL?
+Yes! Sharq supports standard `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `LIMIT`, and `OFFSET`. You only need to learn the new syntax if you want to use the Graph Engine features.
+
+---
 
 ## Technical
 
 ### Why is Sharc faster than standard SQLite?
+1.  **No P/Invoke**: No boundary crossing between C# and C.
+2.  **No VDBE**: Queries compile to JIT delegates, not bytecode.
+3.  **Span<T>**: Data moves from disk to user code without copying.
 
-Sharc eliminates the SQL parser, the VDBE bytecode engine, and the P/Invoke boundary. It walks B-tree pages directly in managed memory using `ReadOnlySpan<byte>`, so bytes go from the page to your variable with zero intermediate object allocations.
+### What is the Trust Layer?
+A built-in cryptographic audit system.
+*   **Identity**: Agents sign writes with ECDsa keys.
+*   **Provenance**: Every entry is hash-linked (SHA-256).
+*   **Result**: You can cryptographically prove *who* added a piece of data and *when*.
+See [Distributed Trust Architecture](DistributedTrustArchitecture.md).
 
 ### Does Sharc support WAL mode?
-
-Yes. Sharc can read SQLite databases in WAL (Write-Ahead Log) mode by merging the main database file with the `-wal` file in memory.
-
-### Does it support WITHOUT ROWID tables?
-
-Yes. Sharc supports both standard rowid tables and `WITHOUT ROWID` tables, including high-speed seeking on primary keys.
+Yes. Sharc implements a full WAL reader that merges `-wal` frames with the main database file in memory, ensuring you always see the latest committed data.
 
 ### Can I use this in Blazor WASM?
+Yes. This is a primary target. Sharc is **~40KB**, making it 25-40x smaller than sql.js or SQLite WASM. It requires no Emscripten and no special headers (like `Cross-Origin-Opener-Policy`).
 
-Yes. Sharc is optimized for WebAssembly. It is ~40x smaller than the standard SQLite WASM bundle and operates entirely within the managed runtime.
-
-### How do I handle concurrent access?
-
-Sharc supports multiple parallel readers. Write support currently follows a single-writer model.
-
-### How does Sharc compare to DuckDB?
-
-Different tools for different jobs. DuckDB is a columnar OLAP engine — excellent for analytics, aggregation, and large-scale scans. Sharc is a row-oriented engine optimized for point lookups and AI context delivery. Use DuckDB for analytics; use Sharc for fast key-value reads and graph traversal.
-
-### How does Sharc compare to LiteDB?
-
-LiteDB is a document database with its own file format. Sharc reads the standard SQLite format, which means any tool that exports to SQLite is compatible with Sharc. Sharc is faster for reads; LiteDB has richer write patterns and a document model.
+---
 
 ## Troubleshooting
 
-### Why am I getting an `InvalidDatabaseException`?
+### `InvalidDatabaseException`
+The file is likely not a valid SQLite Format 3 database. Check that the first 16 bytes are `SQLite format 3\0`.
 
-The file is not a valid SQLite Format 3 database. Ensure your file starts with the header `SQLite format 3\0`. This exception also fires for unsupported format versions.
-
-### `CorruptPageException` during reads?
-
-A B-tree page has invalid structure — bad page type, pointer out of bounds, or cell overflow. This usually means the database file is truncated or corrupted.
+### `CorruptPageException`
+Sharc is strict. If a page checksum fails or a pointer is out of bounds, it throws immediately to prevent data corruption. This usually means the file was truncated during a download.
 
 ### Column index out of range?
-
-If you use column projection (`db.CreateReader("table", "col1", "col2")`), you can only access columns 0 and 1. The ordinal is the position in the projection, not the position in the original table schema.
+If you use **projections** (`db.CreateReader("table", "colA", "colB")`), the reader only sees those 2 columns as index 0 and 1. The original table schema indices are ignored for performance.

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Sharc.Query.Intent;
 
 namespace Sharc.Query;
@@ -143,7 +144,7 @@ internal static class QueryPostProcessor
         source.Dispose();
 
         var sorted = heap.ExtractSorted();
-        return new SharcDataReader(sorted.ToArray(), columnNames);
+        return new SharcDataReader(sorted, columnNames);
     }
 
     // ─── Streaming Aggregate ─────────────────────────────────────
@@ -163,12 +164,14 @@ internal static class QueryPostProcessor
             intent.GroupBy,
             intent.Columns);
 
+        // Reuse a single buffer — StreamingAggregator copies all values it needs
+        // (group key values on new groups, numeric accumulators by value).
+        var buffer = new QueryValue[fieldCount];
         while (source.Read())
         {
-            var row = new QueryValue[fieldCount];
             for (int i = 0; i < fieldCount; i++)
-                row[i] = MaterializeColumn(source, i);
-            aggregator.AccumulateRow(row);
+                buffer[i] = MaterializeColumn(source, i);
+            aggregator.AccumulateRow(buffer);
         }
         source.Dispose();
 
@@ -251,16 +254,41 @@ internal static class QueryPostProcessor
             descending[i] = orderBy[i].Descending;
         }
 
-        rows.Sort((a, b) =>
+        // Span.Sort with struct comparer: JIT specializes the generic,
+        // eliminating delegate allocation and enabling inlining.
+        var comparer = new RowComparer(ordinals, descending);
+        CollectionsMarshal.AsSpan(rows).Sort(comparer);
+    }
+
+    /// <summary>
+    /// Struct-based row comparer for ORDER BY sorting. When used with
+    /// <c>Span&lt;T&gt;.Sort&lt;TComparer&gt;</c>, the JIT specializes the generic
+    /// method for this value type — no delegate, no boxing, enables inlining.
+    /// </summary>
+    internal readonly struct RowComparer : IComparer<QueryValue[]>
+    {
+        private readonly int[] _ordinals;
+        private readonly bool[] _descending;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal RowComparer(int[] ordinals, bool[] descending)
         {
-            for (int i = 0; i < ordinals.Length; i++)
+            _ordinals = ordinals;
+            _descending = descending;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int Compare(QueryValue[]? a, QueryValue[]? b)
+        {
+            if (a is null || b is null) return 0;
+            for (int i = 0; i < _ordinals.Length; i++)
             {
-                int cmp = CompareValues(a[ordinals[i]], b[ordinals[i]]);
+                int cmp = CompareValues(a[_ordinals[i]], b[_ordinals[i]]);
                 if (cmp != 0)
-                    return descending[i] ? -cmp : cmp;
+                    return _descending[i] ? -cmp : cmp;
             }
             return 0;
-        });
+        }
     }
 
     internal static int ResolveOrdinal(string[] columnNames, string name)

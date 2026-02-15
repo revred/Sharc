@@ -27,9 +27,9 @@ namespace Sharc;
 /// </remarks>
 public sealed class SharcDataReader : IDisposable
 {
-    private readonly IBTreeCursor _cursor;
-    private readonly IRecordDecoder _recordDecoder;
-    private readonly IReadOnlyList<ColumnInfo> _columns;
+    private readonly IBTreeCursor? _cursor;
+    private readonly IRecordDecoder? _recordDecoder;
+    private readonly IReadOnlyList<ColumnInfo>? _columns;
     private readonly int[]? _projection;
     private readonly int _rowidAliasOrdinal;
     private readonly int _columnCount;
@@ -58,6 +58,19 @@ public sealed class SharcDataReader : IDisposable
     private int _decodedGeneration;
     private bool _lazyMode;
     private int _currentBodyOffset;
+
+    // Materialized mode — used by Query() post-processing (ORDER BY, DISTINCT, LIMIT/OFFSET)
+    private readonly object?[][]? _materializedRows;
+    private readonly string[]? _materializedColumnNames;
+    private int _materializedIndex = -1;
+
+    // Unboxed materialized mode — QueryValue stores int/double inline without boxing
+    private readonly Query.QueryValue[][]? _queryValueRows;
+
+    // Concatenating mode — streams two readers sequentially for UNION ALL
+    private readonly SharcDataReader? _concatFirst;
+    private readonly SharcDataReader? _concatSecond;
+    private bool _concatOnSecond;
 
     internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
         IReadOnlyList<ColumnInfo> columns, int[]? projection,
@@ -105,14 +118,63 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Creates a materialized reader from pre-computed rows.
+    /// Used internally by Query() post-processing (ORDER BY, DISTINCT, LIMIT/OFFSET).
+    /// </summary>
+    internal SharcDataReader(object?[][] rows, string[] columnNames)
+    {
+        _materializedRows = rows;
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
+    /// Creates an unboxed materialized reader from <see cref="Query.QueryValue"/> rows.
+    /// Typed accessors (GetInt64, GetDouble, GetString) read values without boxing.
+    /// Boxing only occurs when the caller invokes <see cref="GetValue(int)"/>.
+    /// </summary>
+    internal SharcDataReader(Query.QueryValue[][] rows, string[] columnNames)
+    {
+        _queryValueRows = rows;
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
+    /// Creates a concatenating reader that streams from <paramref name="first"/> then
+    /// <paramref name="second"/>. Used for zero-materialization UNION ALL.
+    /// </summary>
+    internal SharcDataReader(SharcDataReader first, SharcDataReader second, string[] columnNames)
+    {
+        _concatFirst = first;
+        _concatSecond = second;
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
     /// Gets the number of columns in the current result set.
     /// </summary>
-    public int FieldCount => _projection?.Length ?? _columns.Count;
+    public int FieldCount => _materializedColumnNames?.Length
+        ?? _projection?.Length
+        ?? _columns!.Count;
+
+    /// <summary>Returns true when the reader is in unboxed <see cref="Query.QueryValue"/> mode.</summary>
+    private bool IsQueryValueMode => _queryValueRows != null;
+
+    /// <summary>Returns true when the reader is in concatenating mode (streaming UNION ALL).</summary>
+    private bool IsConcatMode => _concatFirst != null;
+
+    /// <summary>Gets the currently active reader in concatenating mode.</summary>
+    private SharcDataReader ActiveConcatReader => _concatOnSecond ? _concatSecond! : _concatFirst!;
 
     /// <summary>
     /// Gets the rowid of the current row.
     /// </summary>
-    public long RowId => _cursor.RowId;
+    public long RowId => _cursor?.RowId ?? 0;
 
     /// <summary>
     /// Seeks directly to the row with the specified rowid using B-tree binary search.
@@ -126,7 +188,7 @@ public sealed class SharcDataReader : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        bool found = _cursor.Seek(rowId);
+        bool found = _cursor!.Seek(rowId);
 
         if (found)
         {
@@ -170,7 +232,7 @@ public sealed class SharcDataReader : IDisposable
 
         while (indexCursor.MoveNext())
         {
-            var indexRecord = _recordDecoder.DecodeRecord(indexCursor.Payload);
+            var indexRecord = _recordDecoder!.DecodeRecord(indexCursor.Payload);
             if (indexRecord.Length < 2) continue; // Need at least one key column + rowid
 
             // Compare key values against the first N columns of the index record
@@ -250,12 +312,37 @@ public sealed class SharcDataReader : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        while (_cursor.MoveNext())
+        // Concatenating mode: stream from first reader, then second
+        if (_concatFirst != null)
+        {
+            if (!_concatOnSecond)
+            {
+                if (_concatFirst.Read()) return true;
+                _concatOnSecond = true;
+            }
+            return _concatSecond!.Read();
+        }
+
+        // Materialized mode: iterate pre-computed rows
+        if (_materializedRows != null)
+        {
+            _materializedIndex++;
+            return _materializedIndex < _materializedRows.Length;
+        }
+
+        // Unboxed materialized mode: iterate QueryValue rows
+        if (_queryValueRows != null)
+        {
+            _materializedIndex++;
+            return _materializedIndex < _queryValueRows.Length;
+        }
+
+        while (_cursor!.MoveNext())
         {
             // ── FilterStar byte-level path: evaluate raw record before decoding ──
             if (_filterNode != null)
             {
-                _filterColCount = _recordDecoder.ReadSerialTypes(_cursor.Payload, _filterSerialTypes!, out _filterBodyOffset);
+                _filterColCount = _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _filterSerialTypes!, out _filterBodyOffset);
                 int stCount = Math.Min(_filterColCount, _filterSerialTypes!.Length);
 
                 if (_concreteFilterNode != null)
@@ -275,8 +362,8 @@ public sealed class SharcDataReader : IDisposable
             // ── Zero-Allocation Filter Check ──
             // Evaluate filters against raw serial types/bytes before allocating managed objects.
             // Pushdown to RecordDecoder for zero-allocation check
-            if (_filters != null && _filters.Length > 0 && 
-                !_recordDecoder.Matches(_cursor.Payload, _filters))
+            if (_filters != null && _filters.Length > 0 &&
+                !_recordDecoder!.Matches(_cursor!.Payload, _filters))
             {
                 continue; // Skip row without decoding
             }
@@ -298,7 +385,7 @@ public sealed class SharcDataReader : IDisposable
         // force a full decode so filter columns are available.
         if (_lazyMode)
         {
-            _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+            _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!);
             _lazyMode = false;
         }
 
@@ -307,7 +394,7 @@ public sealed class SharcDataReader : IDisposable
         if (_rowidAliasOrdinal >= 0 && _reusableBuffer![_rowidAliasOrdinal].IsNull)
         {
             _reusableBuffer[_rowidAliasOrdinal] =
-                ColumnValue.FromInt64(4, _cursor.RowId);
+                ColumnValue.FromInt64(4, _cursor!.RowId);
         }
 
         return FilterEvaluator.MatchesAll(_filters!, _reusableBuffer!);
@@ -326,14 +413,14 @@ public sealed class SharcDataReader : IDisposable
                 // We only need to copy up to the number of columns in the table (or found columns)
                 int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
                 Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
-                
+
                 // Cache the body offset for fast lazy decoding
                 _currentBodyOffset = _filterBodyOffset;
             }
             else
             {
                 // Lazy decode: read serial types (varint parsing, no body decode).
-                _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!, out _currentBodyOffset);
+                _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _currentBodyOffset);
             }
 
             // Increment generation instead of Array.Clear — O(1) vs O(N)
@@ -347,14 +434,14 @@ public sealed class SharcDataReader : IDisposable
             {
                 // Optimization: Use the pre-parsed serial types from the filter step
                 // to skip header parsing in RecordDecoder.
-                _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!,
+                _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!,
                     _filterSerialTypes.AsSpan(0, Math.Min(_filterColCount, _filterSerialTypes.Length)),
                     _filterBodyOffset);
             }
             else
             {
                 // Full decode — reuse the pre-allocated buffer
-                _recordDecoder.DecodeRecord(_cursor.Payload, _reusableBuffer!);
+                _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!);
             }
             _lazyMode = false;
         }
@@ -367,6 +454,15 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public bool IsNull(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.IsNull(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].IsNull;
+
+        if (_materializedRows != null)
+            return _materializedRows[_materializedIndex][ordinal] is null or DBNull;
+
         if (_currentRow == null)
             throw new InvalidOperationException("No current row. Call Read() first.");
 
@@ -375,7 +471,7 @@ public sealed class SharcDataReader : IDisposable
         // Fast path: in lazy mode, check serial type directly (no body decode needed)
         if (_lazyMode)
         {
-            _recordDecoder.ReadSerialTypes(_cursor.Payload, _serialTypes!, out _);
+            _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _);
             // INTEGER PRIMARY KEY stores NULL in record; real value is rowid â€” not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;
@@ -391,13 +487,22 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public long GetInt64(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetInt64(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].AsInt64();
+
+        if (_materializedRows != null)
+            return Convert.ToInt64(_materializedRows[_materializedIndex][ordinal], System.Globalization.CultureInfo.InvariantCulture);
+
         // Fast path: decode directly from page span (skip ColumnValue construction)
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
             if (actualOrdinal == _rowidAliasOrdinal)
-                return _cursor.RowId;
-            return _recordDecoder.DecodeInt64Direct(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+                return _cursor!.RowId;
+            return _recordDecoder!.DecodeInt64Direct(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
         }
         return GetColumnValue(ordinal).AsInt64();
     }
@@ -416,11 +521,23 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public double GetDouble(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetDouble(ordinal);
+
+        if (_queryValueRows != null)
+        {
+            var qv = _queryValueRows[_materializedIndex][ordinal];
+            return qv.Type == Query.QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
+        }
+
+        if (_materializedRows != null)
+            return Convert.ToDouble(_materializedRows[_materializedIndex][ordinal], System.Globalization.CultureInfo.InvariantCulture);
+
         // Fast path: decode directly from page span (skip ColumnValue construction)
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
-            return _recordDecoder.DecodeDoubleDirect(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+            return _recordDecoder!.DecodeDoubleDirect(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
         }
         return GetColumnValue(ordinal).AsDouble();
     }
@@ -431,11 +548,20 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string GetString(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetString(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].AsString();
+
+        if (_materializedRows != null)
+            return (string)_materializedRows[_materializedIndex][ordinal]!;
+
         // Fast path: decode UTF-8 directly from page span (eliminates intermediate byte[] allocation)
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
-            return _recordDecoder.DecodeStringDirect(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+            return _recordDecoder!.DecodeStringDirect(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
         }
         return GetColumnValue(ordinal).AsString();
     }
@@ -445,6 +571,14 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public byte[] GetBlob(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetBlob(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].AsBlob();
+
+        if (_materializedRows != null)
+            return (byte[])_materializedRows[_materializedIndex][ordinal]!;
         return GetColumnValue(ordinal).AsBytes().ToArray();
     }
 
@@ -454,6 +588,14 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> GetBlobSpan(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetBlobSpan(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].AsBlob();
+
+        if (_materializedRows != null)
+            return (byte[])_materializedRows[_materializedIndex][ordinal]!;
         return GetColumnValue(ordinal).AsBytes().Span;
     }
 
@@ -462,9 +604,28 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public string GetColumnName(int ordinal)
     {
+        if (_materializedColumnNames != null)
+            return _materializedColumnNames[ordinal];
         if (_projection != null)
-            return _columns[_projection[ordinal]].Name;
-        return _columns[ordinal].Name;
+            return _columns![_projection[ordinal]].Name;
+        return _columns![ordinal].Name;
+    }
+
+    /// <summary>
+    /// Returns the ordinal of the column with the given name (case-insensitive).
+    /// </summary>
+    /// <param name="columnName">The column name to look up.</param>
+    /// <returns>The zero-based column ordinal.</returns>
+    /// <exception cref="ArgumentException">No column with the specified name exists.</exception>
+    public int GetOrdinal(string columnName)
+    {
+        for (int i = 0; i < FieldCount; i++)
+        {
+            if (string.Equals(GetColumnName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        throw new ArgumentException($"Column '{columnName}' not found.");
     }
 
     /// <summary>
@@ -472,6 +633,36 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public SharcColumnType GetColumnType(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetColumnType(ordinal);
+
+        if (_queryValueRows != null)
+        {
+            return _queryValueRows[_materializedIndex][ordinal].Type switch
+            {
+                Query.QueryValueType.Null => SharcColumnType.Null,
+                Query.QueryValueType.Int64 => SharcColumnType.Integral,
+                Query.QueryValueType.Double => SharcColumnType.Real,
+                Query.QueryValueType.Text => SharcColumnType.Text,
+                Query.QueryValueType.Blob => SharcColumnType.Blob,
+                _ => SharcColumnType.Null,
+            };
+        }
+
+        if (_materializedRows != null)
+        {
+            var v = _materializedRows[_materializedIndex][ordinal];
+            return v switch
+            {
+                null or DBNull => SharcColumnType.Null,
+                long => SharcColumnType.Integral,
+                double => SharcColumnType.Real,
+                string => SharcColumnType.Text,
+                byte[] => SharcColumnType.Blob,
+                _ => SharcColumnType.Null
+            };
+        }
+
         var val = GetColumnValue(ordinal);
         return val.StorageClass switch
         {
@@ -490,6 +681,15 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public object GetValue(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetValue(ordinal);
+
+        if (_queryValueRows != null)
+            return _queryValueRows[_materializedIndex][ordinal].ToObject();
+
+        if (_materializedRows != null)
+            return _materializedRows[_materializedIndex][ordinal] ?? DBNull.Value;
+
         var val = GetColumnValue(ordinal);
         return val.StorageClass switch
         {
@@ -516,7 +716,7 @@ public sealed class SharcDataReader : IDisposable
         // Lazy decode: decode this column on first access (projection path only)
         if (_lazyMode && _decodedGenerations![actualOrdinal] != _decodedGeneration)
         {
-            _reusableBuffer![actualOrdinal] = _recordDecoder.DecodeColumn(_cursor.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
+            _reusableBuffer![actualOrdinal] = _recordDecoder!.DecodeColumn(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
             _decodedGenerations[actualOrdinal] = _decodedGeneration;
         }
 
@@ -524,7 +724,7 @@ public sealed class SharcDataReader : IDisposable
 
         // INTEGER PRIMARY KEY columns store NULL in the record; the real value is the rowid.
         if (actualOrdinal == _rowidAliasOrdinal && value.IsNull)
-            return ColumnValue.FromInt64(1, _cursor.RowId);
+            return ColumnValue.FromInt64(1, _cursor!.RowId);
 
         return value;
     }
@@ -536,6 +736,14 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> GetUtf8Span(int ordinal)
     {
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetUtf8Span(ordinal);
+
+        if (_queryValueRows != null)
+            return System.Text.Encoding.UTF8.GetBytes(_queryValueRows[_materializedIndex][ordinal].AsString());
+
+        if (_materializedRows != null)
+            return System.Text.Encoding.UTF8.GetBytes((string)_materializedRows[_materializedIndex][ordinal]!);
         return GetColumnValue(ordinal).AsBytes().Span;
     }
 
@@ -544,7 +752,10 @@ public sealed class SharcDataReader : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _cursor.Dispose();
+
+        _concatFirst?.Dispose();
+        _concatSecond?.Dispose();
+        _cursor?.Dispose();
 
         if (_reusableBuffer is not null)
         {
