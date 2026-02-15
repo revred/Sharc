@@ -187,7 +187,6 @@ All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap
 
 ## What NOT To Do
 
-- **Do not add SQL parsing or execution** — Sharc reads/writes raw B-tree pages, not a SQL engine
 - **Do not add dependencies** without checking `PRC/DependencyPolicy.md`
 - **Do not use `unsafe` code** unless profiling proves it's necessary and the gain is >20%
 - **Do not allocate in hot paths** — use spans, stackalloc, ArrayPool

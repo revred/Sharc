@@ -139,4 +139,80 @@ public sealed class FilterTreeCompilerTests
         var node = FilterTreeCompiler.Compile(expr, columns);
         Assert.IsType<AndNode>(node);
     }
+
+    // ─── Tier 1 vs Tier 2 parity tests ────────────────────────────────
+
+    private static List<ColumnInfo> MakeTypedColumns(params (string name, string type)[] defs)
+    {
+        var list = new List<ColumnInfo>();
+        for (int i = 0; i < defs.Length; i++)
+            list.Add(new ColumnInfo
+            {
+                Name = defs[i].name,
+                Ordinal = i,
+                DeclaredType = defs[i].type,
+                IsPrimaryKey = false,
+                IsNotNull = false
+            });
+        return list;
+    }
+
+    [Fact]
+    public void Tier1VsTier2_SimpleIntGt_SameResult()
+    {
+        var columns = MakeTypedColumns(("age", "INTEGER"));
+        var filter = FilterStar.Column("age").Gt(30);
+
+        var tier1 = FilterTreeCompiler.Compile(filter, columns);
+        var tier2 = FilterTreeCompiler.CompileBaked(filter, columns);
+
+        // age=42 → true
+        byte[] payload = [2, 1, 42];
+        long[] serialTypes = [1];
+        Assert.Equal(
+            tier1.Evaluate(payload, serialTypes, 2, 1),
+            tier2.Evaluate(payload, serialTypes, 2, 1));
+
+        // age=20 → false
+        byte[] payload2 = [2, 1, 20];
+        Assert.Equal(
+            tier1.Evaluate(payload2, serialTypes, 2, 1),
+            tier2.Evaluate(payload2, serialTypes, 2, 1));
+    }
+
+    [Fact]
+    public void Tier1VsTier2_AndExpression_SameResult()
+    {
+        var columns = MakeTypedColumns(("age", "INTEGER"), ("score", "REAL"));
+        var filter = FilterStar.And(
+            FilterStar.Column("age").Gt(30),
+            FilterStar.Column("score").Lt(50.0));
+
+        var tier1 = FilterTreeCompiler.Compile(filter, columns);
+        var tier2 = FilterTreeCompiler.CompileBaked(filter, columns);
+
+        // age=42, score=25.5 → true,true → true
+        byte[] payload = [3, 1, 7, 42, 0x40, 0x39, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00];
+        long[] serialTypes = [1, 7];
+        Assert.Equal(
+            tier1.Evaluate(payload, serialTypes, 3, 1),
+            tier2.Evaluate(payload, serialTypes, 3, 1));
+    }
+
+    [Fact]
+    public void Tier1VsTier2_IsNull_SameResult()
+    {
+        var columns = MakeTypedColumns(("bio", "TEXT"));
+        var filter = FilterStar.Column("bio").IsNull();
+
+        var tier1 = FilterTreeCompiler.Compile(filter, columns);
+        var tier2 = FilterTreeCompiler.CompileBaked(filter, columns);
+
+        // bio=NULL (serial type 0)
+        byte[] payload = [2, 0];
+        long[] serialTypes = [0];
+        Assert.Equal(
+            tier1.Evaluate(payload, serialTypes, 2, 1),
+            tier2.Evaluate(payload, serialTypes, 2, 1));
+    }
 }
