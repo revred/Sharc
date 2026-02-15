@@ -44,4 +44,11 @@ public sealed class QueryIntent
 
     /// <summary>True if the query contains any aggregate functions.</summary>
     public bool HasAggregates => Aggregates is { Count: > 0 };
+
+    // Cached array conversion of Columns — avoids repeated [.. Columns] spread allocations.
+    // Safe to cache because QueryIntent is immutable and QueryPlan instances are reused.
+    private string[]? _columnsArray;
+    internal string[]? ColumnsArray => Columns is { Count: > 0 }
+        ? (_columnsArray ??= Columns as string[] ?? [.. Columns])
+        : null;
 }

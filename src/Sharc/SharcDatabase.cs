@@ -243,7 +243,7 @@ public sealed class SharcDatabase : IDisposable
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     /// <exception cref="Sharc.Query.Sharq.SharqParseException">The query string is invalid.</exception>
     /// <exception cref="ArgumentException">Referenced table or column not found in schema.</exception>
-    public SharcDataReader Query(string sharqQuery) => Query(null, sharqQuery);
+    public SharcDataReader Query(string sharqQuery) => QueryCore(null, sharqQuery, null);
 
     /// <summary>
     /// Executes a Sharq query string with parameter bindings and returns a data reader.
@@ -253,32 +253,7 @@ public sealed class SharcDatabase : IDisposable
     /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT * FROM users WHERE age = $minAge").</param>
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     public SharcDataReader Query(IReadOnlyDictionary<string, object>? parameters, string sharqQuery)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
-        var plan = cache.GetOrCompilePlan(sharqQuery);
-
-        // Compound or CTE queries go through the compound executor
-        if (plan.IsCompound || plan.HasCtes)
-            return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
-
-        // Simple query — existing path
-        var intent = plan.Simple!;
-
-        // When aggregates are present, project only the columns needed for
-        // GROUP BY + aggregate source columns (e.g. 2 columns instead of 8).
-        string[]? columns = intent.HasAggregates
-            ? global::Sharc.Query.QueryPostProcessor.ComputeAggregateProjection(intent)
-            : intent.Columns is { Count: > 0 } ? [.. intent.Columns] : null;
-
-        IFilterStar? filter = intent.Filter.HasValue
-            ? global::Sharc.Query.IntentToFilterBridge.Build(intent.Filter.Value, parameters)
-            : null;
-
-        var reader = CreateReader(intent.TableName, columns, null, filter);
-        return global::Sharc.Query.QueryPostProcessor.Apply(reader, intent);
-    }
+        => QueryCore(parameters, sharqQuery, null);
 
     /// <summary>
     /// Executes a Sharq query string with agent entitlement enforcement.
@@ -290,7 +265,7 @@ public sealed class SharcDatabase : IDisposable
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     /// <exception cref="UnauthorizedAccessException">The agent's scope does not permit this query.</exception>
     public SharcDataReader Query(string sharqQuery, Core.Trust.AgentInfo agent)
-        => Query(null, sharqQuery, agent);
+        => QueryCore(null, sharqQuery, agent);
 
     /// <summary>
     /// Executes a Sharq query string with parameter bindings and agent entitlement enforcement.
@@ -308,29 +283,44 @@ public sealed class SharcDatabase : IDisposable
         IReadOnlyDictionary<string, object>? parameters,
         string sharqQuery,
         Core.Trust.AgentInfo agent)
+        => QueryCore(parameters, sharqQuery, agent);
+
+    private SharcDataReader QueryCore(
+        IReadOnlyDictionary<string, object>? parameters,
+        string sharqQuery,
+        Core.Trust.AgentInfo? agent)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
-        // Enforce entitlements on ALL tables in the plan
-        if (plan.IsCompound || plan.HasCtes)
+        // Enforce entitlements when an agent is specified
+        if (agent is not null)
         {
-            var tables = global::Sharc.Query.CompoundQueryExecutor.CollectTableReferences(plan);
-            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
-            return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
+            if (plan.IsCompound || plan.HasCtes)
+            {
+                var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
+                Trust.EntitlementEnforcer.EnforceAll(agent, tables);
+            }
+            else
+            {
+                var simpleIntent = plan.Simple!;
+                Trust.EntitlementEnforcer.Enforce(agent, simpleIntent.TableName,
+                    simpleIntent.ColumnsArray);
+            }
         }
 
-        // Simple query — existing path
+        // Compound or CTE queries go through the compound executor
+        if (plan.IsCompound || plan.HasCtes)
+            return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
+
+        // Simple query — direct execution
         var intent = plan.Simple!;
 
-        Trust.EntitlementEnforcer.Enforce(agent, intent.TableName,
-            intent.Columns is { Count: > 0 } ? [.. intent.Columns] : null);
-
         string[]? columns = intent.HasAggregates
-            ? global::Sharc.Query.QueryPostProcessor.ComputeAggregateProjection(intent)
-            : intent.Columns is { Count: > 0 } ? [.. intent.Columns] : null;
+            ? global::Sharc.Query.AggregateProjection.Compute(intent)
+            : intent.ColumnsArray;
 
         IFilterStar? filter = intent.Filter.HasValue
             ? global::Sharc.Query.IntentToFilterBridge.Build(intent.Filter.Value, parameters)

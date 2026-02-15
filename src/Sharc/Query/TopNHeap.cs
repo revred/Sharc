@@ -58,18 +58,33 @@ internal sealed class TopNHeap
     /// </summary>
     internal void TryInsert(QueryValue[] row)
     {
+        TryInsert(row, out _);
+    }
+
+    /// <summary>
+    /// Tries to insert a row, returning the evicted row (if any) for reuse.
+    /// Returns true if the row was inserted; false if rejected.
+    /// </summary>
+    internal bool TryInsert(QueryValue[] row, out QueryValue[]? evicted)
+    {
+        evicted = null;
         if (_count < _capacity)
         {
             _heap[_count] = row;
             _count++;
             SiftUp(_count - 1);
+            return true;
         }
-        else if (_worstFirst(row, _heap[0]) < 0)
+
+        if (_worstFirst(row, _heap[0]) < 0)
         {
-            // New row is better than the worst — replace root
+            evicted = _heap[0];
             _heap[0] = row;
             SiftDown(0);
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>
