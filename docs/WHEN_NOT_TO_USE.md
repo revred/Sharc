@@ -4,14 +4,15 @@ Sharc is a specialized **Context Engine**, not a general-purpose database. Hones
 
 ## 🛑 STOP if you need:
 
-### 1. Complex SQL (Aggregations, JOINs, CTEs)
-Sharc has a **query parser** (Sharq), but it is optimized for finding and filtering nodes. It does **NOT** support:
-*   `GROUP BY`, `HAVING`, `SUM`, `AVG`, `MAX`
-*   `JOIN` (use `|>` graph syntax instead, or join in memory)
-*   Common Table Expressions (CTEs)
-*   Views, Triggers, or Stored Procedures
+### 1. SQL JOINs, Views, Triggers, or Stored Procedures
 
-**Use SQLite** for analytics, reporting, and heavy data aggregation.
+Sharc's query pipeline now supports `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, CTEs (`WITH ... AS`), and compound queries (`UNION`, `INTERSECT`, `EXCEPT`). However, it does **NOT** support:
+
+*   `JOIN` (use `UNION`/CTE for multi-table workflows, or the Graph API for relationship traversal)
+*   Views, Triggers, or Stored Procedures
+*   `CASE` expressions, Window Functions (parsed but not yet executable)
+
+**Use SQLite** if you need JOINs, views, triggers, or complex multi-table queries. For large-scale analytics, consider DuckDB.
 
 ### 2. General-Purpose Writes (UPDATE / DELETE)
 The Sharc Write Engine is **EXPERIMENTAL** and **APPEND-ONLY**.
@@ -35,7 +36,7 @@ Sharc is a row-store. It reads row-by-row. If you need to scan 10GB of data to c
 | Capability | Why Sharc Wins |
 | :--- | :--- |
 | **Graph Traversal** | `node |> edge |> target` syntax is **13.5x faster** than SQLite Recursive CTEs. |
-| **Point Lookups** | **585ns** vs 26,000ns. If you do thousands of lookups per request, Sharc is the only choice. |
+| **Point Lookups** | **392ns** vs 24,011ns (61x faster). If you do thousands of lookups per request, Sharc is the only choice. |
 | **Agent Context** | Precision retrieval allows you to fit **100% relevant context** into small token windows. |
 | **Trust & Audit** | Built-in cryptographic ledger (`_sharc_ledger`) proves *who* wrote *what*. |
 | **WASM / Edge** | **<50KB** binary. Runs in-browser without Emscripten or multithreading headers. |

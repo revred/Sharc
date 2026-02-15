@@ -14,8 +14,8 @@ Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 | Engine Init (open + header) | **981 ns** | 38.68 us | **39x** | **1,416 B** | 1,160 B |
 | Schema Introspection | **4.69 us** | 27.86 us | **5.9x** | 4,784 B | 2,536 B |
 | Sequential Scan (9 cols) | **1.54 ms** | 6.22 ms | **4.0x** | 1.41 MB | 1.41 MB |
-| Point Lookup (Seek) | **848 ns** | 39,614 ns | **46.7x** | **688 B** | 728 B |
-| Batch 6 Lookups | **3,326 ns** | 201,979 ns | **60.7x** | **1,792 B** | 3,712 B |
+| Point Lookup (Seek) | **392 ns** | 24,011 ns | **61x** | **688 B** | 728 B |
+| Batch 6 Lookups | **1,940 ns** | 127,526 ns | **66x** | **1,792 B** | 3,712 B |
 | Type Decode (5K ints) | **185 us** | 854 us | **4.6x** | 648 B | 688 B |
 | NULL Detection | **394 us** | 1.24 ms | **3.1x** | 648 B | 688 B |
 | WHERE Filter | **315 us** | 587 us | **1.8x** | 1,008 B | 720 B |
@@ -75,11 +75,11 @@ SQLite Seek Path (21,193 ns):
   sqlite3_step > B-tree descend > read leaf > VDBE decode >
   P/Invoke return > marshal to managed objects
 
-Sharc Seek Path (637 ns):
+Sharc Seek Path (392 ns):
   Span<byte> > B-tree page > binary search > leaf cell > decode value
 ```
 
-**33x on single seeks. 66x on batch 6.** Batch amplification comes from LRU page cache locality -- the second through sixth seeks reuse cached B-tree interior pages.
+**61x on single seeks. 66x on batch 6.** Batch amplification comes from LRU page cache locality -- the second through sixth seeks reuse cached B-tree interior pages.
 
 ---
 
@@ -151,7 +151,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | 15 | Memory Footprint | **~250 KB** | 1,536 KB | 0 (built-in) | Sharc |
 | 16 | Primitives | **8.5 ns** | N/A | N/A | Sharc |
 
-> **Score: Sharc 16 / SQLite 0 / IndexedDB 0.** Sharc ranges from 17x to 233x faster than IndexedDB.
+> **Score: Sharc 16 / SQLite 0 / IndexedDB 0.** These benchmarks test the **Core Engine** (`CreateReader` API). The SQL query pipeline (`Query` API) has different performance characteristics — see the README for query pipeline benchmarks. Sharc ranges from 17x to 233x faster than IndexedDB.
 
 ---
 
@@ -160,9 +160,11 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | Capability | Sharc | Microsoft.Data.Sqlite |
 |:---|:---:|:---:|
 | Read SQLite format 3 | Yes | Yes |
-| SQL parsing / VM / query planner | No -- reads raw B-tree pages | Yes (full VDBE) |
-| WHERE filtering | **FilterStar (14+ ops)** | Yes (via SQL) |
-| JOIN / GROUP BY / aggregates | No | Yes |
+| SQL parsing / query pipeline | **Yes** -- Sharq parser + QueryIntent compiler | Yes (full VDBE) |
+| WHERE filtering | **FilterStar (14+ ops)** + Query API | Yes (via SQL) |
+| GROUP BY / aggregates | **Yes** -- streaming hash aggregator | Yes |
+| UNION / INTERSECT / EXCEPT / CTEs | **Yes** | Yes |
+| JOIN | No | Yes |
 | Write / INSERT | **Yes** | Yes |
 | Native dependencies | **None** | Requires `e_sqlite3` |
 | B-tree point lookup | **7-61x faster** | Baseline |
@@ -192,6 +194,16 @@ dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter *Comparative*
 ```
 
 BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), reports mean with error and outlier removal, and includes `MemoryDiagnoser` for per-operation allocation tracking.
+
+---
+
+## Benchmark Fairness Notes
+
+**QueryPlanCache advantage:** Sharc caches compiled query plans in a `ConcurrentDictionary` (`QueryPlanCache`). After BenchmarkDotNet's warmup iterations, subsequent iterations skip SQL parsing entirely. The SQLite benchmarks create a `new SqliteCommand` and set `CommandText` per iteration — re-parsing each time. In production, SQLite typically uses pre-prepared statements which would narrow the gap on parse overhead. The core engine benchmarks (`CreateReader`) bypass the query pipeline entirely, so this advantage does not apply to those numbers.
+
+**UNION ALL win is architectural:** Sharc's 4.1x advantage on `UNION ALL` comes from avoiding the P/Invoke boundary — both tables are scanned in managed memory and concatenated without crossing to native code. This is a legitimate in-process advantage, specific to the "multiple full table scans" pattern.
+
+**Memory reporting:** SQLite's managed allocation numbers (688 B, 744 B) reflect only the .NET-side marshaling cost. SQLite's native C allocations (query plans, sort buffers, hash tables) are invisible to BenchmarkDotNet's `MemoryDiagnoser`. Sharc's numbers reflect total allocation since all work happens in managed code.
 
 ---
 
