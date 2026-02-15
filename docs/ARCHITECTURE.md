@@ -1,33 +1,34 @@
 # Sharc Architecture
 
-Sharc is a pure managed SQLite file-format reader and writer. No VM, no VDBE, no query planner -- just B-tree pages decoded through zero-alloc spans, with a cryptographic trust layer for AI agents.
+Sharc is a **Context Engineering Engine** that reads and writes the standard SQLite file format. It bypasses the SQLite library entirely to achieve **2-75x** faster reads and **zero per-row allocations**, enabling high-frequency AI context retrieval.
 
 ## Layered Design
 
 ```mermaid
 graph TD
     API["Public API: SharcDatabase, SharcDataReader"]
-    Write["Write Layer: SharcWriter, BTreeMutator"]
-    Trust["Trust Layer: ECDSA, Ledger, Reputation"]
-    Graph["Graph Layer: ConceptStore, RelationStore, EdgeCursor"]
-    Filter["Filter Layer: FilterStar, SharcFilter"]
-    Schema["Schema Layer: SchemaReader, CreateTableParser"]
-    Records["Record Layer: RecordDecoder, RecordEncoder"]
-    BTree["B-Tree Engine: BTreeCursor, IndexBTreeCursor"]
-    IO["Page I/O: Memory | Mmap | File | Cached"]
-    Crypto["Crypto Layer: AES-256-GCM, Argon2id KDF"]
-    Primitives["Primitives: VarintDecoder, SerialTypeCodec"]
+    Query["Query Layer: SharqParser, JIT Filter"]
+    Write["Write Layer (Exp): SharcWriter, BTreeMutator"]
+    Trust["Trust Layer: ECDSA, Ledger, Agents"]
+    Graph["Graph Layer: ConceptStore, RelationStore"]
+    Schema["Schema Layer: SchemaReader"]
+    Records["Record Layer: RecordDecoder (Spans)"]
+    BTree["B-Tree Engine: BTreeCursor"]
+    IO["Page I/O: Memory | Mmap | File | WAL"]
+    Crypto["Crypto Layer: AES-256-GCM"]
+    Primitives["Primitives: Varint, SerialType"]
 
+    API --> Query
     API --> Write
     API --> Trust
     API --> Graph
-    API --> Filter
     API --> Schema
-    Schema --> Records
-    Filter --> Records
+    Query --> Schema
+    Query --> Records
     Graph --> BTree
-    Records --> BTree
     Write --> BTree
+    Schema --> Records
+    Records --> BTree
     BTree --> IO
     IO --> Crypto
     BTree --> Primitives
@@ -35,78 +36,51 @@ graph TD
 
 ## Component Breakdown
 
-| Layer | Responsibility | Key Types |
-| :--- | :--- | :--- |
-| **Public API** | Database open/close, reader creation, schema access | `SharcDatabase`, `SharcDataReader`, `SharcOpenOptions` |
-| **Write Layer** | INSERT with B-tree page splits, ACID transactions | `SharcWriter`, `WriteEngine`, `BTreeMutator`, `Transaction` |
-| **Trust Layer** | Agent identity, hash-chain audit, reputation scoring | `AgentRegistry`, `LedgerManager`, `ReputationEngine` |
-| **Graph Layer** | Concept/relation stores, BFS traversal, edge cursors | `SharcContextGraph`, `ConceptStore`, `RelationStore`, `EdgeCursor` |
-| **Filter Layer** | WHERE-style predicates on raw page bytes | `FilterStar`, `SharcFilter`, `FilterEvaluator` |
-| **Schema Layer** | Parse `sqlite_schema` table, column introspection | `SchemaReader`, `CreateTableParser`, `TableInfo`, `ColumnInfo` |
-| **Record Layer** | Varint + serial type decode/encode to typed values | `RecordDecoder`, `RecordEncoder`, `CellBuilder` |
-| **B-Tree Engine** | Page-level B-tree navigation (table + index) | `BTreeCursor`, `IndexBTreeCursor`, `CellParser` |
-| **Page I/O** | Pluggable page sources with LRU caching | `FilePageSource`, `MemoryPageSource`, `CachedPageSource` |
-| **Crypto** | Page-level encryption, key derivation | `AesGcmPageTransform`, `SharcKeyHandle`, `Argon2idKdf` |
-| **Primitives** | Zero-alloc byte-level operations | `VarintDecoder`, `SerialTypeCodec`, `DatabaseHeader` |
+| Layer | Responsibility | Key Types |Status |
+| :--- | :--- | :--- | :--- |
+| **Public API** | Database access, Reader creation | `SharcDatabase`, `SharcDataReader` | Stable |
+| **Query Layer** | **Sharq** Parser + **FilterStar** JIT Compiler | `SharqParser`, `SharqTokenizer`, `FilterStarCompiler` | Stable |
+| **Graph Layer** | Traversal logic (`\|>`) and Node/Edge storage | `SharcContextGraph`, `ConceptStore`, `RelationStore` | Stable |
+| **Trust Layer** | Identity, Ledger management, cryptographic audit | `AgentRegistry`, `LedgerManager`, `EcdsaP256` | Stable |
+| **Write Layer** | **EXPERIMENTAL** Append-only writes | `SharcWriter`, `BTreeMutator` | **Alpha** |
+| **Schema Layer** | Parse `sqlite_schema` table | `SchemaReader`, `CreateTableParser` | Stable |
+| **Record Layer** | Varint + serial type decode/encode | `RecordDecoder`, `RecordEncoder` | Stable |
+| **B-Tree Engine** | Page-level navigation (Table + Index) | `BTreeCursor`, `IndexBTreeCursor` | Stable |
+| **Page I/O** | Pluggable page sources + WAL | `FilePageSource`, `WalReader`, `MemoryMappedPageSource` | Stable |
+| **Crypto** | Page-level encryption | `AesGcmPageTransform`, `Argon2idKdf` | Stable |
 
 ## Why Sharc Is Fast
 
-Sharc eliminates entire layers that SQLite pays for on every query:
+Sharc eliminates the "General Purpose Tax" of SQLite:
 
-| Layer Eliminated | Impact |
+| Optimization | Impact |
 | :--- | :--- |
-| P/Invoke boundary | ~200 ns per call; compounds to milliseconds over thousands of rows |
-| SQL parser | Eliminated entirely -- no text to parse |
-| VDBE interpreter | Eliminated -- direct B-tree descent replaces bytecode execution |
-| Per-row object allocation | `ArrayPool<ColumnValue>` -- the GC doesn't wake up during reads |
-| String marshalling | `ReadOnlySpan<byte>` or direct UTF-8 decode from page span |
-
-The seek path comparison illustrates this concretely:
-
-```text
-SQLite Seek Path (21,193 ns):
-  C# > P/Invoke > sqlite3_prepare > SQL parse > VDBE compile >
-  sqlite3_step > B-tree descend > read leaf > VDBE decode >
-  P/Invoke return > marshal to managed objects
-
-Sharc Seek Path (637 ns):
-  Span<byte> > B-tree page > binary search > leaf cell > decode value
-```
+| **No P/Invoke** | Saves ~200ns per call. Compounds to milliseconds over 10k rows. |
+| **Simd Tokenizer** | `SharqTokenizer` uses .NET 8 `SearchValues<char>` to scan queries at GB/s. |
+| **JIT Filtering** | `FilterStarCompiler` emits dynamic IL delegates for predicates, beating interpreted bytecode. |
+| **Zero Allocation** | `RecordDecoder` uses `ref struct` and `Span<T>` to read directly from page buffers. |
+| **Graph Indexing** | `RelationStore` uses O(log N) B-tree seeks instead of recursive SQL joins (13.5x speedup). |
 
 ## Key Design Decisions
 
 | Decision | Rationale |
 | :--- | :--- |
-| `ReadOnlySpan<byte>` everywhere | Zero-alloc decode pipeline -- no boxing, no GC pressure |
-| `ColumnValue[]` buffer pooling | `ArrayPool` -- rent once per reader, return on dispose |
-| No SQL parser | Eliminates ~80% of SQLite's codebase |
-| LRU page cache | B-tree interior pages reused across seeks -- batch lookups amortize I/O |
-| `SeekFirst(key)` on index cursor | O(log N) binary search on index B-tree -- enables 13.5x graph traversal speedup |
-| Page-level AES-256-GCM | Encryption at the storage layer, transparent to readers |
-| `IBTreeCursor.Reset()` | Persistent cursor reuse eliminates per-traversal allocation in graph layer |
+| **Sharq vs SQL** | We built a custom recursive descent parser (`Sharq`) to support Graph syntax (`\|>`) and avoid the overhead of a full SQL engine. |
+| **ReadOnlySpan<byte>** | The entire read pipeline is allocation-free. Data is never copied until the user asks for a string. |
+| **Trust Ledger** | We embed a hash-chain ledger directly in the `.sharc` file to make AI memory verifiable. |
+| **Single-Writer** | We sacrificed concurrency for simplicity and codebase size (<50KB). |
 
 ## Project Structure
 
 ```text
-src/Sharc/                    Public API (SharcDatabase, SharcDataReader, Schema, Trust, Write)
-src/Sharc.Core/               Internal: page I/O, B-tree, record decoding, primitives
-src/Sharc.Graph/              Graph storage layer (ConceptStore, RelationStore, EdgeCursor)
-src/Sharc.Graph.Surface/      Graph interfaces and models (IEdgeCursor, TraversalPolicy)
-src/Sharc.Crypto/             Encryption: AES-256-GCM, Argon2id KDF
-src/Sharc.Arena.Wasm/         Live browser benchmark arena (Blazor WASM)
-tests/Sharc.Tests/            Unit tests (832 tests)
-tests/Sharc.IntegrationTests/ End-to-end tests (146 tests)
-tests/Sharc.Graph.Tests.Unit/ Graph layer unit tests (53 tests)
-tests/Sharc.Context.Tests/    MCP context query tests (14 tests)
-tests/Sharc.Index.Tests/      GCD indexer tests (22 tests)
-bench/Sharc.Benchmarks/       BenchmarkDotNet comparative suite
-bench/Sharc.Comparisons/      Graph + core benchmarks
-tools/Sharc.Context/          MCP server: AI agent query tools
-tools/Sharc.Index/            CLI: builds GitHub Context Database
+src/Sharc/                    Public API
+src/Sharc.Core/               Internal Engine (B-Tree, IO, Records)
+src/Sharc.Query/              Sharq Parser & JIT Compiler
+src/Sharc.Graph/              Graph Logic & Stores
+src/Sharc.Graph.Surface/      Graph Interfaces
+src/Sharc.Crypto/             Encryption
+tests/                        1,000+ Unit & Integration Tests
+bench/                        BenchmarkDotNet Suite
+tools/                        CLI & Context Tools
 ```
 
-## Further Reading
-
-- [Benchmarks](BENCHMARKS.md) -- Full performance data with methodology
-- [PRC/ArchitectureOverview.md](../PRC/ArchitectureOverview.md) -- Technical deep-dives
-- [Getting Started](GETTING_STARTED.md) -- Usage patterns

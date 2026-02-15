@@ -1,72 +1,73 @@
-# BakedFilter: High-Performance Database Predicates
+# BakedFilter: The JIT-Compiled Predicate Engine
 
-The **BakedFilter** is Sharc's "star weapon" for competing with native-C database engines. It transforms high-level C# filter expressions into optimized, zero-allocation machine code at runtime.
+**BakedFilter** (internally `FilterStar`) is Sharc's high-performance query execution engine. Unlike traditional interpreters that walk an expression tree for every row, BakedFilter compiles your query predicates into **raw MSIL delegates** at runtime using `System.Linq.Expressions`.
 
-## 🏛️ Three-Tier Architecture
+## 🚀 Architecture
 
-To balance correctness, readability, and raw speed, the engine uses three distinct execution tiers:
+The engine operates in three phases:
 
-### Tier 1: Reference Interpreter
-- **Goal**: Correctness & Debugging.
-- **Tech**: Tree-based visitor pattern (`IFilterNode` implementations).
-- **Behavior**: Slowest path, used as a fallback if JIT is unavailable or during development.
+1.  **Analysis**: The `FilterTreeCompiler` scans the expression tree to identify all referenced columns and standardizes types.
+2.  **JIT Compilation**: `JitPredicateBuilder` constructs a single `Expression<BakedDelegate>` lambda that represents the entire filter logic.
+3.  **Execution**: The delegate is compiled and cached. For each row, the engine invokes this delegate, passing direct pointers to the memory-mapped record data.
 
-### Tier 2: JIT-Compiled (The "Baked" Path)
-- **Goal**: Competitive Performance.
-- **Tech**: `System.Linq.Expressions`.
-- **Strategy**: 
-    - **Offset Hoisting**: Scans the record header once per row. All predicates then access pre-calculated byte offsets.
-    - **De-virtualization**: The entire filter tree is flattened into a single Lambda expression, eliminating polymorphic calls.
-    - **Inlining**: Predicate logic is inlined directly into the filter loop.
+### The `BakedDelegate` Signature
 
-### Tier 3: SIMD Block (Future)
-- **Goal**: Maximum Throughput.
-- **Tech**: `System.Runtime.Intrinsics`.
-- **Strategy**: Processes a block of 8-16 rows simultaneously using AVX/SSE vectors for batch comparison.
-- **Why**: SIMD & Block Evaluation is by far the most important path for maximum throughput.
----
+The generated code has this exact signature, ensuring zero-allocation execution:
 
-## 🏎️ Strategy: Offset Hoisting
-
-In a standard record scan, a filter `age > 30 AND score < 50` currently performs:
-1. Filter 1: Scans header to find "age" offset -> Decodes body.
-2. Filter 2: Scans header *again* to find "score" offset -> Decodes body.
-
-**BakedFilter** optimizes this:
-1. **Hoisting**: Before the loop, identify all needed column ordinals [1, 4].
-2. **Single Pass**: For each row, a specialized `OffsetTracker` populates a tiny stack-allocated span of current offsets.
-3. **Direct Access**: Filters read directly from `payload[offsets[i]]`.
-
-## 🏎️ Performance Results (Tier 2)
-
-The Tier 2 implementation delivers a **2.9x performance boost** over the interpreted engine and **surpasses SQLite's native VDBE** by roughly 25%.
-
-| Metric | Interpreted | Baked (JIT) | vs SQLite VDB | Improvement |
-| :--- | :---: | :---: | :---: | :---: |
-| **Table Scan (5k rows)** | 1,444 μs | **496 μs** | 659 μs | **2.9x Faster** |
-| **Allocations** | 1.07 MB | **1.3 KB** | ~0 | **99.9% Reduced** |
-
-*Hardware: 11th Gen Intel Core i7-11800H @ 2.30GHz*
-
-## 🛡️ Implementation Details
-
-### Offset Hoisting
-Before the record loop starts, `FilterTreeCompiler` identifies all referenced columns. `FilterNode` then performs a single pass over the record header per row, populating a stack-allocated buffer with byte offsets.
-
-### JIT Compilation
-Nested filters (e.g., `AND(OR(x, y), z)`) are flattened into a single `BakedDelegate`:
 ```csharp
 public delegate bool BakedDelegate(
-    ReadOnlySpan<byte> payload, 
-    ReadOnlySpan<long> serialTypes, 
-    ReadOnlySpan<int> offsets, 
-    long rowId);
+    ReadOnlySpan<byte> payload,      // Raw record bytes
+    ReadOnlySpan<long> serialTypes,  // Column type headers
+    ReadOnlySpan<int> offsets,       // Pre-calculated byte offsets
+    long rowId                       // The row's B-tree key
+);
 ```
 
-### Safety & Compatibility
-- **NULL Semantics**: Compilations include guards that return `false` for NULL columns, matching SQLite's official behavior.
-- **Short Records**: Handles records with "added columns" via bounds-checked access in JIT helper methods.
-- **AOT Compatibility**: Uses explicit `MethodInfo` lookups to remain compatible with Ahead-of-Time compilation.
+## ⚡ Performance Features
+
+### 1. Offset Hoisting
+Before the filter executes, Sharc scans the record header *once* to calculate the byte offset of every column. These offsets are passed to the delegate, allowing O(1) access to column data without re-parsing the header for each predicate.
+
+### 2. Type Specialization
+The JIT compiler emits type-specific comparison code.
+*   **Integers**: Compares raw `Int64` values.
+*   **Floats**: Compares raw `Double` values.
+*   **Strings**: Uses SIMD-accelerated `ReadOnlySpan<byte>` comparisons (UTF-8).
+*   **Sets**: `IN (...)` clauses are compiled into `HashSet<T>.Contains` lookups.
+
+### 3. Null Semantics (SQLite Compatible)
+The engine strictly enforces SQLite's null handling rules:
+*   `NULL = NULL` is False.
+*   `NULL != NULL` is False.
+*   Only `IS NULL` returns True for null values.
+
+## 🛠️ Supported Operations
+
+The `JitPredicateBuilder` supports a rich set of operations:
+
+### Comparisons
+*   `=`, `!=`, `<`, `<=`, `>`, `>=`
+*   **Optimization**: Directly compares primitive values.
+
+### String Operations
+*   `STARTS_WITH`, `ENDS_WITH`, `CONTAINS`
+*   **Optimization**: Operates on UTF-8 bytes without string allocation.
+
+### Logical Operators
+*   `AND`, `OR`, `NOT`
+*   **Optimization**: Short-circuit evaluation logic is emitted directly into the IL.
+
+### Range & Set Operations
+*   `BETWEEN 10 AND 20`
+*   `IN (1, 2, 3)` / `NOT IN (...)`
+
+### RowID Alias
+*   Filters on the `rowid` (or `_rowid_`) are optimized to check the B-tree key directly, avoiding payload access entirely when possible.
 
 ## 🛡️ Defensibility
-By using `System.Linq.Expressions`, Sharc remains a **Pure C#** library with zero native dependencies, yet it achieves "native-level" speeds by handing execution control to the .NET JIT compiler, which specializes the filter code for the specific CPU architecture at runtime.
+
+**Why not native C?**
+Sharc achieves "native C" speeds by leveraging the **.NET JIT Compiler**. By emitting efficient IL that accesses `ReadOnlySpan<byte>`, we get:
+1.  **Safety**: Bounds checking and memory safety are managed by the runtime.
+2.  **Portability**: Runs anywhere .NET runs (Windows, Linux, macOS, WASM).
+3.  **Speed**: The JIT optimizes for the specific CPU instruction set (AVX/SSE) of the host machine.

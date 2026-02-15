@@ -159,7 +159,32 @@
 | Snapshot isolation | ✅ | M8 | Via change counter / WAL frame reads |
 | Write transactions | ❌ | — | Read-only library |
 
-## Platform Support
+
+## Graph Engine (Sharc.Graph)
+
+| Feature | Status | Milestone | Notes |
+|---------|--------|-----------|-------|
+| Node storage (native) | ✅ | M10 | Store arbitrary JSON+Vector on nodes |
+| Edge storage (native) | ✅ | M10 | Directed edges with "Kind" property |
+| Adjacency Index | ✅ | M10 | O(log N) traversal in both directions |
+| BFS Traversal | ✅ | M10 | `Graph.Traverse` with depth limits |
+| Subgraph extraction | 🔶 | Post-MVP | Extract self-contained neighborhood |
+| Vector similarity search | ❌ | — | Requires external vector index (for now) |
+
+## Trust Layer (Sharc.Trust)
+
+| Feature | Status | Milestone | Notes |
+|---------|--------|-----------|-------|
+| SHA-256 Hash Chain | ✅ | M11 | Tamper-evident linked list |
+| ECDsa P-256 Signatures | ✅ | M11 | NIST standard curves |
+| Structured Payloads | ✅ | M11 | JSON payloads with type discrimination |
+| Co-signing | ✅ | M11 | Multi-party approval on single payload |
+| Agent Registry | ✅ | M11 | On-chain identity management |
+| Authority Ceilings | ✅ | M11 | Enforced spending/action limits |
+| Evidence Linking | ✅ | M11 | Cryptographic reference to source rows |
+| Cross-Database Sync | ✅ | M11 | `ExportDeltas` / `ImportDeltas` |
+
+
 
 | Platform | Status | Notes |
 |----------|--------|-------|
