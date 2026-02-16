@@ -2,31 +2,29 @@
 
 **Production-grade encryption extensions for the Sharc database engine.**
 
-This package provides secure, page-level encryption for SQLite databases using modern cryptographic primitives.
+Page-level encryption for SQLite databases using modern cryptographic primitives, with zero native dependencies.
 
 ## Features
 
-- **AES-256-GCM**: Industry-standard authenticated encryption for every database page.
+- **AES-256-GCM**: Authenticated encryption for every database page.
 - **Argon2id**: Memory-hard key derivation to protect against brute-force attacks.
-- **Zero-Dependency**: No native crypto libraries required; uses pure .NET implementations.
+- **Zero-Dependency**: Pure .NET cryptographic implementations — no native libraries.
 - **Secure Lifecycle**: `SharcKeyHandle` ensures keys are handled safely in memory.
 
 ## Quick Start
 
 ```csharp
 using Sharc;
-using Sharc.Crypto;
 
 // Open an encrypted database
-var options = new SharcOpenOptions 
-{ 
-    Password = "your-secure-password" 
-};
+var options = new SharcOpenOptions { Password = "your-secure-password" };
+using var db = SharcDatabase.Open("secure_data.db", options);
 
-using var db = SharcDatabase.Open("secure_context.db", options);
-
-// Reads are transparently decrypted at the page level 
+// Reads are transparently decrypted at the page level
 // with zero intermediate byte[] allocations.
+using var reader = db.CreateReader("users");
+while (reader.Read())
+    Console.WriteLine(reader.GetString(1));
 ```
 
 [Full Documentation](https://github.com/revred/Sharc)

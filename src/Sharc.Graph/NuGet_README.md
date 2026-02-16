@@ -2,32 +2,37 @@
 
 **Graph reasoning and trust layer for the Sharc database engine.**
 
-This package enables Context Space Engineering by overlaying a high-performance graph model and a cryptographic trust layer on standard SQLite files.
+High-performance graph storage and cryptographic trust for AI context space engineering, overlaid on standard SQLite files.
 
 ## Features
 
-- **Context Graph**: B-tree backed relationship store for fast O(log N) node and edge traversal.
-- **Trust Ledger**: Cryptographically signed, hash-chained audit trails for data provenance.
-- **Agent Identity**: ECDSA-based registry for attributing every data mutation to a specific agent.
-- **Token Efficiency**: Designed to deliver precise, context-rich subgraphs to LLMs, reducing token waste.
+- **13.5x Faster Traversal**: 2-hop BFS in 6 us vs SQLite's 82 us.
+- **O(log N) Seeks**: B-tree backed node and edge stores with SeekFirst cursors.
+- **Trust Ledger**: Hash-chained, ECDSA-signed audit trails for data provenance.
+- **Agent Identity**: Cryptographic registry for attributing every mutation to a specific agent.
+- **Token Efficiency**: Precise, context-rich subgraphs for LLMs — reduce token waste by 62-133x.
 
 ## Quick Start
 
 ```csharp
+using Sharc;
 using Sharc.Graph;
 
-// Load a context graph from a Sharc database
+using var db = SharcDatabase.Open("context.db");
 var graph = SharcContextGraph.Create(db);
 
-// Traverse relationships with zero-allocation cursors
-var edges = graph.GetEdges(nodeKey, TraversalDirection.Outgoing);
-while (edges.MoveNext())
+// Traverse relationships
+var result = graph.Traverse(nodeKey, new TraversalPolicy
 {
-    Console.WriteLine($"Found: {edges.TargetKey} (Kind: {edges.Kind})");
-}
+    MaxDepth = 2,
+    Direction = TraversalDirection.Both
+});
 
-// Verify the cryptographic integrity of the data ledger
-bool isTrusted = graph.Ledger.VerifyIntegrity();
+foreach (var node in result.Nodes)
+    Console.WriteLine($"Found: {node.Record.Key}");
+
+// Verify ledger integrity
+bool trusted = graph.Ledger.VerifyIntegrity();
 ```
 
-[Full Documentation](https://github.com/revred/Sharc)
+[Full Documentation](https://github.com/revred/Sharc) | [Live Arena](https://revred.github.io/Sharc/)
