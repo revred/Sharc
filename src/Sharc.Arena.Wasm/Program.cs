@@ -28,7 +28,7 @@ builder.Services.AddSingleton<BenchmarkRunner>();
 builder.Services.AddSingleton<IBenchmarkEngine>(sp => sp.GetRequiredService<BenchmarkRunner>());
 
 // Data loader: fetches benchmark JSON from wwwroot/data/
-builder.Services.AddSingleton<BenchmarkDataLoader>();
+builder.Services.AddScoped<BenchmarkDataLoader>();
 
 // Query pipeline: reference data for 13-query comparison
 builder.Services.AddSingleton<QueryPipelineEngine>();
