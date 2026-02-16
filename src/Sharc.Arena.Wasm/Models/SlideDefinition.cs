@@ -22,4 +22,10 @@ public sealed class SlideDefinition
 
     /// <summary>Base results keyed by engine ID (at scale=1).</summary>
     public required IReadOnlyDictionary<string, EngineBaseResult> BaseResults { get; init; }
+
+    /// <summary>Brief explanation of why this benchmark matters for AI agents.</summary>
+    public string? WhyItMatters { get; init; }
+
+    /// <summary>Section grouping (point-ops, scan-ops, graph-ops, trust-meta).</summary>
+    public string? SectionId { get; init; }
 }

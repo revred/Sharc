@@ -1,0 +1,20 @@
+@* Multiplier badge showing speedup factor *@
+
+@if (Speedup >= 1.1)
+{
+    <span class="speedup-badge" style="background: linear-gradient(135deg, @Color, @(Color)CC)">
+        @FormatSpeedup()
+    </span>
+}
+
+@code {
+    [Parameter] public double Speedup { get; set; }
+    [Parameter] public string Color { get; set; } = "#10B981";
+
+    private string FormatSpeedup()
+    {
+        if (Speedup >= 100) return $"{(int)Speedup}x";
+        if (Speedup >= 10) return $"{Speedup:F0}x";
+        return $"{Speedup:F1}x";
+    }
+}
