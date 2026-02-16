@@ -4,7 +4,6 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using Sharc.Core.Format;
-using Sharc.Core.Primitives;
 
 namespace Sharc.Core.BTree;
 

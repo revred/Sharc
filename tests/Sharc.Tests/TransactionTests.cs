@@ -1,4 +1,3 @@
-using Sharc.Core.IO;
 using Xunit;
 
 namespace Sharc.Tests;

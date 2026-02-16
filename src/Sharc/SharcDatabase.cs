@@ -1,13 +1,10 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text;
-using System.Buffers.Binary;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
-using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Crypto;
 using Sharc.Exceptions;

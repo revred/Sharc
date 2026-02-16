@@ -1,10 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using Sharc.Core;
-using Sharc.Core.Format;
-using Sharc.Trust;
-
 namespace Sharc.Analysis;
 
 /// <summary>

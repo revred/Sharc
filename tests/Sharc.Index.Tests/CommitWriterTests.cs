@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Sharc.Index;
 using Xunit;
 
 namespace Sharc.Index.Tests;

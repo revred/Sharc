@@ -1,4 +1,3 @@
-using Sharc;
 using Sharc.IntegrationTests.Helpers;
 using Xunit;
 

@@ -6,7 +6,6 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
-using Sharc.Core.Primitives;
 using Sharc.Core.Records;
 using Xunit;
 

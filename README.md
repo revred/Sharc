@@ -154,6 +154,32 @@ dotnet test                                             # Run all 1,730 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
+## Project Structure
+
+```text
+src/
+  Sharc/                    Public API + Write Engine + Trust Layer
+  Sharc.Core/               B-Tree, Records, Page I/O, Primitives
+  Sharc.Query/              SQL pipeline: parser, compiler, executor
+  Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
+  Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
+  Sharc.Graph.Surface/      Graph interfaces and models
+  Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
+tests/
+  Sharc.Tests/              1,003 unit tests
+  Sharc.IntegrationTests/   213 end-to-end tests
+  Sharc.Query.Tests/        425 query pipeline tests
+  Sharc.Graph.Tests.Unit/   53 graph tests
+  Sharc.Index.Tests/        22 index CLI tests
+  Sharc.Context.Tests/      14 MCP context tests
+bench/
+  Sharc.Benchmarks/         BenchmarkDotNet suite (Sharc vs SQLite)
+  Sharc.Comparisons/        Graph + query benchmarks
+tools/
+  Sharc.Context/            MCP Context Server
+  Sharc.Index/              Git history → SQLite CLI
+```
+
 ## Current Limitations
 
 - **Query pipeline materializes results** -- CTEs allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries

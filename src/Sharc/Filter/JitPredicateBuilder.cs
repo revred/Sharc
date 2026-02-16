@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using System.Text;
-using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
 namespace Sharc;

@@ -5,7 +5,6 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
-using System.Buffers.Binary;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Xunit;

@@ -1,5 +1,3 @@
-using System;
-
 namespace Sharc.Core.Trust;
 
 /// <summary>

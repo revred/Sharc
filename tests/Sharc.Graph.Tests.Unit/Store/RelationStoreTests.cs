@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Graph.Model;

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Buffers.Binary;
 using Sharc.Exceptions;
 
