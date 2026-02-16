@@ -12,7 +12,7 @@
     "methodology": "Verifying the hash chain and agent identity of the distributed ledger. Sharc uses context-aware HMAC-SHA256 verifiable trails.",
     "whyItMatters": "Trust verification ensures no agent has tampered with shared memory. Without cryptographic proof, multi-agent coordination is unsafe.",
     "densityTiers": [
-      { "id": "md", "label": "\u2014", "rows": 0, "scale": 1 }
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
       "sqlite":    { "notSupported": true, "note": "No built-in ledger" },
@@ -31,20 +31,20 @@
     "scaleMode": "fixed",
     "defaultDensity": "md",
     "methodology": "Total download/package + idle heap. Smaller = faster cold starts, better for mobile/edge.",
-    "whyItMatters": "Every KB of engine weight delays cold start. At 50KB, Sharc loads 30\u00d7 faster than SQLite's 1.5MB WASM binary.",
+    "whyItMatters": "Every KB of engine weight delays cold start. At 50KB, Sharc loads 30x faster than SQLite's 1.5MB WASM binary.",
     "densityTiers": [
-      { "id": "md", "label": "\u2014", "rows": 0, "scale": 1 }
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
       "sqlite":    { "value": 1536, "allocation": "2.1 MB idle", "note": "e_sqlite3.wasm + managed wrapper" },
       "indexeddb": { "value": 0.1,  "allocation": "~0 (built-in)", "note": "Browser-native" },
-      "sharc":     { "value": 50,   "allocation": "50 KB total", "note": "30\u2013200\u00d7 smaller \u2014 pure C#" }
+      "sharc":     { "value": 50,   "allocation": "50 KB total", "note": "30\u2013200x smaller - pure C#" }
     }
   },
   {
     "id": "primitives",
     "title": "Primitives (Sharc-only)",
-    "subtitle": "Byte-level decode \u2014 no equivalent elsewhere",
+    "subtitle": "Byte-level decode - no equivalent elsewhere",
     "icon": "\u269b\ufe0f",
     "unit": "ns",
     "categoryId": "meta",
@@ -54,7 +54,7 @@
     "methodology": "Sharc internals: header parse (8.5ns/0B), varint decode (231ns/100/0B). No equivalent in other engines.",
     "whyItMatters": "These primitives are the foundation of every operation. Single-digit nanosecond parsing shows the zero-overhead design philosophy.",
     "densityTiers": [
-      { "id": "md", "label": "\u2014", "rows": 0, "scale": 1 }
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
       "sqlite":    { "notSupported": true, "note": "Behind C library" },

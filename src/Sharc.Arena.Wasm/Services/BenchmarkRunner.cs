@@ -11,12 +11,12 @@ namespace Sharc.Arena.Wasm.Services;
 ///
 /// Tier 1 (same .NET WASM runtime, Stopwatch + GC alloc tracking):
 ///   - Sharc:  pure C# format reader
-///   - SQLite: Microsoft.Data.Sqlite (C â†’ Emscripten â†’ P/Invoke)
+    ///   - SQLite: Microsoft.Data.Sqlite (C -> Emscripten -> P/Invoke)
 ///
 /// Tier 2 (browser API, JS interop, performance.now() timing):
 ///   - IndexedDB: browser-native key-value store
 ///
-/// SurrealDB: reference data only (MVP â€” live engine deferred).
+/// SurrealDB: reference data only (MVP - live engine deferred).
 /// </summary>
 public sealed class BenchmarkRunner : IBenchmarkEngine
 {
@@ -84,13 +84,13 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
     /// <summary>
     /// Generates the canonical database byte[] ONCE and shares it across all engines.
-    /// Eliminates 3Ã— redundant DataGenerator runs (was: each engine generated its own copy).
+    /// Eliminates 3x redundant DataGenerator runs (was: each engine generated its own copy).
     /// </summary>
     private async Task EnsureAllEnginesInitialized(int userCount, int nodeCount)
     {
         if (userCount != _lastUserCount || nodeCount != _lastNodeCount)
         {
-            // Single generation â€” deterministic seed=42, identical for all engines
+            // Single generation - deterministic seed=42, identical for all engines
             _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
 
             _sharcEngine.Reset();
