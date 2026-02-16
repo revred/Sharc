@@ -31,6 +31,6 @@ builder.Services.AddSingleton<IBenchmarkEngine>(sp => sp.GetRequiredService<Benc
 builder.Services.AddScoped<BenchmarkDataLoader>();
 
 // Query pipeline: reference data for 13-query comparison
-builder.Services.AddSingleton<QueryPipelineEngine>();
+builder.Services.AddScoped<QueryPipelineEngine>();
 
 await builder.Build().RunAsync();
