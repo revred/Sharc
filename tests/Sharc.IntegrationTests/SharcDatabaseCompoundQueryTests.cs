@@ -253,10 +253,10 @@ public class SharcDatabaseCompoundQueryTests
         Assert.Equal(4, names.Count);
     }
 
-    // ─── CTE (WITH) ─────────────────────────────────────────────
+    // ─── Cote (WITH) ─────────────────────────────────────────────
 
     [Fact]
-    public void Query_CteSimpleSelect_ReturnsCteRows()
+    public void Query_CoteSimpleSelect_ReturnsCoteRows()
     {
         var data = CreateCompoundTestDatabase();
         using var db = SharcDatabase.OpenMemory(data);

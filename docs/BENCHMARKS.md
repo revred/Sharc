@@ -170,7 +170,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | | `INTERSECT` | **710 us** | 1,183 us | **1.7x** | 1.4 KB |
 | | `EXCEPT` | **748 us** | 1,231 us | **1.6x** | 1.4 KB |
 | | `3-way UNION ALL` | **279 us** | 1,225 us | **4.4x** | 2.3 KB |
-| **CTE** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** | 309 KB |
+| **Cote** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** | 309 KB |
 | **Parameterized** | `WHERE $param AND $param` | **179 us** | 591 us | **3.3x** | 81 KB |
 
 > **Sharc wins every benchmark.** Key optimizations: lazy column decode (568 B for full-table scan), predicate pushdown, filter compilation caching, query plan caching, streaming 3-way UNION ALL, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
@@ -185,7 +185,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | SQL parsing / query pipeline | **Yes** -- Sharq parser + QueryIntent compiler | Yes (full VDBE) |
 | WHERE filtering | **FilterStar (14+ ops)** + Query API | Yes (via SQL) |
 | GROUP BY / aggregates | **Yes** -- streaming hash aggregator | Yes |
-| UNION / INTERSECT / EXCEPT / CTEs | **Yes** | Yes |
+| UNION / INTERSECT / EXCEPT / Cotes | **Yes** | Yes |
 | JOIN | No | Yes |
 | Write / INSERT | **Yes** | Yes |
 | Native dependencies | **None** | Requires `e_sqlite3` |

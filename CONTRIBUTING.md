@@ -102,7 +102,7 @@ Look for issues labeled [`good first issue`](../../labels/good%20first%20issue).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a full breakdown of the layered design.
 
-The key insight: Sharc reads SQLite pages directly through `ReadOnlySpan<byte>` slicing, bypassing SQLite's VDBE interpreter and P/Invoke boundary. The built-in SQL pipeline (SELECT, WHERE, ORDER BY, GROUP BY, UNION, CTE) compiles queries against the raw B-tree layer for maximum throughput.
+The key insight: Sharc reads SQLite pages directly through `ReadOnlySpan<byte>` slicing, bypassing SQLite's VDBE interpreter and P/Invoke boundary. The built-in SQL pipeline (SELECT, WHERE, ORDER BY, GROUP BY, UNION, Cote) compiles queries against the raw B-tree layer for maximum throughput.
 
 ## Questions?
 
