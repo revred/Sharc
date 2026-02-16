@@ -1,0 +1,29 @@
+@* Page 1: Hero hook — "Read SQLite at Memory Speed" *@
+
+<div class="hook-page">
+    <div class="hook-badge">PURE MANAGED C#</div>
+    <h1 class="hook-title">Read SQLite at<br /><span class="hook-accent">Memory Speed</span></h1>
+    <p class="hook-subtitle">
+        Zero native dependencies. 50 KB footprint. 7x faster seeks.
+        The engine AI agents deserve.
+    </p>
+
+    <div class="hook-pillars">
+        <ValuePillar Icon="&#x26A1;" Stat="7.1x" Label="Faster B-tree seeks" />
+        <ValuePillar Icon="&#x1F4E6;" Stat="50 KB" Label="Total engine size" />
+        <ValuePillar Icon="&#x1F30D;" Stat="12.5x" Label="Faster graph traversal" />
+    </div>
+
+    <div class="hook-cta">
+        <a href="#page-benchmarks" class="btn-primary hook-btn" @onclick:preventDefault @onclick="@(() => OnNavigate.InvokeAsync("page-benchmarks"))">
+            See the Benchmarks
+        </a>
+        <a href="https://github.com/revred/Sharc" target="_blank" rel="noopener noreferrer" class="btn-secondary hook-btn">
+            &#x2605; Star on GitHub
+        </a>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnNavigate { get; set; }
+}

@@ -15,7 +15,8 @@ internal static class StreamingTopNProcessor
     internal static SharcDataReader Apply(
         SharcDataReader source,
         IReadOnlyList<OrderIntent> orderBy,
-        long limitValue)
+        long limitValue,
+        long offsetValue = 0)
     {
         int fieldCount = source.FieldCount;
         var columnNames = source.GetColumnNames();
@@ -42,8 +43,8 @@ internal static class StreamingTopNProcessor
             return 0;
         };
 
-        int limit = (int)Math.Min(limitValue, int.MaxValue);
-        var heap = new TopNHeap(limit, worstFirst);
+        int heapSize = (int)Math.Min(limitValue + offsetValue, int.MaxValue);
+        var heap = new TopNHeap(heapSize, worstFirst);
         QueryValue[]? spare = null;
 
         while (source.Read())
@@ -79,6 +80,17 @@ internal static class StreamingTopNProcessor
         source.Dispose();
 
         var sorted = heap.ExtractSorted();
+
+        if (offsetValue > 0 && offsetValue < sorted.Length)
+        {
+            int skip = (int)Math.Min(offsetValue, sorted.Length);
+            sorted = sorted[skip..];
+        }
+        else if (offsetValue >= sorted.Length)
+        {
+            sorted = [];
+        }
+
         return new SharcDataReader(sorted, columnNames);
     }
 }

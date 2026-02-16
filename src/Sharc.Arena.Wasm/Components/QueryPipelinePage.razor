@@ -1,0 +1,52 @@
+@* Page 4: Query Pipeline Comparison — 13 queries *@
+@inject QueryPipelineEngine QueryEngine
+
+<div class="query-page">
+    <div class="query-badge">QUERY PIPELINE</div>
+    <h2 class="query-title">13 Queries. Head to Head.</h2>
+    <p class="query-subtitle">
+        Sharc's query engine vs SQLite's VDBE &mdash; real performance data from BenchmarkDotNet.
+    </p>
+
+    <div class="query-summary">
+        <div class="query-summary-item sharc-summary">
+            <span class="query-summary-value">@_sharcWins</span>
+            <span class="query-summary-label">Sharc wins</span>
+        </div>
+        <div class="query-summary-item sqlite-summary">
+            <span class="query-summary-value">@_sqliteWins</span>
+            <span class="query-summary-label">SQLite wins</span>
+        </div>
+    </div>
+
+    <div class="query-table">
+        <div class="query-table-header">
+            <span class="query-row-num">#</span>
+            <span class="query-row-query">Query</span>
+            <span class="query-row-sharc">&#x1F988; Sharc</span>
+            <span class="query-row-sqlite">&#x26A1; SQLite</span>
+            <span class="query-row-winner">Winner</span>
+        </div>
+        @for (var i = 0; i < _results.Count; i++)
+        {
+            <QueryRow Result="@_results[i]" Index="@i" />
+        }
+    </div>
+
+    <div class="query-note">
+        Click any row for allocation details. All measurements from BenchmarkDotNet v0.15.8, .NET 10.0.2, 5K row dataset.
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<QueryResult> _results = [];
+    private int _sharcWins;
+    private int _sqliteWins;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _results = await QueryEngine.LoadResultsAsync();
+        _sharcWins = _results.Count(r => r.Winner == "sharc");
+        _sqliteWins = _results.Count(r => r.Winner == "sqlite");
+    }
+}

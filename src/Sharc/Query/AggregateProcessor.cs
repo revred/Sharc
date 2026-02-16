@@ -50,7 +50,7 @@ internal static class AggregateProcessor
         var groups = GroupRows(sourceRows, groupOrdinals);
 
         var result = new List<QueryValue[]>(groups.Count);
-        foreach (var (_, groupRows) in groups)
+        foreach (var groupRows in groups.Values)
         {
             var row = new QueryValue[outColumns.Length];
 
@@ -205,7 +205,7 @@ internal static class AggregateProcessor
         return hasValue ? max : QueryValue.Null;
     }
 
-    private static Dictionary<int, List<QueryValue[]>> GroupRows(
+    private static Dictionary<GroupKey, List<QueryValue[]>> GroupRows(
         List<QueryValue[]> rows, int[] groupOrdinals)
     {
         var comparer = new GroupKeyComparer(groupOrdinals);
@@ -222,13 +222,7 @@ internal static class AggregateProcessor
             list.Add(row);
         }
 
-        // Convert to int-keyed dictionary for the caller
-        var result = new Dictionary<int, List<QueryValue[]>>(groups.Count);
-        int idx = 0;
-        foreach (var (_, list) in groups)
-            result[idx++] = list;
-
-        return result;
+        return groups;
     }
 
     /// <summary>Wraps a row + group ordinals for structural hashing/equality.</summary>

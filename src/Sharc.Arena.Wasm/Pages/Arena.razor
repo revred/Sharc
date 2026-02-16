@@ -1,89 +1,129 @@
 @page "/"
 @using System.Diagnostics
+@inject BenchmarkDataLoader DataLoader
+@inject IJSRuntime JS
 
 <div class="arena-bg-gradient"></div>
 <div class="arena-bg-grid"></div>
 
-<div class="arena-container @(_isMobile ? "mobile" : "")">
-    @* ── Header ── *@
-    <ArenaHeader
-        Slides="@_slides"
-        Engines="@SlideData.Engines"
-        Preset="@_preset"
-        Presets="@SlideData.Presets"
-        State="@_state"
-        DoneCount="@_doneSlides.Count"
-        ElapsedMs="@_elapsedMs"
-        IsLive="@_isLive"
-        OnLiveToggle="@(live => _isLive = live)"
-        OnPresetChange="@ApplyPreset"
-        OnRun="@RunAll"
-        OnStop="@Stop" />
+@if (!_loaded)
+{
+    <div class="arena-loading">Loading benchmark data...</div>
+}
+else
+{
+<PageNav ActivePage="@_activePage" OnNavigate="@NavigateToPage" />
 
-    @* ── Mobile progress dots ── *@
-    @if (_isMobile && _state != BenchmarkState.Idle)
-    {
-        <ProgressDots Slides="@_slides" CurrentIndex="@_currentIndex" DoneSlides="@_doneSlides" />
-    }
+<div class="arena-pages">
+    @* ── Page 1: Hook ── *@
+    <section id="page-hook" class="arena-page">
+        <HookPage OnNavigate="@NavigateToPage" />
+    </section>
 
-    @* ── Layout ── *@
-    <div class="arena-layout @(_showSidebar ? "with-sidebar" : "")">
-        @if (_showSidebar)
-        {
-            <aside class="arena-sidebar">
-                <SideNav
-                    Slides="@_slides"
-                    CurrentIndex="@_currentIndex"
-                    DoneSlides="@_doneSlides"
-                    Running="@(_state == BenchmarkState.Running)"
-                    OnJump="@JumpToSlide" />
-            </aside>
-        }
+    @* ── Page 2: Context Problem ── *@
+    <section id="page-context" class="arena-page">
+        <ContextProblemPage />
+    </section>
 
-        <main class="arena-main">
-            @for (var i = 0; i < _slides.Count; i++)
+    @* ── Page 3: Benchmark Arena ── *@
+    <section id="page-benchmarks" class="arena-page">
+        <div class="arena-container @(_isMobile ? "mobile" : "")">
+            <ArenaHeader
+                Slides="@_slides"
+                Engines="@_engines"
+                Preset="@_preset"
+                Presets="@_presets"
+                State="@_state"
+                DoneCount="@_doneSlides.Count"
+                ElapsedMs="@_elapsedMs"
+                IsLive="@_isLive"
+                OnLiveToggle="@(live => _isLive = live)"
+                OnPresetChange="@ApplyPreset"
+                OnRun="@RunAll"
+                OnStop="@Stop" />
+
+            @if (_isMobile && _state != BenchmarkState.Idle)
             {
-                var index = i;
-                var slide = _slides[i];
-                <div id="slide-@slide.Id">
-                    <SlideCard
-                        Slide="@slide"
-                        Data="@GetSlideResults(slide.Id)"
-                        IsActive="@(_currentIndex == index)"
-                        IsDone="@_doneSlides.Contains(slide.Id)"
-                        Number="@(index + 1)"
-                        Total="@_slides.Count"
-                        IsMobile="@_isMobile"
-                        TileDensity="@GetTileDensity(slide.Id)"
-                        OnDensityChange="@(densityId => SetTileDensity(slide.Id, densityId))"
-                        Running="@(_state == BenchmarkState.Running)" />
-                </div>
+                <ProgressDots Slides="@_slides" CurrentIndex="@_currentIndex" DoneSlides="@_doneSlides" />
             }
 
-            @if (_state == BenchmarkState.Done)
-            {
-                <Scoreboard Results="@_results" Slides="@_slides" Engines="@SlideData.Engines" />
+            <div class="arena-layout @(_showSidebar ? "with-sidebar" : "")">
+                @if (_showSidebar)
+                {
+                    <aside class="arena-sidebar">
+                        <SideNav
+                            Slides="@_slides"
+                            CurrentIndex="@_currentIndex"
+                            DoneSlides="@_doneSlides"
+                            Running="@(_state == BenchmarkState.Running)"
+                            OnJump="@JumpToSlide"
+                            Categories="@_categories" />
+                    </aside>
+                }
 
-                <div class="arena-cta">
-                    <div class="arena-cta-title">&#x1F988; Sharc reads SQLite at memory speed</div>
-                    <p class="arena-cta-text">
-                        Zero allocations &middot; 585ns B-tree seeks &middot; Graph ConceptStore + RelationStore &middot; AES-256-GCM &middot; 50KB footprint &middot; Pure .NET 10
-                    </p>
-                    <div class="arena-cta-links">
-                        <a href="https://github.com/revred/Sharc" target="_blank" rel="noopener noreferrer" class="btn-primary">&#x2605; Star on GitHub</a>
-                        <a href="https://www.linkedin.com/in/revodoc/" target="_blank" rel="noopener noreferrer" class="btn-secondary">Connect on LinkedIn</a>
-                    </div>
-                </div>
-            }
-        </main>
-    </div>
+                <main class="arena-main">
+                    @for (var i = 0; i < _slides.Count; i++)
+                    {
+                        var index = i;
+                        var slide = _slides[i];
+                        <div id="slide-@slide.Id">
+                            <SlideCard
+                                Slide="@slide"
+                                Data="@GetSlideResults(slide.Id)"
+                                IsActive="@(_currentIndex == index)"
+                                IsDone="@_doneSlides.Contains(slide.Id)"
+                                Number="@(index + 1)"
+                                Total="@_slides.Count"
+                                IsMobile="@_isMobile"
+                                TileDensity="@GetTileDensity(slide.Id)"
+                                OnDensityChange="@(densityId => SetTileDensity(slide.Id, densityId))"
+                                Running="@(_state == BenchmarkState.Running)"
+                                Engines="@_engines"
+                                Categories="@_categories" />
+                        </div>
+                    }
+
+                    @if (_state == BenchmarkState.Done)
+                    {
+                        <Scoreboard Results="@_results" Slides="@_slides" Engines="@_engines" />
+                    }
+                </main>
+            </div>
+        </div>
+    </section>
+
+    @* ── Page 4: Query Pipeline ── *@
+    <section id="page-pipeline" class="arena-page">
+        <QueryPipelinePage />
+    </section>
+
+    @* ── Page 5: Trust Demo ── *@
+    <section id="page-trust" class="arena-page">
+        <TrustDemoPage />
+    </section>
+
+    @* ── Page 6: Honest Comparison ── *@
+    <section id="page-honest" class="arena-page">
+        <HonestComparisonPage />
+    </section>
+
+    @* ── Page 7: CTA ── *@
+    <section id="page-cta" class="arena-page">
+        <CtaPage />
+    </section>
 </div>
+}
 
 @code {
     [Inject] private BenchmarkRunner LiveEngine { get; set; } = default!;
     [Inject] private ReferenceEngine StaticEngine { get; set; } = default!;
 
-    private IReadOnlyList<SlideDefinition> _slides = SlideData.CreateSlides();
+    private bool _loaded;
+    private string _activePage = "page-hook";
+    private IReadOnlyList<SlideDefinition> _slides = [];
+    private IReadOnlyList<EngineDefinition> _engines = [];
+    private IReadOnlyList<Preset> _presets = [];
+    private IReadOnlyList<Category> _categories = [];
     private string _preset = "quick";
     private BenchmarkState _state = BenchmarkState.Idle;
     private int _currentIndex = -1;
@@ -96,15 +136,58 @@
     private bool _isMobile;
     private bool _showSidebar;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        _engines = await DataLoader.LoadEnginesAsync();
+        _categories = await DataLoader.LoadCategoriesAsync();
+        _presets = await DataLoader.LoadPresetsAsync();
+        _slides = await DataLoader.LoadAllSlidesAsync();
+        _loaded = true;
+
         ApplyPreset("quick");
         UpdateLayout();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var width = await JS.InvokeAsync<int>("viewportHelper.getWidth");
+                _isMobile = width < 768;
+                _showSidebar = !_isMobile;
+                StateHasChanged();
+            }
+            catch
+            {
+                // JS not available during prerender
+            }
+        }
+    }
+
+    [JSInvokable]
+    public void OnPageVisible(string pageId)
+    {
+        _activePage = pageId;
+        StateHasChanged();
+    }
+
+    private async Task NavigateToPage(string pageId)
+    {
+        _activePage = pageId;
+        try
+        {
+            await JS.InvokeVoidAsync("viewportHelper.scrollToElement", pageId);
+        }
+        catch
+        {
+            // Fallback: no-op
+        }
+    }
+
     private void UpdateLayout()
     {
-        // Default to desktop for SSR; JS interop would update this in a real scenario
         _isMobile = false;
         _showSidebar = true;
     }
@@ -113,7 +196,7 @@
     {
         if (_state == BenchmarkState.Running) return;
         _preset = presetId;
-        var preset = SlideData.Presets.FirstOrDefault(p => p.Id == presetId);
+        var preset = _presets.FirstOrDefault(p => p.Id == presetId);
         if (preset is null) return;
 
         var newDensities = new Dictionary<string, string>();
@@ -176,7 +259,7 @@
         StateHasChanged();
 
         var sw = Stopwatch.StartNew();
-        var activePreset = SlideData.Presets.FirstOrDefault(p => p.Id == _preset)!;
+        var activePreset = _presets.FirstOrDefault(p => p.Id == _preset)!;
 
         for (var i = 0; i < _slides.Count; i++)
         {

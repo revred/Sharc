@@ -1,0 +1,29 @@
+[
+  {
+    "id": "sqlite",
+    "name": "SQLite",
+    "subtitle": "C \u2192 WASM P/Invoke",
+    "color": "#3B82F6",
+    "icon": "\u26a1",
+    "footprint": "~1.5 MB",
+    "tier": 1
+  },
+  {
+    "id": "indexeddb",
+    "name": "IndexedDB",
+    "subtitle": "Browser-native",
+    "color": "#F59E0B",
+    "icon": "\ud83d\uddc4\ufe0f",
+    "footprint": "Built-in",
+    "tier": 2
+  },
+  {
+    "id": "sharc",
+    "name": "Sharc",
+    "subtitle": "Zero-alloc C#",
+    "color": "#10B981",
+    "icon": "\ud83e\udd88",
+    "footprint": "~50 KB",
+    "tier": 1
+  }
+]

@@ -1,0 +1,112 @@
+@* Page 5: Trust Layer Demo — Register → Append → Verify → Tamper & Detect *@
+
+<div class="trust-page">
+    <div class="trust-badge">CRYPTOGRAPHIC TRUST</div>
+    <h2 class="trust-title">Every Memory Has a Proof</h2>
+    <p class="trust-subtitle">
+        Sharc's trust layer gives AI agents cryptographic guarantees.
+        ECDSA identity, hash-chain ledger, tamper detection &mdash; built in.
+    </p>
+
+    <div class="trust-steps">
+        @* Step 1: Register *@
+        <div class="trust-step @(Step >= 1 ? "active" : "")">
+            <div class="trust-step-num">1</div>
+            <div class="trust-step-content">
+                <h3 class="trust-step-title">Register Agent</h3>
+                <p class="trust-step-desc">Generate ECDSA key pair, sign self-attestation</p>
+                @if (Step >= 1)
+                {
+                    <div class="trust-step-result">
+                        <code>agent-id: agent-0</code>
+                        <code>public-key: 04a8c2...9f3b (65 bytes)</code>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @* Step 2: Append *@
+        <div class="trust-step @(Step >= 2 ? "active" : "")">
+            <div class="trust-step-num">2</div>
+            <div class="trust-step-content">
+                <h3 class="trust-step-title">Append to Ledger</h3>
+                <p class="trust-step-desc">Hash-chain entry with HMAC-SHA256 linking</p>
+                @if (Step >= 2)
+                {
+                    <div class="trust-step-result">
+                        <code>entries: 50 appended</code>
+                        <code>chain: prev_hash &#x2192; SHA256(payload + prev) &#x2192; next_hash</code>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @* Step 3: Verify *@
+        <div class="trust-step @(Step >= 3 ? "active" : "")">
+            <div class="trust-step-num">3</div>
+            <div class="trust-step-content">
+                <h3 class="trust-step-title">Verify Chain</h3>
+                <p class="trust-step-desc">Walk entire chain, validate every hash link</p>
+                @if (Step >= 3)
+                {
+                    <div class="trust-step-result success">
+                        <code>&#x2713; All 50 entries verified in 850 &#x00B5;s</code>
+                        <code>&#x2713; Chain integrity: INTACT</code>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @* Step 4: Tamper *@
+        <div class="trust-step @(Step >= 4 ? "active tamper" : "")">
+            <div class="trust-step-num">4</div>
+            <div class="trust-step-content">
+                <h3 class="trust-step-title">Tamper &amp; Detect</h3>
+                <p class="trust-step-desc">Modify entry #25, re-verify chain</p>
+                @if (Step >= 4)
+                {
+                    <div class="trust-step-result error">
+                        <code>&#x2717; TAMPER DETECTED at entry #25</code>
+                        <code>&#x2717; Expected: 7a3f...b2c1 Got: e4d8...a91f</code>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="trust-controls">
+        @if (Step < 4)
+        {
+            <button class="btn-primary trust-btn" @onclick="@NextStep">
+                @StepButtonText
+            </button>
+        }
+        else
+        {
+            <button class="btn-secondary trust-btn" @onclick="@Reset">
+                &#x21BB; Reset Demo
+            </button>
+        }
+    </div>
+
+    <div class="trust-note">
+        This demo illustrates the trust layer concept. In production, Sharc uses real ECDSA P-256 keys
+        and HMAC-SHA256 hash chains stored alongside your data.
+    </div>
+</div>
+
+@code {
+    private int Step { get; set; }
+
+    private string StepButtonText => Step switch
+    {
+        0 => "1. Register Agent",
+        1 => "2. Append 50 Entries",
+        2 => "3. Verify Chain",
+        3 => "4. Tamper & Detect",
+        _ => "Next"
+    };
+
+    private void NextStep() => Step = Math.Min(Step + 1, 4);
+    private void Reset() => Step = 0;
+}

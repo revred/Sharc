@@ -1,0 +1,51 @@
+@* Page 6: Where Sharc Excels vs Where SQLite Excels *@
+
+<div class="honest-page">
+    <div class="honest-badge">HONEST ASSESSMENT</div>
+    <h2 class="honest-title">Where Each Engine Excels</h2>
+    <p class="honest-subtitle">
+        No database is best at everything. Here's when to choose each.
+    </p>
+
+    <div class="honest-grid">
+        <div class="honest-card sharc-excels">
+            <div class="honest-card-header">
+                <span class="honest-icon">&#x1F988;</span>
+                <span class="honest-card-title" style="color: var(--sharc)">Sharc Excels At</span>
+            </div>
+            <ul class="honest-list">
+                <li><strong>Cold start</strong> &mdash; 4 &#x00B5;s vs 142 ms (35,000x)</li>
+                <li><strong>Point lookups</strong> &mdash; 3.4 &#x00B5;s B-tree seeks</li>
+                <li><strong>Graph traversal</strong> &mdash; 6 &#x00B5;s 2-hop BFS</li>
+                <li><strong>Footprint</strong> &mdash; 50 KB vs 1.5 MB</li>
+                <li><strong>Page encryption</strong> &mdash; AES-256-GCM built-in</li>
+                <li><strong>Trust layer</strong> &mdash; ECDSA + hash-chain ledger</li>
+                <li><strong>WASM deployment</strong> &mdash; no native dependencies</li>
+            </ul>
+        </div>
+
+        <div class="honest-card sqlite-excels">
+            <div class="honest-card-header">
+                <span class="honest-icon">&#x26A1;</span>
+                <span class="honest-card-title" style="color: var(--sqlite)">SQLite Excels At</span>
+            </div>
+            <ul class="honest-list">
+                <li><strong>Complex queries</strong> &mdash; full SQL optimizer (VDBE)</li>
+                <li><strong>WHERE filtering</strong> &mdash; predicate pushdown wins</li>
+                <li><strong>CTEs</strong> &mdash; mature query planner, faster at complex CTEs</li>
+                <li><strong>Write throughput</strong> &mdash; decades of WAL optimization</li>
+                <li><strong>Ecosystem</strong> &mdash; every language has a binding</li>
+                <li><strong>Maturity</strong> &mdash; 24 years of battle testing</li>
+                <li><strong>Full SQL</strong> &mdash; JOINs, subqueries, window functions</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="honest-verdict">
+        <strong>Bottom line:</strong> If your agent needs fast reads, small footprint, and cryptographic trust &mdash; Sharc.
+        If you need complex SQL and write-heavy workloads &mdash; SQLite remains excellent.
+    </div>
+</div>
+
+@code {
+}

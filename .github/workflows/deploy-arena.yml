@@ -2,7 +2,7 @@ name: Deploy Sharc Arena
 
 on:
   push:
-    branches: [ main, arena-mvp ]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
