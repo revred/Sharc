@@ -46,12 +46,20 @@
     <!-- Optimization for WASM/Size -->
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- SourceLink: embed source info in PDBs for debugger support -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
-  <!-- Include README.md in NuGet packages for all source projects -->
+  <!-- SourceLink for src projects -->
   <ItemGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
   </ItemGroup>
+
+  <!-- Each packable project includes its own NuGet_README.md (see individual csprojs) -->
 
   <!-- ─── Test projects (tests/**) ─── -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('tests'))">

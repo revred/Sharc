@@ -178,6 +178,8 @@ bench/
 tools/
   Sharc.Context/            MCP Context Server
   Sharc.Index/              Git history → SQLite CLI
+docs/                       Architecture, benchmarks, cookbook, FAQ, migration guides
+PRC/                        Architecture decisions, specs, execution plans
 ```
 
 ## Current Limitations

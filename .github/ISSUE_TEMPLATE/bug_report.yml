@@ -1,0 +1,55 @@
+name: Bug Report
+description: Report a bug in Sharc
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill in as much detail as you can.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal code or steps to reproduce the issue.
+      placeholder: |
+        using var db = SharcDatabase.Open("myfile.db");
+        using var reader = db.CreateReader("mytable");
+        // ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Runtime, OS, Sharc version.
+      placeholder: |
+        - Sharc version: 1.0.0-beta.1
+        - .NET version: 10.0
+        - OS: Windows 11 / Ubuntu 24.04 / macOS 15
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Core Engine (Sharc / Sharc.Core)
+        - Query Pipeline (Sharc.Query)
+        - Encryption (Sharc.Crypto)
+        - Graph (Sharc.Graph)
+        - Trust Layer
+        - Arena (Blazor WASM)
+        - Other
+    validations:
+      required: true
