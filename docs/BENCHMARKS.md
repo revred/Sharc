@@ -161,7 +161,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 
 | Category | Operation | Sharc | SQLite | Speedup | Sharc Alloc |
 |:---|:---|---:|---:|:---:|---:|
-| **Simple** | `SELECT * FROM t` (2.5K rows) | **713 us** | 747 us | **1.05x** | 414 KB |
+| **Simple** | `SELECT * FROM t` (2.5K rows) | **64 us** | 586 us | **9.2x** | 568 B |
 | **Filtered** | `SELECT WHERE age > 30` | **193 us** | 802 us | **4.1x** | 98 KB |
 | **Medium** | `WHERE + ORDER BY + LIMIT 100` | **434 us** | 580 us | **1.3x** | 424 KB |
 | **Aggregate** | `GROUP BY + COUNT + AVG` | **353 us** | 475 us | **1.3x** | 5.3 KB |
@@ -173,7 +173,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | **CTE** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** | 309 KB |
 | **Parameterized** | `WHERE $param AND $param` | **179 us** | 591 us | **3.3x** | 81 KB |
 
-> **Sharc wins every benchmark.** Key optimizations: predicate pushdown, filter compilation caching, query plan caching, streaming 3-way UNION ALL, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
+> **Sharc wins every benchmark.** Key optimizations: lazy column decode (568 B for full-table scan), predicate pushdown, filter compilation caching, query plan caching, streaming 3-way UNION ALL, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
 
 ---
 

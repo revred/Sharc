@@ -99,14 +99,14 @@ public sealed class SharcDataReader : IDisposable
         // Rent a reusable buffer from ArrayPool — returned in Dispose()
         _reusableBuffer = ArrayPool<ColumnValue>.Shared.Rent(columns.Count);
 
-        // Pool lazy-decode buffers when using projection
-        if (projection != null)
-        {
-            _serialTypes = ArrayPool<long>.Shared.Rent(columns.Count);
-            _decodedGenerations = ArrayPool<int>.Shared.Rent(columns.Count);
-            _serialTypes.AsSpan(0, columns.Count).Clear();
-            _decodedGenerations.AsSpan(0, columns.Count).Clear();
-        }
+        // Always use lazy decode — parse serial type headers on Read(),
+        // decode individual columns only when Get*() is called. This avoids
+        // string allocation for columns that are never accessed (e.g. SELECT *
+        // where the caller only reads column 0).
+        _serialTypes = ArrayPool<long>.Shared.Rent(columns.Count);
+        _decodedGenerations = ArrayPool<int>.Shared.Rent(columns.Count);
+        _serialTypes.AsSpan(0, columns.Count).Clear();
+        _decodedGenerations.AsSpan(0, columns.Count).Clear();
 
         // Pool serial type buffer for byte-level filter evaluation
         if (filterNode != null)
@@ -430,50 +430,24 @@ public sealed class SharcDataReader : IDisposable
 
     private void DecodeCurrentRow()
     {
-        if (_projection != null)
+        // Always lazy decode: parse serial type headers only.
+        // Column values are decoded on demand by Get*() calls.
+        // This avoids allocating strings for columns never accessed.
+        if (_filterNode != null)
         {
-            // PROJECTION PATH (Lazy Decode)
-            // If we have a filter, we already parsed the serial types in Read().
-            // Reuse them to avoid re-parsing the header.
-            if (_filterNode != null)
-            {
-                // Copy filter serial types to projection serial types
-                // We only need to copy up to the number of columns in the table (or found columns)
-                int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
-                Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
-
-                // Cache the body offset for fast lazy decoding
-                _currentBodyOffset = _filterBodyOffset;
-            }
-            else
-            {
-                // Lazy decode: read serial types (varint parsing, no body decode).
-                _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _currentBodyOffset);
-            }
-
-            // Increment generation instead of Array.Clear — O(1) vs O(N)
-            _decodedGeneration++;
-            _lazyMode = true;
+            // Reuse the pre-parsed serial types from the filter step
+            int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
+            Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
+            _currentBodyOffset = _filterBodyOffset;
         }
         else
         {
-            // FULL ROW PATH
-            if (_filterNode != null && _filterSerialTypes != null)
-            {
-                // Optimization: Use the pre-parsed serial types from the filter step
-                // to skip header parsing in RecordDecoder.
-                _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!,
-                    _filterSerialTypes.AsSpan(0, Math.Min(_filterColCount, _filterSerialTypes.Length)),
-                    _filterBodyOffset);
-            }
-            else
-            {
-                // Full decode — reuse the pre-allocated buffer
-                _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!);
-            }
-            _lazyMode = false;
+            _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _currentBodyOffset);
         }
 
+        // Increment generation instead of Array.Clear — O(1) vs O(N)
+        _decodedGeneration++;
+        _lazyMode = true;
         _currentRow = _reusableBuffer;
     }
 
