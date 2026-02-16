@@ -4,8 +4,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Sharc.Arena.Wasm</RootNamespace>
     <AssemblyName>Sharc.Arena.Wasm</AssemblyName>
-    <!-- Blazor WASM specific -->
-    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <!-- Arena is an app, not a library — disable doc generation, suppress non-library warnings -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
@@ -20,18 +18,8 @@
     <!-- DataGenerator uses Microsoft.Data.Sqlite for in-memory DB → byte[] export -->
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" VersionOverride="2.1.10" />
-    <!-- Ensure native static library is linked for WASM -->
-    <NativeFileReference Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\2.1.10\runtimes\browser-wasm\nativeassets\net6.0\e_sqlite3.a" />
+    <!-- SQLitePCLRaw auto-links net9.0/e_sqlite3.a via buildTransitive; no manual NativeFileReference needed -->
   </ItemGroup>
-
-  <!-- Explicitly copy native asset to output to ensure it's available if dynamic loading occurs -->
-  <Target Name="CopyNativeAssets" AfterTargets="Build">
-    <ItemGroup>
-      <_NativeAsset Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\2.1.10\runtimes\browser-wasm\nativeassets\net6.0\e_sqlite3.a" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_NativeAsset)" DestinationFolder="$(OutDir)wwwroot\_framework" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_NativeAsset)" DestinationFolder="$(PublishDir)wwwroot\_framework" SkipUnchangedFiles="true" Condition="'$(PublishDir)' != ''" />
-  </Target>
 
   <ItemGroup>
     <!-- Tier 1: Sharc (pure C#) -->

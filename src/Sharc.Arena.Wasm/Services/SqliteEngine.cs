@@ -10,7 +10,7 @@ namespace Sharc.Arena.Wasm.Services;
 
 /// <summary>
 /// Tier 1 live engine: runs Microsoft.Data.Sqlite directly in .NET WASM.
-/// Same runtime as Sharc â€” identical timing (Stopwatch + GC alloc tracking).
+/// Same runtime as Sharc — identical timing (Stopwatch + GC alloc tracking).
 /// SQLitePCLRaw bundles e_sqlite3 compiled to WASM via Emscripten, accessed via P/Invoke.
 /// </summary>
 public sealed class SqliteEngine : IDisposable
@@ -71,7 +71,7 @@ public sealed class SqliteEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
             Allocation = $"{allocKb:F1} KB",
-            Note = "Microsoft.Data.Sqlite â€” in-process P/Invoke",
+            Note = "Microsoft.Data.Sqlite — in-process P/Invoke",
         };
     }
 

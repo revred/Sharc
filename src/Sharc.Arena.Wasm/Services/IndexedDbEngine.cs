@@ -12,7 +12,7 @@ namespace Sharc.Arena.Wasm.Services;
 /// <summary>
 /// Tier 2 live engine: runs IndexedDB via IJSRuntime interop (browser-native API).
 /// Timed with performance.now() inside JavaScript (excludes interop overhead).
-/// IndexedDB is a browser API â€” JS interop is the only option.
+/// IndexedDB is a browser API — JS interop is the only option.
 /// </summary>
 public sealed class IndexedDbEngine
 {

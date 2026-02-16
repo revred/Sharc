@@ -1,5 +1,26 @@
 @inherits LayoutComponentBase
 
 <div class="arena-root">
-    @Body
+    <ErrorBoundary @ref="_errorBoundary">
+        <ChildContent>
+            @Body
+        </ChildContent>
+        <ErrorContent Context="ex">
+            <div style="padding:2rem;color:#f87171;background:#1a1a2e;font-family:monospace;white-space:pre-wrap;">
+                <h2>Arena Error</h2>
+                <p>@ex.GetType().Name: @ex.Message</p>
+                <details>
+                    <summary>Stack trace</summary>
+                    <pre style="font-size:0.75rem;overflow-x:auto;">@ex.StackTrace</pre>
+                </details>
+                <button style="margin-top:1rem;padding:0.5rem 1rem;cursor:pointer;" @onclick="Recover">Retry</button>
+            </div>
+        </ErrorContent>
+    </ErrorBoundary>
 </div>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    private void Recover() => _errorBoundary?.Recover();
+}
