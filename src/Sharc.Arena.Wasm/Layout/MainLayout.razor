@@ -9,6 +9,12 @@
             <div style="padding:2rem;color:#f87171;background:#1a1a2e;font-family:monospace;white-space:pre-wrap;">
                 <h2>Arena Error</h2>
                 <p>@ex.GetType().Name: @ex.Message</p>
+                @{ var inner = ex.InnerException; }
+                @while (inner is not null)
+                {
+                    <p style="margin-left:1rem;color:#fbbf24;">&#x2514; @inner.GetType().Name: @inner.Message</p>
+                    inner = inner.InnerException;
+                }
                 <details>
                     <summary>Stack trace</summary>
                     <pre style="font-size:0.75rem;overflow-x:auto;">@ex.StackTrace</pre>
