@@ -16,25 +16,28 @@ namespace Sharc.Query;
 /// The "worst" element is at the root: for ASC ordering, the root is the largest;
 /// for DESC ordering, the root is the smallest. This ensures that when we evict,
 /// we always keep the best K rows.
+///
+/// Generic over <typeparamref name="TComparer"/> to enable JIT specialization —
+/// the struct comparer's Compare method is inlined, eliminating delegate overhead.
 /// </remarks>
-internal sealed class TopNHeap
+internal sealed class TopNHeap<TComparer> where TComparer : IComparer<QueryValue[]>
 {
     private readonly QueryValue[][] _heap;
     private readonly int _capacity;
-    private readonly Comparison<QueryValue[]> _worstFirst;
+    private readonly TComparer _comparer;
     private int _count;
 
     /// <summary>
     /// Creates a new top-N heap.
     /// </summary>
     /// <param name="capacity">Maximum number of rows to retain (the LIMIT value).</param>
-    /// <param name="worstFirst">Comparison that orders the "worst" row first (positive = a is worse).
+    /// <param name="comparer">Comparer that orders the "worst" row first (positive = a is worse).
     /// For ASC sort, this means larger values are "worse" (max-heap).
     /// For DESC sort, smaller values are "worse" (min-heap).</param>
-    internal TopNHeap(int capacity, Comparison<QueryValue[]> worstFirst)
+    internal TopNHeap(int capacity, TComparer comparer)
     {
         _capacity = capacity;
-        _worstFirst = worstFirst;
+        _comparer = comparer;
         _heap = new QueryValue[capacity][];
         _count = 0;
     }
@@ -76,7 +79,7 @@ internal sealed class TopNHeap
             return true;
         }
 
-        if (_worstFirst(row, _heap[0]) < 0)
+        if (_comparer.Compare(row, _heap[0]) < 0)
         {
             evicted = _heap[0];
             _heap[0] = row;
@@ -117,7 +120,7 @@ internal sealed class TopNHeap
         while (index > 0)
         {
             int parent = (index - 1) / 2;
-            if (_worstFirst(_heap[index], _heap[parent]) > 0)
+            if (_comparer.Compare(_heap[index], _heap[parent]) > 0)
             {
                 (_heap[index], _heap[parent]) = (_heap[parent], _heap[index]);
                 index = parent;
@@ -139,9 +142,9 @@ internal sealed class TopNHeap
             int right = 2 * index + 2;
             int worst = index;
 
-            if (left < count && _worstFirst(_heap[left], _heap[worst]) > 0)
+            if (left < count && _comparer.Compare(_heap[left], _heap[worst]) > 0)
                 worst = left;
-            if (right < count && _worstFirst(_heap[right], _heap[worst]) > 0)
+            if (right < count && _comparer.Compare(_heap[right], _heap[worst]) > 0)
                 worst = right;
 
             if (worst == index) break;
