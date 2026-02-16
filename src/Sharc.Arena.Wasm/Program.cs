@@ -1,36 +1,47 @@
-// Copyright (c) Ram Revanur. All rights reserved.
-// Licensed under the MIT License.
-
-
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Sharc.Arena.Wasm;
+using Sharc.Arena.Wasm.Layout;
 using Sharc.Arena.Wasm.Services;
 
-var builder = WebAssemblyHostBuilder.CreateDefault(args);
-builder.RootComponents.Add<App>("#app");
-builder.RootComponents.Add<HeadOutlet>("head::after");
+namespace Sharc.Arena.Wasm;
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+public partial class Program
+{
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(MainLayout))]
+    public static async Task Main(string[] args)
+    {
+        var builder = WebAssemblyHostBuilder.CreateDefault(args);
+        ConfigureServices(builder);
+        await builder.Build().RunAsync();
+    }
 
-// Tier 1: Native .NET engines (Stopwatch + GC alloc tracking)
-builder.Services.AddSingleton<SharcEngine>();
-builder.Services.AddSingleton<SqliteEngine>();
+    static void ConfigureServices(WebAssemblyHostBuilder builder)
+    {
+        builder.RootComponents.Add<App>("#app");
+        builder.RootComponents.Add<HeadOutlet>("head::after");
 
-// Tier 2: Browser API engine (JS interop + performance.now())
-builder.Services.AddSingleton<IndexedDbEngine>();
+        builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
-// Reference engine (static baseline data)
-builder.Services.AddSingleton<ReferenceEngine>();
+        // Tier 1: Native .NET engines (Stopwatch + GC alloc tracking)
+        builder.Services.AddSingleton<SharcEngine>();
+        builder.Services.AddSingleton<SqliteEngine>();
 
-// Orchestrator: routes to live engines, falls back to reference
-builder.Services.AddSingleton<BenchmarkRunner>();
-builder.Services.AddSingleton<IBenchmarkEngine>(sp => sp.GetRequiredService<BenchmarkRunner>());
+        // Tier 2: Browser API engine (JS interop + performance.now())
+        builder.Services.AddSingleton<IndexedDbEngine>();
 
-// Data loader: fetches benchmark JSON from wwwroot/data/
-builder.Services.AddScoped<BenchmarkDataLoader>();
+        // Reference engine (static baseline data)
+        builder.Services.AddSingleton<ReferenceEngine>();
 
-// Query pipeline: reference data for 13-query comparison
-builder.Services.AddScoped<QueryPipelineEngine>();
+        // Orchestrator: routes to live engines, falls back to reference
+        builder.Services.AddSingleton<BenchmarkRunner>();
+        builder.Services.AddSingleton<IBenchmarkEngine>(sp => sp.GetRequiredService<BenchmarkRunner>());
 
-await builder.Build().RunAsync();
+        // Data loader: fetches benchmark JSON from wwwroot/data/
+        builder.Services.AddScoped<BenchmarkDataLoader>();
+
+        // Query pipeline: reference data for 13-query comparison
+        builder.Services.AddScoped<QueryPipelineEngine>();
+    }
+}
