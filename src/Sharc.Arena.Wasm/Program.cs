@@ -10,6 +10,7 @@ namespace Sharc.Arena.Wasm;
 public partial class Program
 {
     [DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(MainLayout))]
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(Pages.Arena))]
     public static async Task Main(string[] args)
     {
         var builder = WebAssemblyHostBuilder.CreateDefault(args);
