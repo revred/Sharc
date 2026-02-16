@@ -13,6 +13,10 @@ public partial class Program
     [DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(Pages.Arena))]
     public static async Task Main(string[] args)
     {
+        // Explicit SQLitePCLRaw init — required in WASM before any SqliteConnection use.
+        // Without this, the static constructor throws TypeInitializationException.
+        SQLitePCL.Batteries_V2.Init();
+
         var builder = WebAssemblyHostBuilder.CreateDefault(args);
         ConfigureServices(builder);
         await builder.Build().RunAsync();

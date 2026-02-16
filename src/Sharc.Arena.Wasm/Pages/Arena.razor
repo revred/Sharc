@@ -28,28 +28,40 @@
                 @if (_loadPhase >= 2) { <span class="loading-check">&#x2713;</span> }
             </div>
 
-            <div class="loading-engine @(_loadPhase >= 4 ? "done" : _loadPhase == 3 ? "active" : "")">
+            <div class="loading-engine @(_loadPhase >= 4 ? (_sqliteError is null ? "done" : "error") : _loadPhase == 3 ? "active" : "")">
                 <span class="loading-engine-icon">&#x26A1;</span>
                 <div class="loading-engine-info">
                     <span class="loading-engine-name">SQLite <span class="loading-engine-size">1.5 MB</span></span>
-                    @if (_loadPhase >= 4)
+                    @if (_loadPhase >= 4 && _sqliteError is null)
                     {
                         <span class="loading-engine-time">@($"{_sqliteInitMs:F1}")ms &middot; @FormatBytes(_sqliteInitAlloc)</span>
+                    }
+                    else if (_loadPhase >= 4 && _sqliteError is not null)
+                    {
+                        <span class="loading-engine-time" style="color:#f87171;">WASM native init failed</span>
                     }
                     else if (_loadPhase == 3)
                     {
                         <span class="loading-engine-time loading-pulse">loading...</span>
                     }
                 </div>
-                @if (_loadPhase >= 4) { <span class="loading-check">&#x2713;</span> }
+                @if (_loadPhase >= 4 && _sqliteError is null) { <span class="loading-check">&#x2713;</span> }
+                @if (_loadPhase >= 4 && _sqliteError is not null) { <span class="loading-check" style="color:#f87171;">&#x2717;</span> }
             </div>
         </div>
 
         @if (_loadPhase >= 4)
         {
             <div class="loading-verdict">
-                @{ var ratio = _sqliteInitMs / Math.Max(0.001, _sharcInitMs); }
-                Sharc loaded <strong>@($"{ratio:F0}x faster")</strong>
+                @if (_sqliteError is null)
+                {
+                    var ratio = _sqliteInitMs / Math.Max(0.001, _sharcInitMs);
+                    <span>Sharc loaded <strong>@($"{ratio:F0}x faster")</strong></span>
+                }
+                else
+                {
+                    <span style="color:#fbbf24;font-size:0.75rem;">@_sqliteError</span>
+                }
             </div>
         }
 
@@ -173,6 +185,7 @@ else
     private long _sharcInitAlloc;
     private double _sqliteInitMs;
     private long _sqliteInitAlloc;
+    private string? _sqliteError;
     private string _activePage = "page-hook";
     private IReadOnlyList<SlideDefinition> _slides = [];
     private IReadOnlyList<EngineDefinition> _engines = [];
@@ -203,19 +216,32 @@ else
         StateHasChanged();
         await Task.Yield(); // flush UI
 
-        var coldStart = LiveEngine.TimeColdStart();
+        try
+        {
+            var coldStart = LiveEngine.TimeColdStart();
 
-        _sharcInitMs = coldStart.SharcMs;
-        _sharcInitAlloc = coldStart.SharcAlloc;
-        _loadPhase = 2;
-        StateHasChanged();
-        await Task.Yield();
+            _sharcInitMs = coldStart.SharcMs;
+            _sharcInitAlloc = coldStart.SharcAlloc;
+            _loadPhase = 2;
+            StateHasChanged();
+            await Task.Yield();
 
-        _sqliteInitMs = coldStart.SqliteMs;
-        _sqliteInitAlloc = coldStart.SqliteAlloc;
-        _loadPhase = 4;
-        StateHasChanged();
-        await Task.Delay(600); // let user see the result
+            _sqliteInitMs = coldStart.SqliteMs;
+            _sqliteInitAlloc = coldStart.SqliteAlloc;
+            _loadPhase = 4;
+            StateHasChanged();
+            await Task.Delay(600); // let user see the result
+        }
+        catch (Exception ex)
+        {
+            // SQLite native init can fail in WASM — proceed with Arena anyway
+            _sqliteError = $"{ex.GetType().Name}: {ex.Message}";
+            if (ex.InnerException is not null)
+                _sqliteError += $" → {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+            _loadPhase = 4;
+            StateHasChanged();
+            await Task.Delay(600);
+        }
 
         _loadPhase = 5;
         StateHasChanged();
