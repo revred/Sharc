@@ -24,6 +24,15 @@
     <NativeFileReference Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\2.1.10\runtimes\browser-wasm\nativeassets\net6.0\e_sqlite3.a" />
   </ItemGroup>
 
+  <!-- Explicitly copy native asset to output to ensure it's available if dynamic loading occurs -->
+  <Target Name="CopyNativeAssets" AfterTargets="Build">
+    <ItemGroup>
+      <_NativeAsset Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\2.1.10\runtimes\browser-wasm\nativeassets\net6.0\e_sqlite3.a" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_NativeAsset)" DestinationFolder="$(OutDir)wwwroot\_framework" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_NativeAsset)" DestinationFolder="$(PublishDir)wwwroot\_framework" SkipUnchangedFiles="true" Condition="'$(PublishDir)' != ''" />
+  </Target>
+
   <ItemGroup>
     <!-- Tier 1: Sharc (pure C#) -->
     <ProjectReference Include="..\Sharc\Sharc.csproj" />
