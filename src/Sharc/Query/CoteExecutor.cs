@@ -15,19 +15,19 @@ internal static class CoteExecutor
     /// <summary>
     /// Materializes all Cotes in order, returning a lookup of Cote name → (rows, columns).
     /// </summary>
-    internal static Dictionary<string, (QueryValue[][] rows, string[] columns)> MaterializeCotes(
+    internal static Dictionary<string, (List<QueryValue[]> rows, string[] columns)> MaterializeCotes(
         SharcDatabase db,
         IReadOnlyList<CoteIntent> cotes,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        var results = new Dictionary<string, (QueryValue[][] rows, string[] columns)>(
+        var results = new Dictionary<string, (List<QueryValue[]> rows, string[] columns)>(
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var cote in cotes)
         {
             var (rows, columns) = CompoundQueryExecutor.ExecuteAndMaterialize(
                 db, cote.Query, parameters, results);
-            results[cote.Name] = (rows.ToArray(), columns);
+            results[cote.Name] = (rows, columns);
         }
 
         return results;
@@ -41,7 +41,7 @@ internal static class CoteExecutor
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)> coteResults)
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)> coteResults)
     {
         if (coteResults.TryGetValue(intent.TableName, out var coteData))
         {
@@ -79,7 +79,7 @@ internal static class CoteExecutor
             if (needsLimit)
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
-            return new SharcDataReader(rows.ToArray(), columnNames);
+            return new SharcDataReader(rows, columnNames);
         }
 
         return CompoundQueryExecutor.ExecuteIntent(db, intent, parameters);

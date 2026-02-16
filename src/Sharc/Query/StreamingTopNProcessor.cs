@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Runtime.CompilerServices;
 using Sharc.Query.Intent;
 
 namespace Sharc.Query;
@@ -32,19 +33,9 @@ internal static class StreamingTopNProcessor
             descending[i] = orderBy[i].Descending;
         }
 
-        Comparison<QueryValue[]> worstFirst = (a, b) =>
-        {
-            for (int i = 0; i < ordinals.Length; i++)
-            {
-                int cmp = QueryValueOps.CompareValues(a[ordinals[i]], b[ordinals[i]]);
-                if (cmp != 0)
-                    return descending[i] ? -cmp : cmp;
-            }
-            return 0;
-        };
-
+        var comparer = new WorstFirstComparer(ordinals, descending);
         int heapSize = (int)Math.Min(limitValue + offsetValue, int.MaxValue);
-        var heap = new TopNHeap(heapSize, worstFirst);
+        var heap = new TopNHeap<WorstFirstComparer>(heapSize, comparer);
         QueryValue[]? spare = null;
 
         while (source.Read())
@@ -92,5 +83,33 @@ internal static class StreamingTopNProcessor
         }
 
         return new SharcDataReader(sorted, columnNames);
+    }
+
+    /// <summary>
+    /// Struct comparer for the TopN heap — enables JIT specialization (no delegate/closure alloc).
+    /// Orders rows so the "worst" compares as positive (max-heap root = worst retained row).
+    /// </summary>
+    private readonly struct WorstFirstComparer : IComparer<QueryValue[]>
+    {
+        private readonly int[] _ordinals;
+        private readonly bool[] _descending;
+
+        internal WorstFirstComparer(int[] ordinals, bool[] descending)
+        {
+            _ordinals = ordinals;
+            _descending = descending;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int Compare(QueryValue[]? a, QueryValue[]? b)
+        {
+            for (int i = 0; i < _ordinals.Length; i++)
+            {
+                int cmp = QueryValueOps.CompareValues(a![_ordinals[i]], b![_ordinals[i]]);
+                if (cmp != 0)
+                    return _descending[i] ? -cmp : cmp;
+            }
+            return 0;
+        }
     }
 }

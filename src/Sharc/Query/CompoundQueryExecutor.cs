@@ -23,26 +23,40 @@ internal static class CompoundQueryExecutor
         // ─── Lazy Cote: resolve references into real table intents ────
         // Instead of materializing all Cote rows upfront, inline simple Cotes
         // so streaming paths (concat, TopN, index-based set ops) remain available.
+        // Resolved intents are cached on the QueryPlan so the same object reference
+        // is reused across calls — this is critical for CreateReaderFromIntent's
+        // CachedReaderInfo cache (keyed by QueryIntent reference equality).
         if (plan.HasCotes)
         {
+            // Fast path: reuse previously resolved intents (reader cache will hit)
+            if (!plan.IsCompound && plan.ResolvedSimple != null)
+                return ExecuteIntent(db, plan.ResolvedSimple, parameters);
+            if (plan.IsCompound && plan.ResolvedCompound != null)
+                return ExecuteCompoundResolved(db, plan.ResolvedCompound, parameters);
+
             var coteMap = BuildCoteIntentMap(plan.Cotes!);
 
             if (!plan.IsCompound)
             {
                 // Cote → SELECT WHERE: single cursor with merged filters
                 if (CanResolveCoteSimple(plan.Simple!, coteMap))
-                    return ExecuteResolvedSimple(db, plan.Simple!, coteMap, parameters);
+                {
+                    var resolved = ResolveSingleIntent(plan.Simple!, coteMap);
+                    plan.ResolvedSimple = resolved; // Cache for subsequent calls
+                    return ExecuteIntent(db, resolved, parameters);
+                }
             }
             else if (CanResolveCompound(plan.Compound!, coteMap))
             {
                 // Cote + compound: resolve references, then use streaming paths
                 var resolved = ResolveCompound(plan.Compound!, coteMap);
+                plan.ResolvedCompound = resolved; // Cache for subsequent calls
                 return ExecuteCompoundResolved(db, resolved, parameters);
             }
         }
 
         // ─── Fallback: materialize Cotes for complex cases ────────────
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults = null;
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults = null;
         if (plan.HasCotes)
             coteResults = CoteExecutor.MaterializeCotes(db, plan.Cotes!, parameters);
 
@@ -65,7 +79,7 @@ internal static class CompoundQueryExecutor
                 return ExecuteIndexSetOp(db, plan.Compound!, parameters);
 
             var (rows, columns) = ExecuteCompoundCore(db, plan.Compound!, parameters, coteResults);
-            return new SharcDataReader(rows.ToArray(), columns);
+            return new SharcDataReader(rows, columns);
         }
 
         // Simple query with Cotes
@@ -246,7 +260,7 @@ internal static class CompoundQueryExecutor
 
         // Fallback: standard compound execution without Cote results
         var (rows, columns) = ExecuteCompoundCore(db, resolved, parameters, null);
-        return new SharcDataReader(rows.ToArray(), columns);
+        return new SharcDataReader(rows, columns);
     }
 
     // ─── Compound execution ──────────────────────────────────────
@@ -255,7 +269,7 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         CompoundQueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
     {
         // Streaming path: UNION/INTERSECT/EXCEPT with two simple sides, no Cote references.
         // Avoids full materialization of both sides — reads directly from B-tree cursors.
@@ -309,7 +323,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamSetOp(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
     {
         if (plan.Operator == CompoundOperator.UnionAll) return false;
         if (plan.RightCompound != null) return false;
@@ -352,7 +366,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamChainedUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
     {
         var current = plan;
         while (current != null)
@@ -470,7 +484,7 @@ internal static class CompoundQueryExecutor
         if (hasLimit)
             rows = QueryPostProcessor.ApplyLimitOffset(rows, plan.FinalLimit, plan.FinalOffset);
 
-        return new SharcDataReader(rows.ToArray(), columns);
+        return new SharcDataReader(rows, columns);
     }
 
     /// <summary>
@@ -492,7 +506,7 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
+        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
     {
         if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
         {
