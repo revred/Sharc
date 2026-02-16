@@ -66,7 +66,7 @@ internal static class QueryPostProcessor
         if (needsLimit)
             rows = ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
-        return new SharcDataReader(rows.ToArray(), columnNames);
+        return new SharcDataReader(rows, columnNames);
     }
 
     // ─── Materialization ──────────────────────────────────────────
@@ -129,11 +129,19 @@ internal static class QueryPostProcessor
         int start = offset.HasValue ? (int)Math.Min(offset.Value, rows.Count) : 0;
         int remaining = rows.Count - start;
         int count = limit.HasValue ? (int)Math.Min(limit.Value, remaining) : remaining;
+        count = Math.Max(0, count);
 
         if (start == 0 && count == rows.Count)
             return rows;
 
-        return rows.GetRange(start, Math.Max(0, count));
+        // In-place trimming: trim end first (no shifting), then trim start.
+        // Avoids GetRange() which allocates a new List + copies all references.
+        int end = start + count;
+        if (end < rows.Count)
+            rows.RemoveRange(end, rows.Count - end);
+        if (start > 0)
+            rows.RemoveRange(0, start);
+        return rows;
     }
 
 }
