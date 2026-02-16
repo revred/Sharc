@@ -10,7 +10,7 @@
     "scaleMode": "linear",
     "defaultDensity": "md",
     "methodology": "Scan all N nodes in _concepts (id, key, kind, data). Tests graph abstraction overhead.",
-    "whyItMatters": "Graph node scans drive knowledge base discovery. 2.8\u00d7 faster scans mean agents explore more concepts per turn.",
+    "whyItMatters": "Graph node scans drive knowledge base discovery. 2.8x faster scans mean agents explore more concepts per turn.",
     "densityTiers": [
       { "id": "xs", "label": "50",  "rows": 50,    "scale": 0.01 },
       { "id": "sm", "label": "500", "rows": 500,   "scale": 0.1 },
@@ -18,9 +18,9 @@
       { "id": "lg", "label": "50K", "rows": 50000, "scale": 10 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 2853, "allocation": "937 KB", "note": "Raw SQL \u2014 no graph layer" },
+      "sqlite":    { "value": 2853, "allocation": "937 KB", "note": "Raw SQL - no graph layer" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 1027, "allocation": "1.5 MB", "note": "2.8\u00d7 \u2014 ConceptStore B-tree" }
+      "sharc":     { "value": 1027, "allocation": "1.5 MB", "note": "2.8x - ConceptStore B-tree" }
     }
   },
   {
@@ -34,7 +34,7 @@
     "scaleMode": "linear",
     "defaultDensity": "md",
     "methodology": "Scan N edges in _relations (source_key, target_key, kind, data). Tests RelationStore performance.",
-    "whyItMatters": "Edge scans power relationship discovery \u2014 how agents find connections between concepts for reasoning chains.",
+    "whyItMatters": "Edge scans power relationship discovery - how agents find connections between concepts for reasoning chains.",
     "densityTiers": [
       { "id": "xs", "label": "50",  "rows": 50,    "scale": 0.01 },
       { "id": "sm", "label": "500", "rows": 500,   "scale": 0.1 },
@@ -42,9 +42,9 @@
       { "id": "lg", "label": "50K", "rows": 50000, "scale": 10 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 7673, "allocation": "1.4 MB", "note": "Raw SQL \u2014 no graph model" },
+      "sqlite":    { "value": 7673, "allocation": "1.4 MB", "note": "Raw SQL - no graph model" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 2268, "allocation": "2.8 MB", "note": "3.4\u00d7 \u2014 RelationStore direct scan" }
+      "sharc":     { "value": 2268, "allocation": "2.8 MB", "note": "3.4x - RelationStore direct scan" }
     }
   },
   {
@@ -57,15 +57,15 @@
     "sectionId": "graph-ops",
     "scaleMode": "fixed",
     "defaultDensity": "md",
-    "methodology": "Look up node by integer key (rowid 2500/5000). Measured: Sharc 3,444ns vs SQLite 24,347ns (7.1\u00d7).",
+    "methodology": "Look up node by integer key (rowid 2500/5000). Measured: Sharc 3,444ns vs SQLite 24,347ns (7.1x).",
     "whyItMatters": "Single-concept lookups happen on every agent tool call. Sub-microsecond seeks keep tool latency imperceptible.",
     "densityTiers": [
-      { "id": "md", "label": "\u2014", "rows": 0, "scale": 1 }
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
       "sqlite":    { "value": 24347, "allocation": "728 B", "note": "WHERE key = ? prepared" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 3444,  "allocation": "8,320 B", "note": "7.1\u00d7 \u2014 sub-\u03bcs context lookup" }
+      "sharc":     { "value": 3444,  "allocation": "8,320 B", "note": "7.1x - sub-\u03bcs context lookup" }
     }
   },
   {
@@ -79,14 +79,14 @@
     "scaleMode": "fixed",
     "defaultDensity": "md",
     "methodology": "Expanding the local knowledge graph for an agent. Sharc uses context-aware SeekFirst. Measured: 6.27\u03bcs vs 78.49\u03bcs.",
-    "whyItMatters": "Graph traversal is how agents expand context \u2014 from one fact to related concepts. 12.5\u00d7 faster traversal unlocks real-time knowledge exploration.",
+    "whyItMatters": "Graph traversal is how agents expand context - from one fact to related concepts. 12.5x faster traversal unlocks real-time knowledge exploration.",
     "densityTiers": [
-      { "id": "md", "label": "\u2014", "rows": 0, "scale": 1 }
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
       "sqlite":    { "value": 78.49, "allocation": "2.7 KB", "note": "SQL JOIN/WHERE overhead" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 6.27,  "allocation": "10.9 KB", "note": "12.5\u00d7 \u2014 native graph seek" }
+      "sharc":     { "value": 6.27,  "allocation": "10.9 KB", "note": "12.5x - native graph seek" }
     }
   }
 ]

@@ -2,7 +2,7 @@
   {
     "id": "sqlite",
     "name": "SQLite",
-    "subtitle": "C \u2192 WASM P/Invoke",
+    "subtitle": "C -> WASM P/Invoke",
     "color": "#3B82F6",
     "icon": "\u26a1",
     "footprint": "~1.5 MB",
