@@ -31,9 +31,10 @@ internal static class QueryPostProcessor
 
         // Streaming top-N: ORDER BY + LIMIT without full materialization
         if (needsSort && needsLimit && !needsAggregate && !needsDistinct
-            && intent.Limit.HasValue && !intent.Offset.HasValue)
+            && intent.Limit.HasValue)
         {
-            return StreamingTopNProcessor.Apply(source, intent.OrderBy!, intent.Limit!.Value);
+            return StreamingTopNProcessor.Apply(
+                source, intent.OrderBy!, intent.Limit!.Value, intent.Offset ?? 0);
         }
 
         // Streaming aggregate: GROUP BY + aggregates without full materialization

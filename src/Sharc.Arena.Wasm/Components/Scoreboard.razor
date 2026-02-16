@@ -32,9 +32,9 @@
 
 <div class="scoreboard" style="border-color: @(winnerEngine?.Color)28; box-shadow: 0 0 80px @(winnerEngine?.Color)08">
     <div class="scoreboard-header">
-        <div class="scoreboard-header-label">Final Standings</div>
+        <div class="scoreboard-header-label">Core Engine Results</div>
         <div class="scoreboard-header-title" style="background: linear-gradient(135deg, @(winnerEngine?.Color), #fff); -webkit-background-clip: text; -webkit-text-fill-color: transparent">
-            &#x1F3C6; @winnerEngine?.Name Dominates
+            &#x1F3C6; @winnerEngine?.Name Wins @scores[winnerId!].Wins/@Slides.Count
         </div>
     </div>
     <div class="scoreboard-grid" style="grid-template-columns: repeat(@Engines.Count, 1fr)">

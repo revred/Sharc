@@ -1,0 +1,43 @@
+@* Expandable query result row *@
+
+<div class="query-row @(Result.Winner == "sharc" ? "sharc-wins" : "sqlite-wins")" @onclick="@(() => _expanded = !_expanded)">
+    <div class="query-row-main">
+        <span class="query-row-num">#@(Index + 1)</span>
+        <span class="query-row-query">@Result.Query</span>
+        <span class="query-row-sharc" style="color: var(--sharc)">@FormatTime(Result.SharcTimeUs)</span>
+        <span class="query-row-sqlite" style="color: var(--sqlite)">@FormatTime(Result.SqliteTimeUs)</span>
+        <span class="query-row-winner">
+            @if (Result.Winner == "sharc")
+            {
+                <span style="color: var(--sharc)">Sharc @Result.Speedup.ToString("F1")x</span>
+            }
+            else
+            {
+                <span style="color: var(--sqlite)">SQLite @Result.Speedup.ToString("F1")x</span>
+            }
+        </span>
+    </div>
+    @if (_expanded)
+    {
+        <div class="query-row-detail">
+            <div class="query-row-desc">@Result.Description</div>
+            <div class="query-row-allocs">
+                <span>Sharc alloc: <strong>@Result.SharcAlloc</strong></span>
+                <span>SQLite alloc: <strong>@Result.SqliteAlloc</strong></span>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public required QueryResult Result { get; set; }
+    [Parameter] public int Index { get; set; }
+    private bool _expanded;
+
+    private static string FormatTime(double us)
+    {
+        if (us >= 1000) return $"{us / 1000.0:F1} ms";
+        if (us < 1) return $"{us * 1000:F0} ns";
+        return $"{us:F0} \u03BCs";
+    }
+}

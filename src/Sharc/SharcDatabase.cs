@@ -55,6 +55,22 @@ public sealed class SharcDatabase : IDisposable
     private bool _disposed;
     private global::Sharc.Query.QueryPlanCache? _queryCache;
 
+    // ─── Compiled-query cache ─────────────────────────────────────
+    // Eliminates per-invocation Expression.Lambda().Compile() overhead
+    // by caching the JIT-compiled filter delegate, projection array,
+    // and table metadata for each unique (intent, parameters) pair.
+    private System.Collections.Concurrent.ConcurrentDictionary<
+        global::Sharc.Query.Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
+    private System.Collections.Concurrent.ConcurrentDictionary<long, IFilterNode>? _paramFilterCache;
+
+    private sealed class CachedReaderInfo
+    {
+        public required IFilterNode? FilterNode;
+        public required int[]? Projection;
+        public required TableInfo Table;
+        public required int RowidAliasOrdinal;
+    }
+
     /// <summary>
     /// Gets the extension registry for this database instance.
     /// </summary>
@@ -315,19 +331,116 @@ public sealed class SharcDatabase : IDisposable
         if (plan.IsCompound || plan.HasCtes)
             return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
 
-        // Simple query — direct execution
+        // Simple query — direct execution with compiled-query cache
         var intent = plan.Simple!;
-
-        string[]? columns = intent.HasAggregates
-            ? global::Sharc.Query.AggregateProjection.Compute(intent)
-            : intent.ColumnsArray;
-
-        IFilterStar? filter = intent.Filter.HasValue
-            ? global::Sharc.Query.IntentToFilterBridge.Build(intent.Filter.Value, parameters)
-            : null;
-
-        var reader = CreateReader(intent.TableName, columns, null, filter);
+        var reader = CreateReaderFromIntent(intent, parameters);
         return global::Sharc.Query.QueryPostProcessor.Apply(reader, intent);
+    }
+
+    /// <summary>
+    /// Creates a reader from a compiled <see cref="global::Sharc.Query.Intent.QueryIntent"/>
+    /// using cached filter nodes, projections, and table metadata.
+    /// Eliminates per-invocation Expression.Lambda().Compile() overhead.
+    /// </summary>
+    internal SharcDataReader CreateReaderFromIntent(
+        global::Sharc.Query.Intent.QueryIntent intent,
+        IReadOnlyDictionary<string, object>? parameters)
+    {
+        var readerCache = _readerInfoCache ??=
+            new System.Collections.Concurrent.ConcurrentDictionary<
+                global::Sharc.Query.Intent.QueryIntent, CachedReaderInfo>();
+
+        // Build or retrieve cached reader info (projection, table, filter for non-parameterized)
+        if (!readerCache.TryGetValue(intent, out var info))
+        {
+            var schema = GetSchema();
+            var table = schema.GetTable(intent.TableName)
+                ?? throw new KeyNotFoundException($"Table '{intent.TableName}' not found.");
+
+            string[]? columns = intent.HasAggregates
+                ? global::Sharc.Query.AggregateProjection.Compute(intent)
+                : intent.ColumnsArray;
+
+            int[]? projection = null;
+            if (columns is { Length: > 0 })
+            {
+                projection = new int[columns.Length];
+                for (int i = 0; i < columns.Length; i++)
+                {
+                    int ordinal = table.GetColumnOrdinal(columns[i]);
+                    projection[i] = ordinal >= 0 ? ordinal
+                        : throw new ArgumentException($"Column '{columns[i]}' not found.");
+                }
+            }
+
+            int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
+
+            // Pre-compile filter for non-parameterized intents
+            IFilterNode? filterNode = null;
+            if (intent.Filter.HasValue && !HasParameterNodes(intent.Filter.Value))
+            {
+                var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
+                    intent.Filter.Value, null);
+                filterNode = FilterTreeCompiler.CompileBaked(filterStar, table.Columns, rowidAlias);
+            }
+
+            info = new CachedReaderInfo
+            {
+                FilterNode = filterNode,
+                Projection = projection,
+                Table = table,
+                RowidAliasOrdinal = rowidAlias,
+            };
+            readerCache.TryAdd(intent, info);
+        }
+
+        // Determine filter node to use
+        IFilterNode? node = info.FilterNode;
+
+        if (node == null && intent.Filter.HasValue)
+        {
+            // Parameterized filter — check param-level cache
+            var paramCache = _paramFilterCache ??= new();
+            long paramKey = ComputeParamCacheKey(intent, parameters);
+            node = paramCache.GetOrAdd(paramKey, _ =>
+            {
+                var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
+                    intent.Filter.Value, parameters);
+                return FilterTreeCompiler.CompileBaked(
+                    filterStar, info.Table.Columns, info.RowidAliasOrdinal);
+            });
+        }
+
+        var cursor = CreateTableCursor(info.Table);
+        return new SharcDataReader(cursor, _recordDecoder, info.Table.Columns,
+            info.Projection, _bTreeReader, info.Table.Indexes, null, node);
+    }
+
+    private static bool HasParameterNodes(global::Sharc.Query.Intent.PredicateIntent predicate)
+    {
+        foreach (ref readonly var node in predicate.Nodes.AsSpan())
+        {
+            if (node.Value.Kind == global::Sharc.Query.Intent.IntentValueKind.Parameter)
+                return true;
+        }
+        return false;
+    }
+
+    private static long ComputeParamCacheKey(
+        global::Sharc.Query.Intent.QueryIntent intent,
+        IReadOnlyDictionary<string, object>? parameters)
+    {
+        var hc = new HashCode();
+        hc.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(intent));
+        if (parameters != null)
+        {
+            foreach (var kvp in parameters)
+            {
+                hc.Add(kvp.Key);
+                hc.Add(kvp.Value);
+            }
+        }
+        return hc.ToHashCode();
     }
 
     /// <summary>
