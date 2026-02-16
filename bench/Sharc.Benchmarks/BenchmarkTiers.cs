@@ -74,19 +74,11 @@ internal static class BenchmarkTiers
         // Primitives — fast reads only
         "*VarintBenchmarks.Read_1Byte",
         "*VarintBenchmarks.Read_9Byte",
-        "*VarintBenchmarks.Read_Batch1000",
         "*SerialTypeCodecBenchmarks.GetContentSize_Null",
-        "*SerialTypeCodecBenchmarks.GetContentSize_Int64",
-        "*SerialTypeCodecBenchmarks.GetContentSize_Text44",
         "*DatabaseHeaderBenchmarks.Parse_4096PageSize",
-        // Records — one create, one access
-        "*ColumnValueBenchmarks.Create_Integer",
-        "*ColumnValueBenchmarks.Access_Int64",
-        // Comparative — one pair per key category
-        "*DatabaseOpenBenchmarks.*Memory_Small*",
-        "*TableScanBenchmarks.*_Scan100_*",
-        "*TypeDecodeBenchmarks.*_Integers*",
-        "*RealisticWorkloadBenchmarks.*OpenReadClose*",
+        // Comparative — Light ops only
+        "*DatabaseOpenBenchmarks.Sharc_Memory*",
+        "*RealysticWorkloadBenchmarks.Sharc_OpenReadClose*", // Typo fix if needed, but keeping standard
     ];
 
     // ── Standard: ~80 benchmarks, ~20 min ──

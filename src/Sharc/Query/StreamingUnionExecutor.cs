@@ -101,15 +101,7 @@ internal static class StreamingUnionExecutor
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        string[]? columns = intent.HasAggregates
-            ? AggregateProjection.Compute(intent)
-            : intent.ColumnsArray;
-
-        IFilterStar? filter = intent.Filter.HasValue
-            ? IntentToFilterBridge.Build(intent.Filter.Value, parameters)
-            : null;
-
-        var reader = db.CreateReader(intent.TableName, columns, null, filter);
+        var reader = db.CreateReaderFromIntent(intent, parameters);
         return QueryPostProcessor.Apply(reader, intent);
     }
 }

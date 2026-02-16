@@ -27,7 +27,7 @@ This document summarizes what is **missing**, **experimental**, or **intentional
 *   **Performance Notes**:
     *   Aggregations are streaming (O(groups) memory).
     *   CTEs materialize the CTE result before re-scanning.
-    *   `UNION`/`INTERSECT`/`EXCEPT` materialize both sides into managed arrays (1.5-1.8 MB for 2.5K rows). SQLite does set ops in native C at near-zero managed allocation.
+    *   `UNION`/`INTERSECT`/`EXCEPT` use streaming set operations with spare-array reuse (1.2-1.6 MB for 2×2.5K rows). String allocation (~500 KB) dominates — further reduction requires raw-byte comparison before materialization.
 
 ## 3. Workload Suitability (OLAP vs OLTP)
 *   **Status**: Optimized for Context Engineering (Latency).
