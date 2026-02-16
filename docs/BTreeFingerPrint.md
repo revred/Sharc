@@ -111,7 +111,7 @@ Benchmarks read `GetInt64(0)` only (no string columns), demonstrating the lazy-d
 | `src/Sharc/SharcDataReader.cs` | `GetRowFingerprint()`, `GetCursorRowFingerprint()`, `ComputeFingerprint()`, `Fnv1aHasher` ref struct, `SetDedupMode` enum, dedup constructor + Read() + accessor delegation |
 | `src/Sharc/Query/CompoundQueryExecutor.cs` | `ExecuteIndexSetOp()`, `BuildIndexSet()`, wiring in `Execute()` |
 
-No new files created. `StreamingSetOpProcessor` remains as the fallback path for complex compounds and CTE references.
+No new files created. `StreamingSetOpProcessor` remains as the fallback path for complex compounds and Cote references.
 
 ## Edge Cases
 
@@ -121,4 +121,4 @@ No new files created. `StreamingSetOpProcessor` remains as the fallback path for
 
 3. **Mixed types**: SQLite's type affinity means the same column can hold different storage classes across rows. The serial type in the fingerprint captures the actual storage class, preventing cross-type false matches.
 
-4. **Non-cursor readers**: When the underlying reader is in materialized mode (CTE results, complex compounds), the fingerprint falls back to `System.HashCode` over the `QueryValue[]` array. This is slower but correct.
+4. **Non-cursor readers**: When the underlying reader is in materialized mode (Cote results, complex compounds), the fingerprint falls back to `System.HashCode` over the `QueryValue[]` array. This is slower but correct.

@@ -6,13 +6,13 @@
 Sharc is a **high-performance, managed context engine** for AI agents. It reads and writes the standard SQLite file format (Format 3) but bypasses the SQLite library entirely to achieve **2-75x faster read performance**. It is built in pure C# with no native dependencies.
 
 ### Why not just use SQLite?
-If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now supports `GROUP BY`, CTEs, and compound queries (`UNION`/`INTERSECT`/`EXCEPT`) via the Query API.
+If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now supports `GROUP BY`, Cotes, and compound queries (`UNION`/`INTERSECT`/`EXCEPT`) via the Query API.
 
 **Use Sharc when:**
 
 *   **Latency matters:** You need sub-microsecond point lookups (392ns vs 24,011ns in SQLite).
 *   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
-*   **Context matters:** You need to traverse graphs at 13.5x the speed of SQLite recursive CTEs.
+*   **Context matters:** You need to traverse graphs at 13.5x the speed of SQLite recursive CTEs (Cotes in Sharc).
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
@@ -48,13 +48,13 @@ Instead of complicated `JOIN` syntax, you can write:
 ```sql
 SELECT id |> friend |> name FROM users
 ```
-The Graph API already achieves ~13.5x faster traversal than SQLite recursive CTEs.
+The Graph API already achieves ~13.5x faster traversal than SQLite recursive CTEs (Cotes in Sharc).
 See [Sharq Reference](ParsingTsql.md).
 
 ### Can I just use regular SQL?
-Yes! Sharq supports `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, CTEs (`WITH ... AS`), and parameterized queries (`$param`). You only need the arrow syntax for Graph Engine features.
+Yes! Sharq supports `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, Cotes (`WITH ... AS`), and parameterized queries (`$param`). You only need the arrow syntax for Graph Engine features.
 
-> **Note:** `CASE` expressions and window functions (`OVER`, `PARTITION BY`) are parsed but not yet executable. `JOIN` is not supported — use `UNION`/CTE for multi-table workflows.
+> **Note:** `CASE` expressions and window functions (`OVER`, `PARTITION BY`) are parsed but not yet executable. `JOIN` is not supported — use `UNION`/Cote for multi-table workflows.
 
 ---
 

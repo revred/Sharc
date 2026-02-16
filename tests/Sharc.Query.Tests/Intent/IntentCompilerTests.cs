@@ -513,13 +513,13 @@ public class IntentCompilerTests
     }
 
     [Fact]
-    public void CompilePlan_SingleCte_ProducesCteIntent()
+    public void CompilePlan_SingleCote_ProducesCoteIntent()
     {
         var plan = CompilePlan("WITH cte AS (SELECT * FROM users) SELECT * FROM cte");
-        Assert.True(plan.HasCtes);
-        Assert.Single(plan.Ctes!);
-        Assert.Equal("cte", plan.Ctes![0].Name);
-        Assert.Equal("users", plan.Ctes![0].Query.TableName);
+        Assert.True(plan.HasCotes);
+        Assert.Single(plan.Cotes!);
+        Assert.Equal("cte", plan.Cotes![0].Name);
+        Assert.Equal("users", plan.Cotes![0].Query.TableName);
 
         Assert.False(plan.IsCompound);
         Assert.NotNull(plan.Simple);
@@ -527,16 +527,16 @@ public class IntentCompilerTests
     }
 
     [Fact]
-    public void CompilePlan_MultipleCtes_AllCompiled()
+    public void CompilePlan_MultipleCotes_AllCompiled()
     {
         var plan = CompilePlan(
             "WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM t2) SELECT * FROM a");
-        Assert.True(plan.HasCtes);
-        Assert.Equal(2, plan.Ctes!.Count);
-        Assert.Equal("a", plan.Ctes[0].Name);
-        Assert.Equal("t1", plan.Ctes[0].Query.TableName);
-        Assert.Equal("b", plan.Ctes[1].Name);
-        Assert.Equal("t2", plan.Ctes[1].Query.TableName);
+        Assert.True(plan.HasCotes);
+        Assert.Equal(2, plan.Cotes!.Count);
+        Assert.Equal("a", plan.Cotes[0].Name);
+        Assert.Equal("t1", plan.Cotes[0].Query.TableName);
+        Assert.Equal("b", plan.Cotes[1].Name);
+        Assert.Equal("t2", plan.Cotes[1].Query.TableName);
     }
 
     // ─── Negative path tests (P0 Item 20) ───────────────────────

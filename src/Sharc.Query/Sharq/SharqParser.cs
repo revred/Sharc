@@ -56,12 +56,12 @@ internal ref struct SharqParser
 
     private SelectStatement ParseStatement()
     {
-        // Optional WITH cte_list
-        IReadOnlyList<CteDefinition>? ctes = null;
+        // Optional WITH cote_list
+        IReadOnlyList<CoteDefinition>? cotes = null;
         if (_current.Kind == SharqTokenKind.With)
         {
             Advance();
-            ctes = ParseCteList();
+            cotes = ParseCoteList();
         }
 
         var stmt = ParseSelectCompound();
@@ -69,9 +69,9 @@ internal ref struct SharqParser
         // Optional trailing semicolon (moved from ParseSelect)
         Match(SharqTokenKind.Semicolon);
 
-        if (ctes != null)
+        if (cotes != null)
         {
-            // Attach CTEs to the outermost statement
+            // Attach Cotes to the outermost statement
             return new SelectStatement
             {
                 IsDistinct = stmt.IsDistinct,
@@ -83,7 +83,7 @@ internal ref struct SharqParser
                 OrderBy = stmt.OrderBy,
                 Limit = stmt.Limit,
                 Offset = stmt.Offset,
-                Ctes = ctes,
+                Cotes = cotes,
                 CompoundOp = stmt.CompoundOp,
                 CompoundRight = stmt.CompoundRight
             };
@@ -92,9 +92,9 @@ internal ref struct SharqParser
         return stmt;
     }
 
-    private List<CteDefinition> ParseCteList()
+    private List<CoteDefinition> ParseCoteList()
     {
-        var ctes = new List<CteDefinition>();
+        var cotes = new List<CoteDefinition>();
         do
         {
             string name = ExpectIdentifierText();
@@ -102,9 +102,9 @@ internal ref struct SharqParser
             Expect(SharqTokenKind.LeftParen);
             var query = ParseSelect();
             Expect(SharqTokenKind.RightParen);
-            ctes.Add(new CteDefinition { Name = name, Query = query });
+            cotes.Add(new CoteDefinition { Name = name, Query = query });
         } while (Match(SharqTokenKind.Comma));
-        return ctes;
+        return cotes;
     }
 
     private SelectStatement ParseSelectCompound()

@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GROUP BY** with COUNT, SUM, AVG, MIN, MAX aggregates (streaming hash aggregator)
 - **LIMIT / OFFSET** with streaming execution
 - **UNION ALL / UNION / INTERSECT / EXCEPT** with pooled open-addressing hash maps
-- **Common Table Expressions (CTEs)** with lazy evaluation
+- **Cotes** (Common Table Expressions) with lazy evaluation
 - **Parameterized queries** via `$param` syntax
 - **Query plan caching** for repeated execution
 

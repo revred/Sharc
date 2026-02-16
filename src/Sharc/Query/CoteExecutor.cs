@@ -7,43 +7,43 @@ using IntentPredicateNode = Sharc.Query.Intent.PredicateNode;
 namespace Sharc.Query;
 
 /// <summary>
-/// Executes queries that reference Common Table Expressions (CTEs).
-/// Materializes CTE results first, then executes the main query against them.
+/// Executes queries that reference Cotes (Common Table Expressions).
+/// Materializes Cote results first, then executes the main query against them.
 /// </summary>
-internal static class CteExecutor
+internal static class CoteExecutor
 {
     /// <summary>
-    /// Materializes all CTEs in order, returning a lookup of CTE name → (rows, columns).
+    /// Materializes all Cotes in order, returning a lookup of Cote name → (rows, columns).
     /// </summary>
-    internal static Dictionary<string, (QueryValue[][] rows, string[] columns)> MaterializeCtes(
+    internal static Dictionary<string, (QueryValue[][] rows, string[] columns)> MaterializeCotes(
         SharcDatabase db,
-        IReadOnlyList<CteIntent> ctes,
+        IReadOnlyList<CoteIntent> cotes,
         IReadOnlyDictionary<string, object>? parameters)
     {
         var results = new Dictionary<string, (QueryValue[][] rows, string[] columns)>(
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var cte in ctes)
+        foreach (var cote in cotes)
         {
             var (rows, columns) = CompoundQueryExecutor.ExecuteAndMaterialize(
-                db, cte.Query, parameters, results);
-            results[cte.Name] = (rows.ToArray(), columns);
+                db, cote.Query, parameters, results);
+            results[cote.Name] = (rows.ToArray(), columns);
         }
 
         return results;
     }
 
     /// <summary>
-    /// Executes a simple query that may reference CTE results.
-    /// If the query's table name matches a CTE, uses the pre-materialized CTE data.
+    /// Executes a simple query that may reference Cote results.
+    /// If the query's table name matches a Cote, uses the pre-materialized Cote data.
     /// </summary>
-    internal static SharcDataReader ExecuteSimpleWithCtes(
+    internal static SharcDataReader ExecuteSimpleWithCotes(
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)> cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)> coteResults)
     {
-        if (cteResults.TryGetValue(intent.TableName, out var cteData))
+        if (coteResults.TryGetValue(intent.TableName, out var coteData))
         {
             bool needsFilter = intent.Filter.HasValue;
             bool needsSort = intent.OrderBy is { Count: > 0 };
@@ -52,12 +52,12 @@ internal static class CteExecutor
             bool needsDistinct = intent.IsDistinct;
 
             if (!needsFilter && !needsAggregate && !needsDistinct && !needsSort && !needsLimit)
-                return new SharcDataReader(cteData.rows, cteData.columns);
+                return new SharcDataReader(coteData.rows, coteData.columns);
 
-            var rows = new List<QueryValue[]>(cteData.rows);
-            var columnNames = cteData.columns;
+            var rows = new List<QueryValue[]>(coteData.rows);
+            var columnNames = coteData.columns;
 
-            // Apply outer WHERE filter to CTE data
+            // Apply outer WHERE filter to Cote data
             if (needsFilter)
                 rows = ApplyPredicateFilter(rows, columnNames, intent.Filter!.Value, parameters);
 

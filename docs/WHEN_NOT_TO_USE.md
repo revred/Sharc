@@ -6,9 +6,9 @@ Sharc is a specialized **Context Engine**, not a general-purpose database. Hones
 
 ### 1. SQL JOINs, Views, Triggers, or Stored Procedures
 
-Sharc's query pipeline now supports `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, CTEs (`WITH ... AS`), and compound queries (`UNION`, `INTERSECT`, `EXCEPT`). However, it does **NOT** support:
+Sharc's query pipeline now supports `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, Cotes (`WITH ... AS`), and compound queries (`UNION`, `INTERSECT`, `EXCEPT`). However, it does **NOT** support:
 
-*   `JOIN` (use `UNION`/CTE for multi-table workflows, or the Graph API for relationship traversal)
+*   `JOIN` (use `UNION`/Cote for multi-table workflows, or the Graph API for relationship traversal)
 *   Views, Triggers, or Stored Procedures
 *   `CASE` expressions, Window Functions (parsed but not yet executable)
 
@@ -35,7 +35,7 @@ Sharc is a row-store. It reads row-by-row. If you need to scan 10GB of data to c
 
 | Capability | Why Sharc Wins |
 | :--- | :--- |
-| **Graph Traversal** | `node |> edge |> target` syntax is **13.5x faster** than SQLite Recursive CTEs. |
+| **Graph Traversal** | `node |> edge |> target` syntax is **13.5x faster** than SQLite recursive CTEs. |
 | **Point Lookups** | **392ns** vs 24,011ns (61x faster). If you do thousands of lookups per request, Sharc is the only choice. |
 | **Agent Context** | Precision retrieval allows you to fit **100% relevant context** into small token windows. |
 | **Trust & Audit** | Built-in cryptographic ledger (`_sharc_ledger`) proves *who* wrote *what*. |

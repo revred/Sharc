@@ -8,7 +8,7 @@ Sharc is a high-performance, zero-allocation SQLite format reader and writer wit
 
 - **61x Faster Seeks**: B-tree point lookups in 392 ns vs SQLite's 24,011 ns.
 - **9.2x Faster Scans**: Full table reads with lazy column decode (568 B allocation for 2,500 rows).
-- **SQL Pipeline**: SELECT, WHERE, ORDER BY, GROUP BY, UNION, INTERSECT, EXCEPT, CTEs.
+- **SQL Pipeline**: SELECT, WHERE, ORDER BY, GROUP BY, UNION, INTERSECT, EXCEPT, Cotes.
 - **Zero Allocation**: Hot paths use `ReadOnlySpan<byte>` and `stackalloc` — zero GC pressure.
 - **Pure C#**: No native DLLs. Runs anywhere .NET runs (Windows, Linux, macOS, WASM, IoT).
 - **~250 KB Footprint**: 40x smaller than the standard SQLite bundle.
