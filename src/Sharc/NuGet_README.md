@@ -1,45 +1,46 @@
 # Sharc
 
-**Read SQLite files 2-56x faster than Microsoft.Data.Sqlite, in pure C#, with zero native dependencies.**
+**Read and write SQLite files 2-66x faster than Microsoft.Data.Sqlite, in pure C#, with zero native dependencies.**
 
-Sharc is a high-performance, zero-allocation SQLite format reader and writer designed for AI context space engineering, edge computing, and high-throughput point lookups.
+Sharc is a high-performance, zero-allocation SQLite format reader and writer with a built-in SQL query pipeline, designed for AI context space engineering, edge computing, and high-throughput data access.
 
 ## Key Features
 
-- **Extreme Performance**: Up to 56x faster than standard P/Invoke-based readers for B-tree seeks.
-- **Zero Allocation**: Hot paths use `ReadOnlySpan<byte>` and `stackalloc` to eliminate GC pressure.
+- **61x Faster Seeks**: B-tree point lookups in 392 ns vs SQLite's 24,011 ns.
+- **9.2x Faster Scans**: Full table reads with lazy column decode (568 B allocation for 2,500 rows).
+- **SQL Pipeline**: SELECT, WHERE, ORDER BY, GROUP BY, UNION, INTERSECT, EXCEPT, CTEs.
+- **Zero Allocation**: Hot paths use `ReadOnlySpan<byte>` and `stackalloc` — zero GC pressure.
 - **Pure C#**: No native DLLs. Runs anywhere .NET runs (Windows, Linux, macOS, WASM, IoT).
-- **Sub-50KB Footprint**: 40x smaller than the standard SQLite bundle.
-- **Cryptographic Trust**: Built-in support for signed, tamper-evident data ledgers.
-- **Encryption**: Production-grade AES-256-GCM + Argon2id support (via `Sharc.Crypto`).
+- **~250 KB Footprint**: 40x smaller than the standard SQLite bundle.
+- **Cryptographic Trust**: ECDSA agent attestation and tamper-evident audit ledgers (via `Sharc.Graph`).
+- **Encryption**: AES-256-GCM + Argon2id support (via `Sharc.Crypto`).
 
 ## Quick Start
 
 ```csharp
 using Sharc;
 
-// Open a database (zero-allocation read)
-using var db = SharcDatabase.Open("project_context.db");
+// Open a database
+using var db = SharcDatabase.Open("mydata.db");
 
-// Seek a row by Primary Key in < 600ns
-using var reader = db.CreateReader("commits");
-if (reader.ReadByRowId(1234))
-{
-    Console.WriteLine($"Message: {reader.GetString("message")}");
-}
+// Scan a table
+using var reader = db.CreateReader("users");
+while (reader.Read())
+    Console.WriteLine($"{reader.GetInt64(0)}: {reader.GetString(1)}");
 
-// Scan with high-performance filters
-var filtered = db.CreateReader("files", "path", "size")
-                .Where("size", FilterOp.GreaterThan, 1024);
+// Point lookup in < 1 microsecond
+if (reader.Seek(42))
+    Console.WriteLine($"Found: {reader.GetString(1)}");
 
-while (filtered.Read())
-{
-    Console.WriteLine(filtered.GetString(0));
-}
+// SQL queries
+using var results = db.Query(
+    "SELECT dept, COUNT(*) FROM users WHERE age > 25 GROUP BY dept ORDER BY dept");
+while (results.Read())
+    Console.WriteLine($"{results.GetString(0)}: {results.GetInt64(1)}");
 ```
 
 ## When to Use Sharc
 
-Sharc is optimized for **Point Lookups**, **Structured AI Context**, and **Embedded Scenarios**. It is a complement to SQLite, not a full replacement. Use Sharc when performance, allocation, or zero-dependency deployment is critical.
+Sharc is optimized for **point lookups**, **structured AI context**, and **embedded scenarios**. It is a complement to SQLite, not a full replacement. Use Sharc when performance, allocation, or zero-dependency deployment is critical.
 
-[Full Documentation & Benchmarks](https://github.com/revred/Sharc)
+[Full Documentation & Benchmarks](https://github.com/revred/Sharc) | [Live Arena](https://revred.github.io/Sharc/)

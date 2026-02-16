@@ -8,8 +8,8 @@ namespace Sharc.Arena.Wasm.Services;
 
 /// <summary>
 /// Interface for a benchmark engine that can run a slide and return scaled results.
-/// Phase 1 uses <see cref="ReferenceEngine"/> (static base data).
-/// Phase 2+ replaces with live engines (Sharc, SQLite, SurrealDB, IndexedDB).
+/// Live engines (Sharc, SQLite, IndexedDB) run real benchmarks;
+/// <see cref="ReferenceEngine"/> provides static baseline data as fallback.
 /// </summary>
 public interface IBenchmarkEngine
 {
