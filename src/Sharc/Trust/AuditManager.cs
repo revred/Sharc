@@ -1,7 +1,6 @@
 using System.Text;
 using System.Security.Cryptography;
 using Sharc.Core;
-using Sharc.Core.Records;
 using Sharc.Core.Trust;
 using Sharc.Core.Storage;
 

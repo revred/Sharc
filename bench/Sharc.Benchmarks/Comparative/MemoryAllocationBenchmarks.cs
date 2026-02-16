@@ -16,7 +16,6 @@
 --------------------------------------------------------------------------------------------------*/
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using Microsoft.Data.Sqlite;
 using Sharc.Benchmarks.Helpers;

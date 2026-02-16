@@ -10,8 +10,6 @@ using Sharc.Graph;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Trust;
-using Sharc.Crypto;
-using Sharc.Core;
 using Sharc.Core.Query;
 using Sharc.Core.Trust;
 

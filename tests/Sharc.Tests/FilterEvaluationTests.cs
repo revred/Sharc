@@ -1,4 +1,3 @@
-using Sharc;
 using Sharc.Core;
 using Sharc.Core.Query;
 using Xunit;

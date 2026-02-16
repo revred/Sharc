@@ -6,7 +6,6 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.BTree;
-using Sharc.Core.Primitives;
 using Xunit;
 
 namespace Sharc.Tests.Write;

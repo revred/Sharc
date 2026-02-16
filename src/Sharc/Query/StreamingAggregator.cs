@@ -1,7 +1,6 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Sharc.Query.Intent;
 

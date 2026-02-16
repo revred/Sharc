@@ -5,7 +5,6 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
-using System.Runtime.CompilerServices;
 using Sharc.Core.Primitives;
 
 namespace Sharc;

@@ -15,8 +15,6 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
-using Sharc;
-using Sharc.Exceptions;
 using Sharc.IntegrationTests.Helpers;
 using Xunit;
 

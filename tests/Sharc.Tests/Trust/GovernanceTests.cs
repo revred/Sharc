@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using Sharc.Core;
-using Sharc.Core.Schema;
 using Sharc.Core.Trust;
 using Sharc.Trust;
 using Xunit;

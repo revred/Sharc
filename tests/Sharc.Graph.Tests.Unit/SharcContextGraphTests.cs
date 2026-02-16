@@ -1,11 +1,9 @@
 using System.Text;
 using System.Buffers.Binary;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
-using Sharc.Graph.Store;
 using Sharc.Core.Schema;
 
 namespace Sharc.Graph.Tests.Unit;
@@ -65,7 +63,6 @@ public class SharcContextGraphTests
 
         var result = graph.Traverse(new NodeKey(200), policy);
 
-        Assert.IsNotNull(result);
         // Should find B (start), A (incoming), C (outgoing)
         Assert.HasCount(3, result.Nodes);
         

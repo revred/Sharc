@@ -5,7 +5,6 @@
 using System.Buffers;
 using Sharc.Core;
 using Sharc.Core.Records;
-using Sharc.Graph.Model;
 
 namespace Sharc.Graph.Store;
 
