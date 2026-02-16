@@ -1266,14 +1266,88 @@ body {
 
 .arena-loading {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    gap: 1.5rem;
     font-size: 0.85rem;
     color: var(--text-muted);
     font-weight: 600;
     letter-spacing: 0.05em;
 }
+
+.loading-title {
+    font-size: 1.1rem;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 0.5rem;
+}
+
+.loading-race {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 340px;
+}
+
+.loading-engine {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    opacity: 0.35;
+    transition: opacity 0.3s, border-color 0.3s, background 0.3s;
+}
+
+.loading-engine.active {
+    opacity: 1;
+    border-color: rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+}
+
+.loading-engine.done {
+    opacity: 1;
+    border-color: var(--sharc);
+    background: rgba(16,185,129,0.06);
+}
+
+.loading-engine-icon { font-size: 1.3rem; }
+.loading-engine-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.loading-engine-name { font-size: 0.9rem; color: #fff; font-weight: 700; }
+.loading-engine-size { font-size: 0.7rem; color: var(--text-muted); font-weight: 400; margin-left: 0.4rem; }
+.loading-engine-time { font-size: 0.75rem; color: var(--sharc); font-family: 'JetBrains Mono', monospace; }
+
+.loading-pulse { animation: pulse 1s infinite; color: rgba(255,255,255,0.4) !important; }
+@keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+.loading-check { color: var(--sharc); font-size: 1.1rem; font-weight: 700; }
+
+.loading-verdict {
+    font-size: 1rem;
+    color: var(--sharc);
+    text-align: center;
+    animation: fadeIn 0.4s ease;
+}
+
+.loading-verdict strong {
+    color: #fff;
+    font-size: 1.2rem;
+}
+
+.loading-ready {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── 7-Page Layout ──────────────────────────────────── */
 
