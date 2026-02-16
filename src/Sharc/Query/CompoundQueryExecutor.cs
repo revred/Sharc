@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Sharc.Query.Intent;
+using IntentPredicateNode = Sharc.Query.Intent.PredicateNode;
 
 namespace Sharc.Query;
 
@@ -19,7 +20,28 @@ internal static class CompoundQueryExecutor
         QueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        // Materialize CTEs
+        // ─── Lazy CTE: resolve references into real table intents ────
+        // Instead of materializing all CTE rows upfront, inline simple CTEs
+        // so streaming paths (concat, TopN, index-based set ops) remain available.
+        if (plan.HasCtes)
+        {
+            var cteMap = BuildCteIntentMap(plan.Ctes!);
+
+            if (!plan.IsCompound)
+            {
+                // CTE → SELECT WHERE: single cursor with merged filters
+                if (CanResolveCteSimple(plan.Simple!, cteMap))
+                    return ExecuteResolvedSimple(db, plan.Simple!, cteMap, parameters);
+            }
+            else if (CanResolveCompound(plan.Compound!, cteMap))
+            {
+                // CTE + compound: resolve references, then use streaming paths
+                var resolved = ResolveCompound(plan.Compound!, cteMap);
+                return ExecuteCompoundResolved(db, resolved, parameters);
+            }
+        }
+
+        // ─── Fallback: materialize CTEs for complex cases ────────────
         Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults = null;
         if (plan.HasCtes)
             cteResults = CteExecutor.MaterializeCtes(db, plan.Ctes!, parameters);
@@ -39,8 +61,6 @@ internal static class CompoundQueryExecutor
                 return StreamingChainedUnionAll(db, plan.Compound!, parameters);
 
             // Index-based streaming: UNION/INTERSECT/EXCEPT without string materialization.
-            // Indexes raw cursor bytes (FNV-1a 128-bit) to build dedup sets, then returns a
-            // streaming reader that only materializes columns when the caller reads them.
             if (CanStreamSetOp(plan.Compound!, cteResults))
                 return ExecuteIndexSetOp(db, plan.Compound!, parameters);
 
@@ -50,6 +70,183 @@ internal static class CompoundQueryExecutor
 
         // Simple query with CTEs
         return CteExecutor.ExecuteSimpleWithCtes(db, plan.Simple!, parameters, cteResults!);
+    }
+
+    // ─── Lazy CTE resolution ─────────────────────────────────────
+
+    /// <summary>
+    /// Builds a lookup of CTE name → query intent for lazy resolution.
+    /// </summary>
+    private static Dictionary<string, QueryIntent> BuildCteIntentMap(IReadOnlyList<CteIntent> ctes)
+    {
+        var map = new Dictionary<string, QueryIntent>(ctes.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var cte in ctes)
+            map[cte.Name] = cte.Query;
+        return map;
+    }
+
+    /// <summary>
+    /// Returns true when a CTE query is a simple filtered table scan that can be inlined.
+    /// No aggregates, DISTINCT, ORDER BY, LIMIT, or inter-CTE references.
+    /// </summary>
+    private static bool IsCteSimpleTableScan(QueryIntent cteQuery, Dictionary<string, QueryIntent> cteMap)
+    {
+        if (cteMap.ContainsKey(cteQuery.TableName)) return false; // references another CTE
+        if (cteQuery.HasAggregates) return false;
+        if (cteQuery.IsDistinct) return false;
+        if (cteQuery.OrderBy is { Count: > 0 }) return false;
+        if (cteQuery.Limit.HasValue || cteQuery.Offset.HasValue) return false;
+        if (cteQuery.GroupBy is { Count: > 0 }) return false;
+        if (cteQuery.HavingFilter.HasValue) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Returns true when a simple CTE query can be resolved to a direct cursor read.
+    /// </summary>
+    private static bool CanResolveCteSimple(QueryIntent outer, Dictionary<string, QueryIntent> cteMap)
+    {
+        if (!cteMap.TryGetValue(outer.TableName, out var cteQuery)) return false;
+        return IsCteSimpleTableScan(cteQuery, cteMap);
+    }
+
+    /// <summary>
+    /// Executes a CTE → SELECT WHERE as a single cursor with merged filters.
+    /// Avoids materializing the CTE entirely.
+    /// </summary>
+    private static SharcDataReader ExecuteResolvedSimple(
+        SharcDatabase db, QueryIntent outer, Dictionary<string, QueryIntent> cteMap,
+        IReadOnlyDictionary<string, object>? parameters)
+    {
+        var resolved = ResolveSingleIntent(outer, cteMap);
+        return ExecuteIntent(db, resolved, parameters);
+    }
+
+    /// <summary>
+    /// Returns true when all CTE references in a compound plan can be inlined.
+    /// Requires a simple two-way plan with no nested compounds.
+    /// </summary>
+    private static bool CanResolveCompound(CompoundQueryPlan plan, Dictionary<string, QueryIntent> cteMap)
+    {
+        if (plan.RightCompound != null) return false;
+        if (plan.RightSimple == null) return false;
+
+        bool leftIsCte = cteMap.ContainsKey(plan.Left.TableName);
+        bool rightIsCte = cteMap.ContainsKey(plan.RightSimple.TableName);
+
+        if (!leftIsCte && !rightIsCte) return false;
+        if (leftIsCte && !IsCteSimpleTableScan(cteMap[plan.Left.TableName], cteMap)) return false;
+        if (rightIsCte && !IsCteSimpleTableScan(cteMap[plan.RightSimple.TableName], cteMap)) return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces CTE table references with real table intents, merging filters.
+    /// </summary>
+    private static CompoundQueryPlan ResolveCompound(
+        CompoundQueryPlan plan, Dictionary<string, QueryIntent> cteMap)
+    {
+        return new CompoundQueryPlan
+        {
+            Left = ResolveSingleIntent(plan.Left, cteMap),
+            Operator = plan.Operator,
+            RightSimple = plan.RightSimple != null ? ResolveSingleIntent(plan.RightSimple, cteMap) : null,
+            RightCompound = plan.RightCompound,
+            FinalOrderBy = plan.FinalOrderBy,
+            FinalLimit = plan.FinalLimit,
+            FinalOffset = plan.FinalOffset,
+        };
+    }
+
+    /// <summary>
+    /// If the intent references a CTE, returns a new intent targeting the real table
+    /// with the CTE filter and outer filter merged via AND.
+    /// </summary>
+    private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryIntent> cteMap)
+    {
+        if (!cteMap.TryGetValue(intent.TableName, out var cteQuery))
+            return intent;
+
+        return new QueryIntent
+        {
+            TableName = cteQuery.TableName,
+            Columns = intent.Columns ?? cteQuery.Columns,
+            Filter = MergeFilters(cteQuery.Filter, intent.Filter),
+            OrderBy = intent.OrderBy,
+            Limit = intent.Limit,
+            Offset = intent.Offset,
+            IsDistinct = intent.IsDistinct,
+            Aggregates = intent.Aggregates,
+            GroupBy = intent.GroupBy,
+            HavingFilter = intent.HavingFilter,
+        };
+    }
+
+    /// <summary>
+    /// Combines two predicate filters with AND. Returns null if both are null.
+    /// </summary>
+    private static PredicateIntent? MergeFilters(PredicateIntent? cteFilter, PredicateIntent? outerFilter)
+    {
+        if (!cteFilter.HasValue) return outerFilter;
+        if (!outerFilter.HasValue) return cteFilter;
+
+        var cteNodes = cteFilter.Value.Nodes;
+        var outerNodes = outerFilter.Value.Nodes;
+        int offset = cteNodes.Length;
+
+        // Combine: [cte nodes] [outer nodes (shifted)] [AND root]
+        var combined = new IntentPredicateNode[cteNodes.Length + outerNodes.Length + 1];
+        Array.Copy(cteNodes, 0, combined, 0, cteNodes.Length);
+
+        for (int i = 0; i < outerNodes.Length; i++)
+        {
+            ref readonly var node = ref outerNodes[i];
+            combined[offset + i] = new IntentPredicateNode
+            {
+                Op = node.Op,
+                ColumnName = node.ColumnName,
+                Value = node.Value,
+                HighValue = node.HighValue,
+                LeftIndex = node.LeftIndex >= 0 ? node.LeftIndex + offset : -1,
+                RightIndex = node.RightIndex >= 0 ? node.RightIndex + offset : -1,
+            };
+        }
+
+        combined[^1] = new IntentPredicateNode
+        {
+            Op = IntentOp.And,
+            LeftIndex = cteFilter.Value.RootIndex,
+            RightIndex = outerFilter.Value.RootIndex + offset,
+        };
+
+        return new PredicateIntent(combined, combined.Length - 1);
+    }
+
+    /// <summary>
+    /// Executes a resolved compound plan through all streaming paths.
+    /// Called after CTE references have been inlined into real table intents.
+    /// </summary>
+    private static SharcDataReader ExecuteCompoundResolved(
+        SharcDatabase db, CompoundQueryPlan resolved,
+        IReadOnlyDictionary<string, object>? parameters)
+    {
+        // All streaming paths are available — no CTE references remain
+        if (StreamingUnionExecutor.CanStreamUnionAll(resolved, null))
+            return StreamingUnionExecutor.StreamingUnionAll(db, resolved, parameters);
+
+        if (StreamingUnionExecutor.CanStreamUnionAllTopN(resolved, null))
+            return StreamingUnionExecutor.StreamingUnionAllTopN(db, resolved, parameters);
+
+        if (CanStreamChainedUnionAll(resolved, null))
+            return StreamingChainedUnionAll(db, resolved, parameters);
+
+        if (CanStreamSetOp(resolved, null))
+            return ExecuteIndexSetOp(db, resolved, parameters);
+
+        // Fallback: standard compound execution without CTE results
+        var (rows, columns) = ExecuteCompoundCore(db, resolved, parameters, null);
+        return new SharcDataReader(rows.ToArray(), columns);
     }
 
     // ─── Compound execution ──────────────────────────────────────
@@ -260,8 +457,9 @@ internal static class CompoundQueryExecutor
             return dedupReader;
 
         // Streaming TopN: ORDER BY + LIMIT without full materialization
-        if (hasOrderBy && plan.FinalLimit.HasValue && !plan.FinalOffset.HasValue)
-            return StreamingTopNProcessor.Apply(dedupReader, plan.FinalOrderBy!, plan.FinalLimit.Value);
+        if (hasOrderBy && plan.FinalLimit.HasValue)
+            return StreamingTopNProcessor.Apply(
+                dedupReader, plan.FinalOrderBy!, plan.FinalLimit.Value, plan.FinalOffset ?? 0);
 
         // Materialize for complex cases (ORDER BY without LIMIT, OFFSET, etc.)
         var (rows, columns) = QueryPostProcessor.Materialize(dedupReader);

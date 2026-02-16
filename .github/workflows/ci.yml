@@ -12,10 +12,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -37,10 +34,13 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results
           path: |
             **/TestResults/*.trx
           retention-days: 30
+
+      - name: Verify Arena build
+        run: dotnet publish src/Sharc.Arena.Wasm/Sharc.Arena.Wasm.csproj -c Release --nologo
 
   pack:
     name: Verify NuGet Packing

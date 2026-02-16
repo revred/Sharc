@@ -53,7 +53,12 @@ else
                 }
             }
         </div>
-        <div class="engine-alloc">Alloc: @(Result.Allocation ?? "—")</div>
+        <AllocationBar Allocation="@Result.Allocation" WidthPercent="@AllocBarWidth" Color="@(Engine.Color + "40")" />
+        @if (IsWinner && WinnerValue.HasValue && MaxValue > 0)
+        {
+            var speedup = MaxValue / WinnerValue.Value;
+            <SpeedupBadge Speedup="@speedup" Color="@Engine.Color" />
+        }
         @if (Result.Note is not null)
         {
             <div class="engine-note @(IsWinner ? "winner-note" : "")">@Result.Note</div>
@@ -77,6 +82,8 @@ else
     private double BarWidth => MaxValue > 0 && Result?.Value > 0
         ? Math.Min((Result.Value.Value / MaxValue) * 100, 100)
         : 0;
+
+    private double AllocBarWidth => IsWinner ? 30 : 70;
 
     private static string FormatValue(double? v, string unit)
     {

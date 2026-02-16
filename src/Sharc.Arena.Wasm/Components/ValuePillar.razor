@@ -1,0 +1,13 @@
+@* Single value proposition card *@
+
+<div class="value-pillar">
+    <span class="value-pillar-icon">@Icon</span>
+    <div class="value-pillar-stat">@Stat</div>
+    <div class="value-pillar-label">@Label</div>
+</div>
+
+@code {
+    [Parameter] public required string Icon { get; set; }
+    [Parameter] public required string Stat { get; set; }
+    [Parameter] public required string Label { get; set; }
+}

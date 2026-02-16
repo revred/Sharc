@@ -1,0 +1,14 @@
+@* Case study card *@
+
+<div class="scenario-card">
+    <div class="scenario-stat" style="color: @Color">@Stat</div>
+    <div class="scenario-title">@Title</div>
+    <div class="scenario-desc">@Description</div>
+</div>
+
+@code {
+    [Parameter] public required string Stat { get; set; }
+    [Parameter] public required string Title { get; set; }
+    [Parameter] public required string Description { get; set; }
+    [Parameter] public string Color { get; set; } = "#10B981";
+}

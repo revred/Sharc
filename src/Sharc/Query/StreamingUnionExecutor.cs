@@ -61,7 +61,6 @@ internal static class StreamingUnionExecutor
         if (plan.Operator != CompoundOperator.UnionAll) return false;
         if (plan.FinalOrderBy is not { Count: > 0 }) return false;
         if (!plan.FinalLimit.HasValue) return false;
-        if (plan.FinalOffset.HasValue) return false;
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
 
@@ -89,7 +88,7 @@ internal static class StreamingUnionExecutor
         var columnNames = leftReader.GetColumnNames();
         var concatReader = new SharcDataReader(leftReader, rightReader, columnNames);
         return StreamingTopNProcessor.Apply(
-            concatReader, plan.FinalOrderBy!, plan.FinalLimit!.Value);
+            concatReader, plan.FinalOrderBy!, plan.FinalLimit!.Value, plan.FinalOffset ?? 0);
     }
 
     /// <summary>

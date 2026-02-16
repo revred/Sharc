@@ -11,6 +11,8 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
+builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+
 // Tier 1: Native .NET engines (Stopwatch + GC alloc tracking)
 builder.Services.AddSingleton<SharcEngine>();
 builder.Services.AddSingleton<SqliteEngine>();
@@ -18,11 +20,17 @@ builder.Services.AddSingleton<SqliteEngine>();
 // Tier 2: Browser API engine (JS interop + performance.now())
 builder.Services.AddSingleton<IndexedDbEngine>();
 
-// Reference engine (static base data for SurrealDB)
+// Reference engine (static baseline data)
 builder.Services.AddSingleton<ReferenceEngine>();
 
-// Orchestrator: routes to live engines, falls back to reference for SurrealDB
+// Orchestrator: routes to live engines, falls back to reference
 builder.Services.AddSingleton<BenchmarkRunner>();
 builder.Services.AddSingleton<IBenchmarkEngine>(sp => sp.GetRequiredService<BenchmarkRunner>());
+
+// Data loader: fetches benchmark JSON from wwwroot/data/
+builder.Services.AddSingleton<BenchmarkDataLoader>();
+
+// Query pipeline: reference data for 13-query comparison
+builder.Services.AddSingleton<QueryPipelineEngine>();
 
 await builder.Build().RunAsync();

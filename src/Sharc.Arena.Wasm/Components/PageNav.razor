@@ -1,0 +1,30 @@
+@* Fixed side navigation (7 dots with labels) *@
+
+<nav class="page-nav">
+    @foreach (var item in _navItems)
+    {
+        var isActive = ActivePage == item.Id;
+        <div class="page-nav-item @(isActive ? "active" : "")"
+             @onclick="@(() => OnNavigate.InvokeAsync(item.Id))"
+             title="@item.Label">
+            <span class="page-nav-dot @(isActive ? "active" : "")"></span>
+            <span class="page-nav-label">@item.Label</span>
+        </div>
+    }
+</nav>
+
+@code {
+    [Parameter] public string ActivePage { get; set; } = "page-hook";
+    [Parameter] public EventCallback<string> OnNavigate { get; set; }
+
+    private static readonly (string Id, string Label)[] _navItems =
+    [
+        ("page-hook", "Home"),
+        ("page-context", "Problem"),
+        ("page-benchmarks", "Benchmarks"),
+        ("page-pipeline", "Query"),
+        ("page-trust", "Trust"),
+        ("page-honest", "Comparison"),
+        ("page-cta", "Get Started"),
+    ];
+}

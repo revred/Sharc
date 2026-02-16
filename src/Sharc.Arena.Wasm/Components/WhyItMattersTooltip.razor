@@ -1,0 +1,19 @@
+@* Expandable "Why it matters" explanation *@
+
+@if (!string.IsNullOrEmpty(Text))
+{
+    <div class="why-tooltip @(_expanded ? "expanded" : "")">
+        <button class="why-tooltip-toggle" @onclick="@(() => _expanded = !_expanded)">
+            @(_expanded ? "\u25B2" : "\u25BC") Why it matters
+        </button>
+        @if (_expanded)
+        {
+            <div class="why-tooltip-body">@Text</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Text { get; set; }
+    private bool _expanded;
+}

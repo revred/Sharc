@@ -1,0 +1,40 @@
+@* Page 2: "AI Agents Are Drowning in Context" *@
+
+<div class="context-page">
+    <div class="context-badge">THE PROBLEM</div>
+    <h2 class="context-title">AI Agents Are Drowning in Context</h2>
+    <p class="context-subtitle">
+        Every agent needs persistent memory. Traditional databases add 1.5 MB of WASM weight,
+        142 ms cold starts, and P/Invoke overhead on every read.
+    </p>
+
+    <div class="context-comparison">
+        <ContextColumn Label="Traditional Approach" IsNew="false">
+            <ul class="context-list">
+                <li>1.5 MB WASM binary (e_sqlite3)</li>
+                <li>142 ms cold start per agent</li>
+                <li>P/Invoke marshaling on every read</li>
+                <li>No page-level encryption</li>
+                <li>No graph traversal built-in</li>
+            </ul>
+        </ContextColumn>
+        <ContextColumn Label="With Sharc" IsNew="true">
+            <ul class="context-list sharc-list">
+                <li>50 KB pure managed C#</li>
+                <li>4 &#x00B5;s instant activation</li>
+                <li>Zero-alloc Span pipeline</li>
+                <li>AES-256-GCM page encryption</li>
+                <li>Native ConceptStore + RelationStore</li>
+            </ul>
+        </ContextColumn>
+    </div>
+
+    <div class="context-scenarios">
+        <ScenarioCard Stat="62x" Title="Healthcare Agent" Description="Patient context retrieval drops from 142ms to 2.3ms" />
+        <ScenarioCard Stat="133x" Title="Engineering Agent" Description="Schema introspection: 26&#x00B5;s &#x2192; 2.97&#x00B5;s, 50KB vs 1.5MB" Color="#3B82F6" />
+        <ScenarioCard Stat="&#x00A3;225K" Title="Manufacturing" Description="Annual savings from eliminating native dependency overhead" Color="#F59E0B" />
+    </div>
+</div>
+
+@code {
+}

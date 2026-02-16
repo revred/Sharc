@@ -14,7 +14,7 @@
         var slide = Slides[i];
         var isCurrent = CurrentIndex == i;
         var isDone = DoneSlides.Contains(slide.Id);
-        var cat = SlideData.Categories.FirstOrDefault(c => c.Id == slide.CategoryId);
+        var cat = Categories?.FirstOrDefault(c => c.Id == slide.CategoryId);
 
         <div class="sidenav-item @(isCurrent ? "current" : "") @(isDone ? "done" : "")"
              @onclick="@(() => { if (!Running) OnJump.InvokeAsync(index); })">
@@ -32,4 +32,5 @@
     [Parameter] public required HashSet<string> DoneSlides { get; set; }
     [Parameter] public bool Running { get; set; }
     [Parameter] public required EventCallback<int> OnJump { get; set; }
+    [Parameter] public IReadOnlyList<Category>? Categories { get; set; }
 }

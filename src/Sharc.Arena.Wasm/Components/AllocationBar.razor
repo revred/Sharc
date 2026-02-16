@@ -1,0 +1,18 @@
+@* Visual memory allocation bar *@
+
+@if (!string.IsNullOrEmpty(Allocation))
+{
+    <div class="alloc-bar">
+        <div class="alloc-bar-label">Alloc</div>
+        <div class="alloc-bar-track">
+            <div class="alloc-bar-fill" style="width: @(WidthPercent)%; background: @Color"></div>
+        </div>
+        <div class="alloc-bar-value">@Allocation</div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Allocation { get; set; }
+    [Parameter] public double WidthPercent { get; set; } = 50;
+    [Parameter] public string Color { get; set; } = "rgba(255,255,255,0.15)";
+}

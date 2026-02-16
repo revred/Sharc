@@ -1,0 +1,12 @@
+@* One side of the old/new comparison *@
+
+<div class="context-column @(IsNew ? "new" : "old")">
+    <div class="context-column-label">@Label</div>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public required string Label { get; set; }
+    [Parameter] public bool IsNew { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
