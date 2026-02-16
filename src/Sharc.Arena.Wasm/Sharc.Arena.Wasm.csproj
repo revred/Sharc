@@ -17,8 +17,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
     <!-- DataGenerator uses Microsoft.Data.Sqlite for in-memory DB → byte[] export -->
     <PackageReference Include="Microsoft.Data.Sqlite" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" VersionOverride="2.1.11" />
-    <!-- SQLitePCLRaw auto-links e_sqlite3.a via buildTransitive; requires wasm-tools workload for native relinking -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" VersionOverride="3.0.2" />
+    <!-- 3.0.2 uses SourceGear.sqlite3 (SQLite 3.50.4); requires wasm-tools workload for native relinking -->
   </ItemGroup>
 
   <ItemGroup>
