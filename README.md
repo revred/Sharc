@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-1%2C730_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-1%2C782_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -14,7 +14,7 @@
 | **61x faster** B-tree seeks | **~250 KB** engine footprint | **ECDSA** agent attestation |
 | **13.5x faster** graph traversal | **Zero** native dependencies | **AES-256-GCM** encryption |
 | **4.7x faster** UNION ALL queries | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
-| **~0 B** per-row allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / CTE |
+| **~0 B** per-row allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
 
 ---
 
@@ -46,7 +46,7 @@ if (reader.Seek(42))
 using var filtered = db.CreateReader("users",
     new SharcFilter("age", SharcOperator.GreaterOrEqual, 18L));
 
-// SQL queries — SELECT, WHERE, ORDER BY, GROUP BY, UNION, CTE
+// SQL queries — SELECT, WHERE, ORDER BY, GROUP BY, UNION, Cote
 using var results = db.Query(
     "SELECT dept, COUNT(*) AS cnt FROM users WHERE age > 25 GROUP BY dept ORDER BY cnt DESC LIMIT 10");
 while (results.Read())
@@ -56,7 +56,7 @@ while (results.Read())
 using var combined = db.Query(
     "SELECT name FROM employees UNION SELECT name FROM contractors ORDER BY name");
 
-// CTEs
+// Cotes
 using var cte = db.Query(
     "WITH active AS (SELECT id, name FROM users WHERE active = 1) " +
     "SELECT * FROM active WHERE id > 100");
@@ -99,8 +99,8 @@ using var cte = db.Query(
 | | `EXCEPT` | **748 us** | 1,231 us | **1.6x** |
 | | `UNION ALL + ORDER BY + LIMIT` | **465 us** | 482 us | **1.04x** |
 | | `3-way UNION ALL` | **279 us** | 1,225 us | **4.4x** |
-| **CTE** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** |
-| | `CTE + UNION ALL` | **580 us** | 791 us | **1.4x** |
+| **Cote** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** |
+| | `Cote + UNION ALL` | **580 us** | 791 us | **1.4x** |
 | **Parameterized** | `WHERE $param AND $param` | **179 us** | 591 us | **3.3x** |
 
 **Memory per query** (managed heap, † = managed-only; see note below):
@@ -114,7 +114,7 @@ using var cte = db.Query(
 | `UNION` / `INTERSECT` / `EXCEPT` | **1.4 KB** | 744 B † | ArrayPool-backed IndexSet — zero alloc after warmup |
 | `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3 KB † | Streaming concat → TopN, no full materialization |
 | `GROUP BY + COUNT + AVG` | **5.3 KB** | 920 B † | Streaming hash aggregator with fingerprint-based string pooling |
-| `CTE` | 309 KB | 31 KB | CTE rows materialized then re-scanned |
+| `Cote` | 309 KB | 31 KB | Cote rows materialized then re-scanned |
 
 > **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's † numbers reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
 >
@@ -150,15 +150,43 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 1,730 tests
+dotnet test                                             # Run all 1,782 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
+```
+
+## Project Structure
+
+```text
+src/
+  Sharc/                    Public API + Write Engine + Trust Layer
+  Sharc.Core/               B-Tree, Records, Page I/O, Primitives
+  Sharc.Query/              SQL pipeline: parser, compiler, executor
+  Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
+  Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
+  Sharc.Graph.Surface/      Graph interfaces and models
+  Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
+tests/
+  Sharc.Tests/              1,003 unit tests
+  Sharc.IntegrationTests/   265 end-to-end tests
+  Sharc.Query.Tests/        425 query pipeline tests
+  Sharc.Graph.Tests.Unit/   53 graph tests
+  Sharc.Index.Tests/        22 index CLI tests
+  Sharc.Context.Tests/      14 MCP context tests
+bench/
+  Sharc.Benchmarks/         BenchmarkDotNet suite (Sharc vs SQLite)
+  Sharc.Comparisons/        Graph + query benchmarks
+tools/
+  Sharc.Context/            MCP Context Server
+  Sharc.Index/              Git history → SQLite CLI
+docs/                       Architecture, benchmarks, cookbook, FAQ, migration guides
+PRC/                        Architecture decisions, specs, execution plans
 ```
 
 ## Current Limitations
 
-- **Query pipeline materializes results** -- CTEs allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
+- **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
 - **Write support** -- INSERT with B-tree splits. UPDATE/DELETE planned
-- **No JOIN support** -- single-table queries only; use UNION/CTE for multi-table workflows
+- **No JOIN support** -- single-table queries only; use UNION/Cote for multi-table workflows
 - **No virtual tables** -- FTS5, R-Tree not supported
 
 Sharc is a **complement** to SQLite, not a replacement. See [When NOT to Use Sharc](docs/WHEN_NOT_TO_USE.md).

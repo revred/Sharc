@@ -1,4 +1,3 @@
-using Sharc;
 using Xunit;
 
 namespace Sharc.Tests.Filter;

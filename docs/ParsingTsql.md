@@ -55,7 +55,7 @@ You can start a traversal from a specific record ID using the `table:id` syntax:
 SELECT users:alice|>friends|>name;
 ```
 
-## 3. Common Table Expressions (CTEs)
+## 3. Cotes (Common Table Expressions)
 
 Modularize complex queries using `WITH`.
 

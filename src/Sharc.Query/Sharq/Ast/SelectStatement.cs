@@ -17,13 +17,13 @@ internal sealed class SelectStatement
     public IReadOnlyList<OrderByItem>? OrderBy { get; init; }
     public SharqStar? Limit { get; init; }
     public SharqStar? Offset { get; init; }
-    public IReadOnlyList<CteDefinition>? Ctes { get; init; }
+    public IReadOnlyList<CoteDefinition>? Cotes { get; init; }
     public CompoundOp? CompoundOp { get; init; }
     public SelectStatement? CompoundRight { get; init; }
 }
 
-/// <summary>A Common Table Expression definition: name AS (SELECT ...).</summary>
-internal sealed class CteDefinition
+/// <summary>A Cote (Common Table Expression) definition: name AS (SELECT ...).</summary>
+internal sealed class CoteDefinition
 {
     public required string Name { get; init; }
     public required SelectStatement Query { get; init; }

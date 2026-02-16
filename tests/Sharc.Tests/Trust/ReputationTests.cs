@@ -1,7 +1,4 @@
-using System;
-using System.IO;
 using Xunit;
-using Sharc.Core.Trust;
 using Sharc.Trust;
 
 namespace Sharc.Tests.Trust;

@@ -20,13 +20,13 @@ This document summarizes what is **missing**, **experimental**, or **intentional
     *   Common Table Expressions (`WITH ... AS`)
     *   Parameterized queries (`$param`)
 *   **Missing Features**:
-    *   **No SQL JOINs**: Standard `JOIN` syntax is not supported. Use `UNION`/CTE for multi-table workflows or the Graph API for relationship traversal.
+    *   **No SQL JOINs**: Standard `JOIN` syntax is not supported. Use `UNION`/Cote for multi-table workflows or the Graph API for relationship traversal.
     *   **No Virtual Tables**: `FTS5`, `R*Tree`, `json_each` are not supported.
     *   **No CASE execution**: `CASE` expressions are parsed but not yet executable.
     *   **No Window Functions**: `OVER`, `PARTITION BY` are parsed but not yet executable.
 *   **Performance Notes**:
     *   Aggregations are streaming (O(groups) memory).
-    *   CTEs materialize the CTE result before re-scanning.
+    *   Cotes materialize the Cote result before re-scanning.
     *   `UNION`/`INTERSECT`/`EXCEPT` use streaming set operations with spare-array reuse (1.2-1.6 MB for 2×2.5K rows). String allocation (~500 KB) dominates — further reduction requires raw-byte comparison before materialization.
 
 ## 3. Workload Suitability (OLAP vs OLTP)

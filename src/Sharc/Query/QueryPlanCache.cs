@@ -15,7 +15,7 @@ internal sealed class QueryPlanCache
 
     /// <summary>
     /// Returns a cached <see cref="QueryPlan"/> for the given query string,
-    /// compiling it on the first call. Supports simple, compound, and CTE queries.
+    /// compiling it on the first call. Supports simple, compound, and Cote queries.
     /// </summary>
     internal QueryPlan GetOrCompilePlan(string query)
     {
@@ -29,7 +29,7 @@ internal sealed class QueryPlanCache
     {
         var plan = GetOrCompilePlan(query);
         return plan.Simple ?? throw new NotSupportedException(
-            "Use GetOrCompilePlan for compound or CTE queries.");
+            "Use GetOrCompilePlan for compound or Cote queries.");
     }
 
     /// <summary>Number of cached plans.</summary>

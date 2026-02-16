@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sharc.Arena.Wasm.Models;
 

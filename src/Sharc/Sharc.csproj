@@ -1,18 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Sharc</RootNamespace>
     <AssemblyName>Sharc</AssemblyName>
-    <Version>1.0.0-beta.1</Version>
-    <Authors>Ram Revanur</Authors>
     <Description>Pure C# SQLite read/write engine for AI context space engineering. Zero dependencies, sub-50KB footprint, zero-allocation hot paths.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/revred/Sharc</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/revred/Sharc</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
     <PackageTags>sqlite;database;ai;context-space;zero-allocation;dotnet;csharp</PackageTags>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />

@@ -33,7 +33,7 @@ internal static class EntitlementEnforcer
     }
 
     /// <summary>
-    /// Validates that the agent's ReadScope permits access to ALL tables in a compound/CTE query.
+    /// Validates that the agent's ReadScope permits access to ALL tables in a compound/Cote query.
     /// Throws <see cref="UnauthorizedAccessException"/> if access to any table is denied.
     /// </summary>
     internal static void EnforceAll(AgentInfo agent, List<(string table, string[]? columns)> targets)

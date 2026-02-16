@@ -450,64 +450,64 @@ public class SharqSelectParserTests
         Assert.IsType<ParameterStar>(stmt.Limit);
     }
 
-    // ─── CTEs (WITH ... AS) ─────────────────────────────────────────
+    // ─── Cotes (WITH ... AS) ────────────────────────────────────────
 
     [Fact]
-    public void Parse_SingleCte_SetsCteList()
+    public void Parse_SingleCote_SetsCoteList()
     {
         var stmt = Parse("WITH active AS (SELECT * FROM users WHERE active = 1) SELECT * FROM active");
-        Assert.NotNull(stmt.Ctes);
-        Assert.Single(stmt.Ctes);
-        Assert.Equal("active", stmt.Ctes[0].Name);
-        Assert.Equal("users", stmt.Ctes[0].Query.From.Name);
+        Assert.NotNull(stmt.Cotes);
+        Assert.Single(stmt.Cotes);
+        Assert.Equal("active", stmt.Cotes[0].Name);
+        Assert.Equal("users", stmt.Cotes[0].Query.From.Name);
     }
 
     [Fact]
-    public void Parse_MultipleCtes_ParsesAll()
+    public void Parse_MultipleCotes_ParsesAll()
     {
         var stmt = Parse(
             "WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM t2) SELECT * FROM a");
-        Assert.NotNull(stmt.Ctes);
-        Assert.Equal(2, stmt.Ctes.Count);
-        Assert.Equal("a", stmt.Ctes[0].Name);
-        Assert.Equal("b", stmt.Ctes[1].Name);
-        Assert.Equal("t1", stmt.Ctes[0].Query.From.Name);
-        Assert.Equal("t2", stmt.Ctes[1].Query.From.Name);
+        Assert.NotNull(stmt.Cotes);
+        Assert.Equal(2, stmt.Cotes.Count);
+        Assert.Equal("a", stmt.Cotes[0].Name);
+        Assert.Equal("b", stmt.Cotes[1].Name);
+        Assert.Equal("t1", stmt.Cotes[0].Query.From.Name);
+        Assert.Equal("t2", stmt.Cotes[1].Query.From.Name);
     }
 
     [Fact]
-    public void Parse_CteInnerQueryParsed_Works()
+    public void Parse_CoteInnerQueryParsed_Works()
     {
         var stmt = Parse("WITH top5 AS (SELECT * FROM users ORDER BY score DESC LIMIT 5) SELECT name FROM top5");
-        Assert.NotNull(stmt.Ctes);
-        Assert.NotNull(stmt.Ctes[0].Query.OrderBy);
-        Assert.NotNull(stmt.Ctes[0].Query.Limit);
+        Assert.NotNull(stmt.Cotes);
+        Assert.NotNull(stmt.Cotes[0].Query.OrderBy);
+        Assert.NotNull(stmt.Cotes[0].Query.Limit);
     }
 
     [Fact]
-    public void Parse_NoCte_CtesIsNull()
+    public void Parse_NoCote_CotesIsNull()
     {
         var stmt = Parse("SELECT * FROM users");
-        Assert.Null(stmt.Ctes);
+        Assert.Null(stmt.Cotes);
     }
 
     [Fact]
-    public void Parse_CteCaseInsensitive_Works()
+    public void Parse_CoteCaseInsensitive_Works()
     {
         var stmt = Parse("with x as (select * from t) select * from x");
-        Assert.NotNull(stmt.Ctes);
-        Assert.Single(stmt.Ctes);
+        Assert.NotNull(stmt.Cotes);
+        Assert.Single(stmt.Cotes);
     }
 
     [Fact]
-    public void Parse_CteWithWhereGroupBy_Works()
+    public void Parse_CoteWithWhereGroupBy_Works()
     {
         var stmt = Parse(
             "WITH dept_stats AS (SELECT dept, count(*) AS cnt FROM emp GROUP BY dept HAVING count(*) > 3) " +
             "SELECT * FROM dept_stats WHERE cnt > 5 ORDER BY cnt DESC");
-        Assert.NotNull(stmt.Ctes);
-        Assert.NotNull(stmt.Ctes[0].Query.GroupBy);
-        Assert.NotNull(stmt.Ctes[0].Query.Having);
+        Assert.NotNull(stmt.Cotes);
+        Assert.NotNull(stmt.Cotes[0].Query.GroupBy);
+        Assert.NotNull(stmt.Cotes[0].Query.Having);
         Assert.NotNull(stmt.Where);
         Assert.NotNull(stmt.OrderBy);
     }
@@ -600,7 +600,7 @@ public class SharqSelectParserTests
     public void Parse_CompoundWithCte_Works()
     {
         var stmt = Parse("WITH a AS (SELECT * FROM t1) SELECT * FROM a UNION SELECT * FROM t2");
-        Assert.NotNull(stmt.Ctes);
+        Assert.NotNull(stmt.Cotes);
         Assert.Equal(CompoundOp.Union, stmt.CompoundOp);
         Assert.NotNull(stmt.CompoundRight);
     }

@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace Sharc.Core.IO;
 
 /// <summary>

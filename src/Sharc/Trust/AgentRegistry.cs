@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
 using Sharc.Core;
-using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Core.Trust;
 using Sharc.Core.Storage;

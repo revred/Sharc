@@ -7,7 +7,6 @@
 
 using BenchmarkDotNet.Attributes;
 using Microsoft.Data.Sqlite;
-using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;

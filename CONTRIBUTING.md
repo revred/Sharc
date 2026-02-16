@@ -13,7 +13,7 @@ dotnet build
 dotnet test
 ```
 
-All 1,067 tests must pass before submitting a PR.
+All 1,730 tests must pass before submitting a PR.
 
 ## Development Workflow
 
@@ -54,15 +54,23 @@ Use xUnit `Assert.*` methods only. No FluentAssertions.
 
 ## Project Structure
 
-```
-src/Sharc/                    Public API (SharcDatabase, SharcDataReader)
-src/Sharc.Core/               Internal engine (B-Tree, Records, IO, Primitives)
-src/Sharc.Crypto/             Encryption (AES-256-GCM, Argon2id KDF)
+```text
+src/Sharc/                    Public API + Write Engine + Trust Layer
+src/Sharc.Core/               B-Tree, Records, Page I/O, Primitives
+src/Sharc.Query/              SQL pipeline: parser, compiler, executor
+src/Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
 src/Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
 src/Sharc.Graph.Surface/      Graph interfaces and models
-tests/Sharc.Tests/            Unit tests
-tests/Sharc.IntegrationTests/ End-to-end tests
-tests/Sharc.Graph.Tests.Unit/ Graph layer tests
+src/Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
+tests/Sharc.Tests/            1,003 unit tests
+tests/Sharc.IntegrationTests/ 213 end-to-end tests
+tests/Sharc.Query.Tests/      425 query pipeline tests
+tests/Sharc.Graph.Tests.Unit/ 53 graph tests
+tests/Sharc.Index.Tests/      22 index CLI tests
+tests/Sharc.Context.Tests/    14 MCP context tests
+bench/Sharc.Benchmarks/       BenchmarkDotNet suite (Sharc vs SQLite)
+tools/Sharc.Context/          MCP Context Server
+tools/Sharc.Index/            Git history → SQLite CLI
 ```
 
 ## Pull Request Process
@@ -76,7 +84,6 @@ tests/Sharc.Graph.Tests.Unit/ Graph layer tests
 
 ## What NOT to Do
 
-- **Do not add SQL parsing or execution** — Sharc reads raw B-tree pages
 - **Do not add heavy dependencies** — Sharc is zero-dependency by design
 - **Do not use `unsafe` code** unless profiling proves >20% gain
 - **Do not allocate in hot paths** — use spans, stackalloc, ArrayPool
@@ -95,7 +102,7 @@ Look for issues labeled [`good first issue`](../../labels/good%20first%20issue).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a full breakdown of the layered design.
 
-The key insight: Sharc is a **file-format reader**, not a database engine. It decodes SQLite B-tree pages directly through `ReadOnlySpan<byte>`, eliminating the SQL parser, VDBE interpreter, and P/Invoke boundary that SQLite pays for on every query.
+The key insight: Sharc reads SQLite pages directly through `ReadOnlySpan<byte>` slicing, bypassing SQLite's VDBE interpreter and P/Invoke boundary. The built-in SQL pipeline (SELECT, WHERE, ORDER BY, GROUP BY, UNION, Cote) compiles queries against the raw B-tree layer for maximum throughput.
 
 ## Questions?
 

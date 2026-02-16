@@ -7,13 +7,13 @@ namespace Sharc.Query.Intent;
 
 /// <summary>
 /// Compiles a parsed Sharq <see cref="SelectStatement"/> into a <see cref="QueryIntent"/>
-/// or a <see cref="QueryPlan"/> (for compound and CTE queries).
+/// or a <see cref="QueryPlan"/> (for compound and Cote queries).
 /// </summary>
 public static class IntentCompiler
 {
     /// <summary>
     /// Parses and compiles a Sharq query string into a <see cref="QueryIntent"/>.
-    /// Throws <see cref="NotSupportedException"/> for compound and CTE queries.
+    /// Throws <see cref="NotSupportedException"/> for compound and Cote queries.
     /// Use <see cref="CompilePlan(string)"/> for full support.
     /// </summary>
     public static QueryIntent Compile(string sharq) =>
@@ -21,7 +21,7 @@ public static class IntentCompiler
 
     /// <summary>
     /// Parses and compiles a Sharq query string into a <see cref="QueryPlan"/>
-    /// that supports simple, compound (UNION/INTERSECT/EXCEPT), and CTE queries.
+    /// that supports simple, compound (UNION/INTERSECT/EXCEPT), and Cote queries.
     /// </summary>
     public static QueryPlan CompilePlan(string sharq) =>
         CompilePlan(Sharq.SharqParser.Parse(sharq));
@@ -31,21 +31,21 @@ public static class IntentCompiler
     /// </summary>
     internal static QueryPlan CompilePlan(SelectStatement statement)
     {
-        // Compile CTEs if present
-        IReadOnlyList<CteIntent>? ctes = null;
-        if (statement.Ctes is { Count: > 0 })
-            ctes = CompileCtes(statement.Ctes);
+        // Compile Cotes if present
+        IReadOnlyList<CoteIntent>? cotes = null;
+        if (statement.Cotes is { Count: > 0 })
+            cotes = CompileCotes(statement.Cotes);
 
         // Compound query?
         if (statement.CompoundOp != null)
         {
             var compound = CompileCompound(statement);
-            return new QueryPlan { Compound = compound, Ctes = ctes };
+            return new QueryPlan { Compound = compound, Cotes = cotes };
         }
 
-        // Simple query (strip CTEs — they're already compiled above)
+        // Simple query (strip Cotes — they're already compiled above)
         var intent = CompileSimple(statement);
-        return new QueryPlan { Simple = intent, Ctes = ctes };
+        return new QueryPlan { Simple = intent, Cotes = cotes };
     }
 
     /// <summary>
@@ -58,7 +58,7 @@ public static class IntentCompiler
             throw new NotSupportedException(
                 $"{statement.CompoundOp} queries are not yet supported.");
 
-        if (statement.Ctes is { Count: > 0 })
+        if (statement.Cotes is { Count: > 0 })
             throw new NotSupportedException(
                 "Common Table Expressions (WITH) are not yet supported.");
 
@@ -429,11 +429,11 @@ public static class IntentCompiler
         _ => throw new NotSupportedException($"Unsupported binary operator for intent: {op}"),
     };
 
-    // ─── Compound / CTE compilation ──────────────────────────────
+    // ─── Compound / Cote compilation ──────────────────────────────
 
     /// <summary>
     /// Compiles a simple (non-compound) <see cref="SelectStatement"/> into a <see cref="QueryIntent"/>.
-    /// Same logic as <see cref="Compile(SelectStatement)"/> but without the compound/CTE guards.
+    /// Same logic as <see cref="Compile(SelectStatement)"/> but without the compound/Cote guards.
     /// </summary>
     private static QueryIntent CompileSimple(SelectStatement statement)
     {
@@ -519,15 +519,15 @@ public static class IntentCompiler
         return orders;
     }
 
-    private static CteIntent[] CompileCtes(IReadOnlyList<CteDefinition> ctes)
+    private static CoteIntent[] CompileCotes(IReadOnlyList<CoteDefinition> cotes)
     {
-        var result = new CteIntent[ctes.Count];
-        for (int i = 0; i < ctes.Count; i++)
+        var result = new CoteIntent[cotes.Count];
+        for (int i = 0; i < cotes.Count; i++)
         {
-            result[i] = new CteIntent
+            result[i] = new CoteIntent
             {
-                Name = ctes[i].Name,
-                Query = CompileSimple(ctes[i].Query),
+                Name = cotes[i].Name,
+                Query = CompileSimple(cotes[i].Query),
             };
         }
         return result;

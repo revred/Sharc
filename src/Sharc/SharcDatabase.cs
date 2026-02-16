@@ -1,13 +1,10 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text;
-using System.Buffers.Binary;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
-using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Crypto;
 using Sharc.Exceptions;
@@ -314,7 +311,7 @@ public sealed class SharcDatabase : IDisposable
         // Enforce entitlements when an agent is specified
         if (agent is not null)
         {
-            if (plan.IsCompound || plan.HasCtes)
+            if (plan.IsCompound || plan.HasCotes)
             {
                 var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
                 Trust.EntitlementEnforcer.EnforceAll(agent, tables);
@@ -327,8 +324,8 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        // Compound or CTE queries go through the compound executor
-        if (plan.IsCompound || plan.HasCtes)
+        // Compound or Cote queries go through the compound executor
+        if (plan.IsCompound || plan.HasCotes)
             return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
 
         // Simple query — direct execution with compiled-query cache

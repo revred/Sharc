@@ -16,8 +16,6 @@ namespace Sharc.Arena.Wasm.Services;
 ///
 /// Tier 2 (browser API, JS interop, performance.now() timing):
 ///   - IndexedDB: browser-native key-value store
-///
-/// SurrealDB: reference data only (MVP - live engine deferred).
 /// </summary>
 public sealed class BenchmarkRunner : IBenchmarkEngine
 {
@@ -48,7 +46,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     {
         Console.WriteLine($"[Runner] Running slide: {slide.Id} (scale: {scale})");
 
-        // Get reference results (used for SurrealDB which stays on reference data)
+        // Get reference results (used as fallback for engines without live implementations)
         var referenceResults = await _referenceEngine.RunSlideAsync(slide, scale, cancellationToken);
 
         // Calculate row counts from scale
@@ -65,7 +63,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         // Run Tier 2 engine (async, JS interop)
         var indexedDbResult = await _indexedDbEngine.RunSlide(slide.Id, scale);
 
-        // Merge: live results for sharc/sqlite/indexeddb, reference for surrealdb
+        // Merge: live results for all engines, reference as fallback
         var merged = new Dictionary<string, EngineBaseResult>(referenceResults.Count);
         foreach (var (engineId, result) in referenceResults)
         {
@@ -74,7 +72,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
                 "sharc" => sharcResult,
                 "sqlite" => sqliteResult,
                 "indexeddb" => indexedDbResult,
-                _ => result, // surrealdb stays on reference data
+                _ => result,
             };
         }
 

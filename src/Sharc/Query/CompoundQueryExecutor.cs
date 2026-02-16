@@ -7,151 +7,151 @@ using IntentPredicateNode = Sharc.Query.Intent.PredicateNode;
 namespace Sharc.Query;
 
 /// <summary>
-/// Executes compound (UNION/INTERSECT/EXCEPT) and CTE queries by materializing
+/// Executes compound (UNION/INTERSECT/EXCEPT) and Cote queries by materializing
 /// sub-queries into unboxed <see cref="QueryValue"/> rows and applying set operations.
 /// </summary>
 internal static class CompoundQueryExecutor
 {
     /// <summary>
-    /// Executes a <see cref="QueryPlan"/> that is compound and/or has CTEs.
+    /// Executes a <see cref="QueryPlan"/> that is compound and/or has Cotes.
     /// </summary>
     internal static SharcDataReader Execute(
         SharcDatabase db,
         QueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        // ─── Lazy CTE: resolve references into real table intents ────
-        // Instead of materializing all CTE rows upfront, inline simple CTEs
+        // ─── Lazy Cote: resolve references into real table intents ────
+        // Instead of materializing all Cote rows upfront, inline simple Cotes
         // so streaming paths (concat, TopN, index-based set ops) remain available.
-        if (plan.HasCtes)
+        if (plan.HasCotes)
         {
-            var cteMap = BuildCteIntentMap(plan.Ctes!);
+            var coteMap = BuildCoteIntentMap(plan.Cotes!);
 
             if (!plan.IsCompound)
             {
-                // CTE → SELECT WHERE: single cursor with merged filters
-                if (CanResolveCteSimple(plan.Simple!, cteMap))
-                    return ExecuteResolvedSimple(db, plan.Simple!, cteMap, parameters);
+                // Cote → SELECT WHERE: single cursor with merged filters
+                if (CanResolveCoteSimple(plan.Simple!, coteMap))
+                    return ExecuteResolvedSimple(db, plan.Simple!, coteMap, parameters);
             }
-            else if (CanResolveCompound(plan.Compound!, cteMap))
+            else if (CanResolveCompound(plan.Compound!, coteMap))
             {
-                // CTE + compound: resolve references, then use streaming paths
-                var resolved = ResolveCompound(plan.Compound!, cteMap);
+                // Cote + compound: resolve references, then use streaming paths
+                var resolved = ResolveCompound(plan.Compound!, coteMap);
                 return ExecuteCompoundResolved(db, resolved, parameters);
             }
         }
 
-        // ─── Fallback: materialize CTEs for complex cases ────────────
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults = null;
-        if (plan.HasCtes)
-            cteResults = CteExecutor.MaterializeCtes(db, plan.Ctes!, parameters);
+        // ─── Fallback: materialize Cotes for complex cases ────────────
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults = null;
+        if (plan.HasCotes)
+            coteResults = CoteExecutor.MaterializeCotes(db, plan.Cotes!, parameters);
 
         if (plan.IsCompound)
         {
             // Streaming UNION ALL (2-way): zero-materialization concatenation
-            if (StreamingUnionExecutor.CanStreamUnionAll(plan.Compound!, cteResults))
+            if (StreamingUnionExecutor.CanStreamUnionAll(plan.Compound!, coteResults))
                 return StreamingUnionExecutor.StreamingUnionAll(db, plan.Compound!, parameters);
 
             // Streaming UNION ALL + ORDER BY + LIMIT: concat reader → TopN heap
-            if (StreamingUnionExecutor.CanStreamUnionAllTopN(plan.Compound!, cteResults))
+            if (StreamingUnionExecutor.CanStreamUnionAllTopN(plan.Compound!, coteResults))
                 return StreamingUnionExecutor.StreamingUnionAllTopN(db, plan.Compound!, parameters);
 
             // Streaming chained UNION ALL (N-way): flatten to streaming concat chain
-            if (CanStreamChainedUnionAll(plan.Compound!, cteResults))
+            if (CanStreamChainedUnionAll(plan.Compound!, coteResults))
                 return StreamingChainedUnionAll(db, plan.Compound!, parameters);
 
             // Index-based streaming: UNION/INTERSECT/EXCEPT without string materialization.
-            if (CanStreamSetOp(plan.Compound!, cteResults))
+            if (CanStreamSetOp(plan.Compound!, coteResults))
                 return ExecuteIndexSetOp(db, plan.Compound!, parameters);
 
-            var (rows, columns) = ExecuteCompoundCore(db, plan.Compound!, parameters, cteResults);
+            var (rows, columns) = ExecuteCompoundCore(db, plan.Compound!, parameters, coteResults);
             return new SharcDataReader(rows.ToArray(), columns);
         }
 
-        // Simple query with CTEs
-        return CteExecutor.ExecuteSimpleWithCtes(db, plan.Simple!, parameters, cteResults!);
+        // Simple query with Cotes
+        return CoteExecutor.ExecuteSimpleWithCotes(db, plan.Simple!, parameters, coteResults!);
     }
 
-    // ─── Lazy CTE resolution ─────────────────────────────────────
+    // ─── Lazy Cote resolution ─────────────────────────────────────
 
     /// <summary>
-    /// Builds a lookup of CTE name → query intent for lazy resolution.
+    /// Builds a lookup of Cote name → query intent for lazy resolution.
     /// </summary>
-    private static Dictionary<string, QueryIntent> BuildCteIntentMap(IReadOnlyList<CteIntent> ctes)
+    private static Dictionary<string, QueryIntent> BuildCoteIntentMap(IReadOnlyList<CoteIntent> cotes)
     {
-        var map = new Dictionary<string, QueryIntent>(ctes.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var cte in ctes)
-            map[cte.Name] = cte.Query;
+        var map = new Dictionary<string, QueryIntent>(cotes.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var cote in cotes)
+            map[cote.Name] = cote.Query;
         return map;
     }
 
     /// <summary>
-    /// Returns true when a CTE query is a simple filtered table scan that can be inlined.
-    /// No aggregates, DISTINCT, ORDER BY, LIMIT, or inter-CTE references.
+    /// Returns true when a Cote query is a simple filtered table scan that can be inlined.
+    /// No aggregates, DISTINCT, ORDER BY, LIMIT, or inter-Cote references.
     /// </summary>
-    private static bool IsCteSimpleTableScan(QueryIntent cteQuery, Dictionary<string, QueryIntent> cteMap)
+    private static bool IsCoteSimpleTableScan(QueryIntent coteQuery, Dictionary<string, QueryIntent> coteMap)
     {
-        if (cteMap.ContainsKey(cteQuery.TableName)) return false; // references another CTE
-        if (cteQuery.HasAggregates) return false;
-        if (cteQuery.IsDistinct) return false;
-        if (cteQuery.OrderBy is { Count: > 0 }) return false;
-        if (cteQuery.Limit.HasValue || cteQuery.Offset.HasValue) return false;
-        if (cteQuery.GroupBy is { Count: > 0 }) return false;
-        if (cteQuery.HavingFilter.HasValue) return false;
+        if (coteMap.ContainsKey(coteQuery.TableName)) return false; // references another Cote
+        if (coteQuery.HasAggregates) return false;
+        if (coteQuery.IsDistinct) return false;
+        if (coteQuery.OrderBy is { Count: > 0 }) return false;
+        if (coteQuery.Limit.HasValue || coteQuery.Offset.HasValue) return false;
+        if (coteQuery.GroupBy is { Count: > 0 }) return false;
+        if (coteQuery.HavingFilter.HasValue) return false;
         return true;
     }
 
     /// <summary>
-    /// Returns true when a simple CTE query can be resolved to a direct cursor read.
+    /// Returns true when a simple Cote query can be resolved to a direct cursor read.
     /// </summary>
-    private static bool CanResolveCteSimple(QueryIntent outer, Dictionary<string, QueryIntent> cteMap)
+    private static bool CanResolveCoteSimple(QueryIntent outer, Dictionary<string, QueryIntent> coteMap)
     {
-        if (!cteMap.TryGetValue(outer.TableName, out var cteQuery)) return false;
-        return IsCteSimpleTableScan(cteQuery, cteMap);
+        if (!coteMap.TryGetValue(outer.TableName, out var coteQuery)) return false;
+        return IsCoteSimpleTableScan(coteQuery, coteMap);
     }
 
     /// <summary>
-    /// Executes a CTE → SELECT WHERE as a single cursor with merged filters.
-    /// Avoids materializing the CTE entirely.
+    /// Executes a Cote → SELECT WHERE as a single cursor with merged filters.
+    /// Avoids materializing the Cote entirely.
     /// </summary>
     private static SharcDataReader ExecuteResolvedSimple(
-        SharcDatabase db, QueryIntent outer, Dictionary<string, QueryIntent> cteMap,
+        SharcDatabase db, QueryIntent outer, Dictionary<string, QueryIntent> coteMap,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        var resolved = ResolveSingleIntent(outer, cteMap);
+        var resolved = ResolveSingleIntent(outer, coteMap);
         return ExecuteIntent(db, resolved, parameters);
     }
 
     /// <summary>
-    /// Returns true when all CTE references in a compound plan can be inlined.
+    /// Returns true when all Cote references in a compound plan can be inlined.
     /// Requires a simple two-way plan with no nested compounds.
     /// </summary>
-    private static bool CanResolveCompound(CompoundQueryPlan plan, Dictionary<string, QueryIntent> cteMap)
+    private static bool CanResolveCompound(CompoundQueryPlan plan, Dictionary<string, QueryIntent> coteMap)
     {
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
 
-        bool leftIsCte = cteMap.ContainsKey(plan.Left.TableName);
-        bool rightIsCte = cteMap.ContainsKey(plan.RightSimple.TableName);
+        bool leftIsCte = coteMap.ContainsKey(plan.Left.TableName);
+        bool rightIsCte = coteMap.ContainsKey(plan.RightSimple.TableName);
 
         if (!leftIsCte && !rightIsCte) return false;
-        if (leftIsCte && !IsCteSimpleTableScan(cteMap[plan.Left.TableName], cteMap)) return false;
-        if (rightIsCte && !IsCteSimpleTableScan(cteMap[plan.RightSimple.TableName], cteMap)) return false;
+        if (leftIsCte && !IsCoteSimpleTableScan(coteMap[plan.Left.TableName], coteMap)) return false;
+        if (rightIsCte && !IsCoteSimpleTableScan(coteMap[plan.RightSimple.TableName], coteMap)) return false;
 
         return true;
     }
 
     /// <summary>
-    /// Replaces CTE table references with real table intents, merging filters.
+    /// Replaces Cote table references with real table intents, merging filters.
     /// </summary>
     private static CompoundQueryPlan ResolveCompound(
-        CompoundQueryPlan plan, Dictionary<string, QueryIntent> cteMap)
+        CompoundQueryPlan plan, Dictionary<string, QueryIntent> coteMap)
     {
         return new CompoundQueryPlan
         {
-            Left = ResolveSingleIntent(plan.Left, cteMap),
+            Left = ResolveSingleIntent(plan.Left, coteMap),
             Operator = plan.Operator,
-            RightSimple = plan.RightSimple != null ? ResolveSingleIntent(plan.RightSimple, cteMap) : null,
+            RightSimple = plan.RightSimple != null ? ResolveSingleIntent(plan.RightSimple, coteMap) : null,
             RightCompound = plan.RightCompound,
             FinalOrderBy = plan.FinalOrderBy,
             FinalLimit = plan.FinalLimit,
@@ -160,19 +160,19 @@ internal static class CompoundQueryExecutor
     }
 
     /// <summary>
-    /// If the intent references a CTE, returns a new intent targeting the real table
-    /// with the CTE filter and outer filter merged via AND.
+    /// If the intent references a Cote, returns a new intent targeting the real table
+    /// with the Cote filter and outer filter merged via AND.
     /// </summary>
-    private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryIntent> cteMap)
+    private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryIntent> coteMap)
     {
-        if (!cteMap.TryGetValue(intent.TableName, out var cteQuery))
+        if (!coteMap.TryGetValue(intent.TableName, out var coteQuery))
             return intent;
 
         return new QueryIntent
         {
-            TableName = cteQuery.TableName,
-            Columns = intent.Columns ?? cteQuery.Columns,
-            Filter = MergeFilters(cteQuery.Filter, intent.Filter),
+            TableName = coteQuery.TableName,
+            Columns = intent.Columns ?? coteQuery.Columns,
+            Filter = MergeFilters(coteQuery.Filter, intent.Filter),
             OrderBy = intent.OrderBy,
             Limit = intent.Limit,
             Offset = intent.Offset,
@@ -186,18 +186,18 @@ internal static class CompoundQueryExecutor
     /// <summary>
     /// Combines two predicate filters with AND. Returns null if both are null.
     /// </summary>
-    private static PredicateIntent? MergeFilters(PredicateIntent? cteFilter, PredicateIntent? outerFilter)
+    private static PredicateIntent? MergeFilters(PredicateIntent? coteFilter, PredicateIntent? outerFilter)
     {
-        if (!cteFilter.HasValue) return outerFilter;
-        if (!outerFilter.HasValue) return cteFilter;
+        if (!coteFilter.HasValue) return outerFilter;
+        if (!outerFilter.HasValue) return coteFilter;
 
-        var cteNodes = cteFilter.Value.Nodes;
+        var coteNodes = coteFilter.Value.Nodes;
         var outerNodes = outerFilter.Value.Nodes;
-        int offset = cteNodes.Length;
+        int offset = coteNodes.Length;
 
-        // Combine: [cte nodes] [outer nodes (shifted)] [AND root]
-        var combined = new IntentPredicateNode[cteNodes.Length + outerNodes.Length + 1];
-        Array.Copy(cteNodes, 0, combined, 0, cteNodes.Length);
+        // Combine: [cote nodes] [outer nodes (shifted)] [AND root]
+        var combined = new IntentPredicateNode[coteNodes.Length + outerNodes.Length + 1];
+        Array.Copy(coteNodes, 0, combined, 0, coteNodes.Length);
 
         for (int i = 0; i < outerNodes.Length; i++)
         {
@@ -216,7 +216,7 @@ internal static class CompoundQueryExecutor
         combined[^1] = new IntentPredicateNode
         {
             Op = IntentOp.And,
-            LeftIndex = cteFilter.Value.RootIndex,
+            LeftIndex = coteFilter.Value.RootIndex,
             RightIndex = outerFilter.Value.RootIndex + offset,
         };
 
@@ -225,13 +225,13 @@ internal static class CompoundQueryExecutor
 
     /// <summary>
     /// Executes a resolved compound plan through all streaming paths.
-    /// Called after CTE references have been inlined into real table intents.
+    /// Called after Cote references have been inlined into real table intents.
     /// </summary>
     private static SharcDataReader ExecuteCompoundResolved(
         SharcDatabase db, CompoundQueryPlan resolved,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        // All streaming paths are available — no CTE references remain
+        // All streaming paths are available — no Cote references remain
         if (StreamingUnionExecutor.CanStreamUnionAll(resolved, null))
             return StreamingUnionExecutor.StreamingUnionAll(db, resolved, parameters);
 
@@ -244,7 +244,7 @@ internal static class CompoundQueryExecutor
         if (CanStreamSetOp(resolved, null))
             return ExecuteIndexSetOp(db, resolved, parameters);
 
-        // Fallback: standard compound execution without CTE results
+        // Fallback: standard compound execution without Cote results
         var (rows, columns) = ExecuteCompoundCore(db, resolved, parameters, null);
         return new SharcDataReader(rows.ToArray(), columns);
     }
@@ -255,11 +255,11 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         CompoundQueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
-        // Streaming path: UNION/INTERSECT/EXCEPT with two simple sides, no CTE references.
+        // Streaming path: UNION/INTERSECT/EXCEPT with two simple sides, no Cote references.
         // Avoids full materialization of both sides — reads directly from B-tree cursors.
-        if (CanStreamSetOp(plan, cteResults))
+        if (CanStreamSetOp(plan, coteResults))
         {
             var (rows, columns) = ExecuteStreamingSetOp(db, plan, parameters);
 
@@ -272,17 +272,17 @@ internal static class CompoundQueryExecutor
             return (rows, columns);
         }
 
-        // Materialized path: complex compounds, CTE references, or UNION ALL.
-        var (leftRows, leftColumns) = ExecuteAndMaterialize(db, plan.Left, parameters, cteResults);
+        // Materialized path: complex compounds, Cote references, or UNION ALL.
+        var (leftRows, leftColumns) = ExecuteAndMaterialize(db, plan.Left, parameters, coteResults);
 
         List<QueryValue[]> rightRows;
         if (plan.RightCompound != null)
         {
-            (rightRows, _) = ExecuteCompoundCore(db, plan.RightCompound, parameters, cteResults);
+            (rightRows, _) = ExecuteCompoundCore(db, plan.RightCompound, parameters, coteResults);
         }
         else
         {
-            (rightRows, _) = ExecuteAndMaterialize(db, plan.RightSimple!, parameters, cteResults);
+            (rightRows, _) = ExecuteAndMaterialize(db, plan.RightSimple!, parameters, coteResults);
         }
 
         int leftCount = leftColumns.Length;
@@ -305,20 +305,20 @@ internal static class CompoundQueryExecutor
 
     /// <summary>
     /// Returns true when a compound plan can use streaming set operations:
-    /// UNION/INTERSECT/EXCEPT, simple two-way, no CTE references on either side.
+    /// UNION/INTERSECT/EXCEPT, simple two-way, no Cote references on either side.
     /// </summary>
     private static bool CanStreamSetOp(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
         if (plan.Operator == CompoundOperator.UnionAll) return false;
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
 
-        if (cteResults != null)
+        if (coteResults != null)
         {
-            if (cteResults.ContainsKey(plan.Left.TableName)) return false;
-            if (cteResults.ContainsKey(plan.RightSimple.TableName)) return false;
+            if (coteResults.ContainsKey(plan.Left.TableName)) return false;
+            if (coteResults.ContainsKey(plan.RightSimple.TableName)) return false;
         }
 
         return true;
@@ -347,12 +347,12 @@ internal static class CompoundQueryExecutor
     // ─── Chained UNION ALL streaming ────────────────────────────
 
     /// <summary>
-    /// Returns true when an entire compound chain is UNION ALL with no CTEs,
+    /// Returns true when an entire compound chain is UNION ALL with no Cotes,
     /// no final ORDER BY / LIMIT / OFFSET, enabling N-way streaming concat.
     /// </summary>
     private static bool CanStreamChainedUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
         var current = plan;
         while (current != null)
@@ -361,12 +361,12 @@ internal static class CompoundQueryExecutor
             if (current.FinalOrderBy is { Count: > 0 }) return false;
             if (current.FinalLimit.HasValue || current.FinalOffset.HasValue) return false;
 
-            if (cteResults != null && cteResults.ContainsKey(current.Left.TableName))
+            if (coteResults != null && coteResults.ContainsKey(current.Left.TableName))
                 return false;
 
             if (current.RightSimple != null)
             {
-                if (cteResults != null && cteResults.ContainsKey(current.RightSimple.TableName))
+                if (coteResults != null && coteResults.ContainsKey(current.RightSimple.TableName))
                     return false;
                 return true; // reached the leaf
             }
@@ -492,12 +492,12 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
-        if (cteResults != null && cteResults.TryGetValue(intent.TableName, out var cteData))
+        if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
         {
-            var rows = new List<QueryValue[]>(cteData.rows);
-            var columnNames = cteData.columns;
+            var rows = new List<QueryValue[]>(coteData.rows);
+            var columnNames = coteData.columns;
 
             bool needsAggregate = intent.HasAggregates;
             bool needsDistinct = intent.IsDistinct;

@@ -4,14 +4,14 @@
 namespace Sharc.Query.Intent;
 
 /// <summary>
-/// A compiled Common Table Expression: a named sub-query whose results
+/// A compiled Cote (Common Table Expression): a named sub-query whose results
 /// are materialized before the main query executes.
 /// </summary>
-public sealed class CteIntent
+public sealed class CoteIntent
 {
-    /// <summary>CTE name (used as a virtual table reference).</summary>
+    /// <summary>Cote name (used as a virtual table reference).</summary>
     public required string Name { get; init; }
 
-    /// <summary>The sub-query that produces the CTE's rows.</summary>
+    /// <summary>The sub-query that produces the Cote's rows.</summary>
     public required QueryIntent Query { get; init; }
 }
