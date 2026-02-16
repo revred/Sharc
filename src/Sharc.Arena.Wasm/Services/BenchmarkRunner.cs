@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 
+using System.Diagnostics;
 using Sharc.Arena.Wasm.Models;
 
 namespace Sharc.Arena.Wasm.Services;
@@ -80,6 +81,31 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         // Yield to avoid blocking the UI thread
         await Task.Yield();
         return merged;
+    }
+
+    /// <summary>
+    /// Cold-start timing: generates a small database and times each engine's initialization.
+    /// Called during the loading phase to show real init costs in the progressive load UI.
+    /// </summary>
+    public record ColdStartResult(double GenerateMs, double SharcMs, long SharcAlloc, double SqliteMs, long SqliteAlloc);
+
+    public ColdStartResult TimeColdStart(int userCount = 500, int nodeCount = 100)
+    {
+        var sw = Stopwatch.StartNew();
+        var dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
+        var generateMs = sw.Elapsed.TotalMilliseconds;
+
+        _sharcEngine.Reset();
+        var (sharcMs, sharcAlloc) = _sharcEngine.EnsureInitialized(dbBytes);
+
+        _sqliteEngine.Reset();
+        var (sqliteMs, sqliteAlloc) = _sqliteEngine.EnsureInitialized(dbBytes);
+
+        _dbBytes = dbBytes;
+        _lastUserCount = userCount;
+        _lastNodeCount = nodeCount;
+
+        return new ColdStartResult(generateMs, sharcMs, sharcAlloc, sqliteMs, sqliteAlloc);
     }
 
     /// <summary>

@@ -8,7 +8,56 @@
 
 @if (!_loaded)
 {
-    <div class="arena-loading">Loading benchmark data...</div>
+    <div class="arena-loading">
+        <div class="loading-title">Initializing Engines</div>
+
+        <div class="loading-race">
+            <div class="loading-engine @(_loadPhase >= 2 ? "done" : _loadPhase == 1 ? "active" : "")">
+                <span class="loading-engine-icon">&#x1F988;</span>
+                <div class="loading-engine-info">
+                    <span class="loading-engine-name">Sharc <span class="loading-engine-size">50 KB</span></span>
+                    @if (_loadPhase >= 2)
+                    {
+                        <span class="loading-engine-time">@($"{_sharcInitMs:F2}")ms &middot; @FormatBytes(_sharcInitAlloc)</span>
+                    }
+                    else if (_loadPhase == 1)
+                    {
+                        <span class="loading-engine-time loading-pulse">loading...</span>
+                    }
+                </div>
+                @if (_loadPhase >= 2) { <span class="loading-check">&#x2713;</span> }
+            </div>
+
+            <div class="loading-engine @(_loadPhase >= 4 ? "done" : _loadPhase == 3 ? "active" : "")">
+                <span class="loading-engine-icon">&#x26A1;</span>
+                <div class="loading-engine-info">
+                    <span class="loading-engine-name">SQLite <span class="loading-engine-size">1.5 MB</span></span>
+                    @if (_loadPhase >= 4)
+                    {
+                        <span class="loading-engine-time">@($"{_sqliteInitMs:F1}")ms &middot; @FormatBytes(_sqliteInitAlloc)</span>
+                    }
+                    else if (_loadPhase == 3)
+                    {
+                        <span class="loading-engine-time loading-pulse">loading...</span>
+                    }
+                </div>
+                @if (_loadPhase >= 4) { <span class="loading-check">&#x2713;</span> }
+            </div>
+        </div>
+
+        @if (_loadPhase >= 4)
+        {
+            <div class="loading-verdict">
+                @{ var ratio = _sqliteInitMs / Math.Max(0.001, _sharcInitMs); }
+                Sharc loaded <strong>@($"{ratio:F0}x faster")</strong>
+            </div>
+        }
+
+        @if (_loadPhase >= 5)
+        {
+            <div class="loading-ready">Ready</div>
+        }
+    </div>
 }
 else
 {
@@ -119,6 +168,11 @@ else
     [Inject] private ReferenceEngine StaticEngine { get; set; } = default!;
 
     private bool _loaded;
+    private int _loadPhase; // 0=pending, 1=sharc loading, 2=sharc done, 3=sqlite loading, 4=sqlite done, 5=ready
+    private double _sharcInitMs;
+    private long _sharcInitAlloc;
+    private double _sqliteInitMs;
+    private long _sqliteInitAlloc;
     private string _activePage = "page-hook";
     private IReadOnlyList<SlideDefinition> _slides = [];
     private IReadOnlyList<EngineDefinition> _engines = [];
@@ -138,14 +192,45 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Phase 0: Load benchmark metadata
         _engines = await DataLoader.LoadEnginesAsync();
         _categories = await DataLoader.LoadCategoriesAsync();
         _presets = await DataLoader.LoadPresetsAsync();
         _slides = await DataLoader.LoadAllSlidesAsync();
-        _loaded = true;
 
+        // Phase 1-4: Timed cold start — generate DB, init each engine, show results
+        _loadPhase = 1;
+        StateHasChanged();
+        await Task.Yield(); // flush UI
+
+        var coldStart = LiveEngine.TimeColdStart();
+
+        _sharcInitMs = coldStart.SharcMs;
+        _sharcInitAlloc = coldStart.SharcAlloc;
+        _loadPhase = 2;
+        StateHasChanged();
+        await Task.Yield();
+
+        _sqliteInitMs = coldStart.SqliteMs;
+        _sqliteInitAlloc = coldStart.SqliteAlloc;
+        _loadPhase = 4;
+        StateHasChanged();
+        await Task.Delay(600); // let user see the result
+
+        _loadPhase = 5;
+        StateHasChanged();
+        await Task.Delay(400); // brief "Ready" flash
+
+        _loaded = true;
         ApplyPreset("quick");
         UpdateLayout();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
