@@ -89,7 +89,7 @@ using var cte = db.Query(
 
 | Category | Operation | Sharc | SQLite | Speedup |
 | :--- | :--- | ---: | ---: | ---: |
-| **Simple** | `SELECT * FROM t` (2.5K rows) | **713 us** | 747 us | **1.05x** |
+| **Simple** | `SELECT * FROM t` (2.5K rows) | **64 us** | 586 us | **9.2x** |
 | **Filtered** | `SELECT WHERE age > 30` | **193 us** | 802 us | **4.1x** |
 | **Medium** | `WHERE + ORDER BY + LIMIT 100` | **434 us** | 580 us | **1.3x** |
 | **Aggregate** | `GROUP BY + COUNT + AVG` | **353 us** | 475 us | **1.3x** |
@@ -107,7 +107,7 @@ using var cte = db.Query(
 
 | Query Type | Sharc | SQLite | Notes |
 | :--- | ---: | ---: | :--- |
-| `SELECT *` (2.5K rows) | 414 KB | 688 B † | Sharc materializes all values; SQLite returns via P/Invoke |
+| `SELECT *` (2.5K rows) | **568 B** | 688 B † | Lazy decode: only accessed columns materialized |
 | `WHERE` filter | 98 KB | 96 KB | Near parity — both allocate result strings |
 | `WHERE + ORDER BY + LIMIT` | 54 KB | 5.5 KB † | Streaming TopN heap avoids full materialization |
 | `UNION ALL` | 415 KB | 415 KB | Both sides materialized in managed arrays |
@@ -118,7 +118,7 @@ using var cte = db.Query(
 
 > **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's † numbers reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
 >
-> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) **wins every benchmark** — from 1.05x on full scans to 4.7x on UNION ALL. Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap, streaming aggregator with string pooling, predicate pushdown, query plan caching) deliver consistent wins across all query types.
+> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) **wins every benchmark** — from 1.3x on sorted queries to 9.2x on full scans (lazy decode: **568 B** vs SQLite's 688 B). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan caching) deliver consistent wins across all query types.
 
 [**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc/)
 
