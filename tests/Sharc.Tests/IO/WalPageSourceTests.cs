@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Sharc.Core;
 using Sharc.Core.IO;
 using Xunit;

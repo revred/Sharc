@@ -1,5 +1,3 @@
-using System.Buffers;
-
 namespace Sharc.Core.IO;
 
 /// <summary>

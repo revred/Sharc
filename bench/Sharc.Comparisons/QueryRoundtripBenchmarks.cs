@@ -22,7 +22,7 @@ namespace Sharc.Comparisons;
 ///   MediumQuery:     WHERE + ORDER BY + LIMIT
 ///   AggregateQuery:  GROUP BY + COUNT/SUM
 ///   CompoundQuery:   UNION / UNION ALL / INTERSECT / EXCEPT
-///   CteQuery:        WITH ... AS (...) SELECT ...
+///   CoteQuery:        WITH ... AS (...) SELECT ...
 ///
 /// Database: Two tables (users_a, users_b) with identical schemas and overlapping data.
 ///   - users_a: 2,500 rows (id 1–2500)
@@ -399,12 +399,12 @@ public class QueryRoundtripBenchmarks
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  10. CTE — WITH clause + SELECT from CTE
+    //  10. Cote — WITH clause + SELECT from Cote
     // ═══════════════════════════════════════════════════════════════
 
-    [Benchmark(Description = "Sharc: CTE → SELECT WHERE")]
-    [BenchmarkCategory("CteQuery")]
-    public long Sharc_Cte_SimpleSelect()
+    [Benchmark(Description = "Sharc: Cote → SELECT WHERE")]
+    [BenchmarkCategory("CoteQuery")]
+    public long Sharc_Cote_SimpleSelect()
     {
         using var reader = _sharcDb.Query(
             "WITH active AS (SELECT id, name, score FROM users_a WHERE active = 1) " +
@@ -420,9 +420,9 @@ public class QueryRoundtripBenchmarks
         return count;
     }
 
-    [Benchmark(Description = "SQLite: CTE → SELECT WHERE")]
-    [BenchmarkCategory("CteQuery")]
-    public long SQLite_Cte_SimpleSelect()
+    [Benchmark(Description = "SQLite: Cote → SELECT WHERE")]
+    [BenchmarkCategory("CoteQuery")]
+    public long SQLite_Cote_SimpleSelect()
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
@@ -441,12 +441,12 @@ public class QueryRoundtripBenchmarks
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  11. CTE + UNION — CTE used in compound query
+    //  11. Cote + UNION — Cote used in compound query
     // ═══════════════════════════════════════════════════════════════
 
-    [Benchmark(Description = "Sharc: CTE + UNION ALL")]
-    [BenchmarkCategory("CteQuery")]
-    public long Sharc_Cte_UnionAll()
+    [Benchmark(Description = "Sharc: Cote + UNION ALL")]
+    [BenchmarkCategory("CoteQuery")]
+    public long Sharc_Cote_UnionAll()
     {
         using var reader = _sharcDb.Query(
             "WITH eng AS (SELECT id, name, score FROM users_a WHERE dept = 'eng') " +
@@ -460,9 +460,9 @@ public class QueryRoundtripBenchmarks
         return count;
     }
 
-    [Benchmark(Description = "SQLite: CTE + UNION ALL")]
-    [BenchmarkCategory("CteQuery")]
-    public long SQLite_Cte_UnionAll()
+    [Benchmark(Description = "SQLite: Cote + UNION ALL")]
+    [BenchmarkCategory("CoteQuery")]
+    public long SQLite_Cote_UnionAll()
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =

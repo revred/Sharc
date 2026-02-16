@@ -9,7 +9,7 @@
   { "id": "q8",  "query": "EXCEPT",                      "description": "Set difference",                 "sharcTimeUs": 732,  "sharcAlloc": "1.4 KB",  "sqliteTimeUs": 1060, "sqliteAlloc": "744 B",   "winner": "sharc",  "speedup": 1.4 },
   { "id": "q9",  "query": "UNION ALL + ORDER BY + LIMIT","description": "Compound with top-N",            "sharcTimeUs": 441,  "sharcAlloc": "32 KB",   "sqliteTimeUs": 406,  "sqliteAlloc": "3 KB",    "winner": "sqlite", "speedup": 1.1 },
   { "id": "q10", "query": "3-way UNION ALL",             "description": "Triple concatenation",           "sharcTimeUs": 286,  "sharcAlloc": "2.3 KB",  "sqliteTimeUs": 1413, "sqliteAlloc": "776 B",   "winner": "sharc",  "speedup": 4.9 },
-  { "id": "q11", "query": "CTE -> SELECT WHERE",    "description": "Common table expression + filter","sharcTimeUs": 1906, "sharcAlloc": "15 KB",   "sqliteTimeUs": 386,  "sqliteAlloc": "31 KB",   "winner": "sqlite", "speedup": 4.9 },
-  { "id": "q12", "query": "CTE + UNION ALL",             "description": "CTE with compound query",        "sharcTimeUs": 1187, "sharcAlloc": "12 KB",   "sqliteTimeUs": 735,  "sqliteAlloc": "816 B",   "winner": "sqlite", "speedup": 1.6 },
+  { "id": "q11", "query": "Cote -> SELECT WHERE",    "description": "Common table expression + filter","sharcTimeUs": 1906, "sharcAlloc": "15 KB",   "sqliteTimeUs": 386,  "sqliteAlloc": "31 KB",   "winner": "sqlite", "speedup": 4.9 },
+  { "id": "q12", "query": "Cote + UNION ALL",             "description": "Cote with compound query",        "sharcTimeUs": 1187, "sharcAlloc": "12 KB",   "sqliteTimeUs": 735,  "sqliteAlloc": "816 B",   "winner": "sqlite", "speedup": 1.6 },
   { "id": "q13", "query": "Parameterized WHERE",         "description": "Prepared query with parameter",  "sharcTimeUs": 198,  "sharcAlloc": "81 KB",   "sqliteTimeUs": 632,  "sqliteAlloc": "82 KB",   "winner": "sharc",  "speedup": 3.2 }
 ]

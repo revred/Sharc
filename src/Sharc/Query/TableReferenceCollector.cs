@@ -14,10 +14,10 @@ internal static class TableReferenceCollector
     {
         var tables = new List<(string, string[]?)>();
 
-        if (plan.HasCtes)
+        if (plan.HasCotes)
         {
-            foreach (var cte in plan.Ctes!)
-                tables.Add((cte.Query.TableName, cte.Query.ColumnsArray));
+            foreach (var cote in plan.Cotes!)
+                tables.Add((cote.Query.TableName, cote.Query.ColumnsArray));
         }
 
         if (plan.IsCompound)

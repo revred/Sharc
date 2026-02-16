@@ -1,5 +1,4 @@
 using Xunit;
-using Sharc;
 using Sharc.Core.Schema;
 
 namespace Sharc.Tests.Filter;

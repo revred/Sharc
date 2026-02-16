@@ -1,7 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Sharc.Arena.Wasm;
 using Sharc.Arena.Wasm.Layout;
 using Sharc.Arena.Wasm.Services;
 

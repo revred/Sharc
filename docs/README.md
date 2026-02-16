@@ -9,7 +9,7 @@ Welcome to the **Sharc Context Engine** documentation.
 *   [**When NOT to Use Sharc**](WHEN_NOT_TO_USE.md): Honest limitations.
 
 ## 📚 Core Features
-*   [**Sharc Query (Sharq)**](ParsingTsql.md): The SQL-like query language reference (Syntax, Graph Arrows, CTEs).
+*   [**Sharc Query (Sharq)**](ParsingTsql.md): The SQL-like query language reference (Syntax, Graph Arrows, Cotes).
 *   [**Deep Dive: Parsing**](DeepDive_Parsing.md): How Sharq achieves zero-allocation parsing with SIMD.
 *   [**BakedFilter JIT**](BakedFilter.md): The internal engine that compiles your queries to machine code.
 *   [**Distributed Trust**](DistributedTrustArchitecture.md): **(Critical)** The architecture for Agent Identity, Ledgers, and decentralized AI memory.

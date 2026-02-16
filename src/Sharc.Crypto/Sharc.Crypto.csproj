@@ -1,18 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Sharc.Crypto</RootNamespace>
     <AssemblyName>Sharc.Crypto</AssemblyName>
-    <Version>1.0.0-beta.1</Version>
-    <Authors>Ram Revanur</Authors>
     <Description>Cryptographic extensions for Sharc: AES-256-GCM encryption and Argon2id key derivation for SQLite databases.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/revred/Sharc</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/revred/Sharc</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
     <PackageTags>sqlite;database;crypto;encryption;aes-gcm;argon2id;dotnet;csharp</PackageTags>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />

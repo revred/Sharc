@@ -748,7 +748,7 @@ The query pipeline page includes a dedicated memory comparison table (from READM
 | `SELECT *` (2.5K rows) | 414 KB | 688 B | Sharc materializes all column values |
 | `UNION/INTERSECT/EXCEPT` | 1.5-1.8 MB | 744 B | SQLite does set ops in native C |
 | `GROUP BY + COUNT + AVG` | 169 KB | 920 B | Streaming hash aggregator, O(G) memory |
-| `CTE` | 281 KB | 31 KB | CTE rows materialized then re-scanned |
+| `Cote` | 281 KB | 31 KB | Cote rows materialized then re-scanned |
 
 This table is rendered with explicit visual emphasis — not hidden in small text.
 

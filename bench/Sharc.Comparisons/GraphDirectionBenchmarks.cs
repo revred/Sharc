@@ -4,8 +4,6 @@ using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
-using Sharc.Core.Records;
-using Sharc.Core.Schema;
 using Sharc.Graph;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;

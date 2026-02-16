@@ -665,17 +665,17 @@ body {
     white-space: nowrap;
 }
 
-.engine-alloc { font-size: 0.55rem; color: rgba(255, 255, 255, 0.2); }
+.engine-alloc { font-size: 0.65rem; color: rgba(255, 255, 255, 0.5); }
 
 .engine-note {
-    font-size: 0.52rem;
-    color: rgba(255, 255, 255, 0.16);
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.4);
     font-style: italic;
     margin-top: 3px;
     line-height: 1.3;
 }
 
-.engine-note.muted { color: rgba(255, 255, 255, 0.16); }
+.engine-note.muted { color: rgba(255, 255, 255, 0.3); }
 
 /* ── Tier Badge ──────────────────────────────────────── */
 
@@ -708,15 +708,15 @@ body {
 .slide-methodology {
     margin-top: 10px;
     padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
-    font-size: 0.5rem;
-    color: var(--text-dim);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.55rem;
+    color: rgba(255, 255, 255, 0.3);
     line-height: 1.45;
     font-style: italic;
 }
 
 .slide-methodology strong {
-    color: rgba(255, 255, 255, 0.22);
+    color: rgba(255, 255, 255, 0.4);
     font-style: normal;
 }
 

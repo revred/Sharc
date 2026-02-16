@@ -1,0 +1,54 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your suggestion! Please describe the feature you'd like to see.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Why is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work? Include API sketches if applicable.
+      placeholder: |
+        // Example API:
+        using var reader = db.CreateReader("users", projection: ["name", "age"]);
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Core Engine (Sharc / Sharc.Core)
+        - Query Pipeline (Sharc.Query)
+        - Encryption (Sharc.Crypto)
+        - Graph (Sharc.Graph)
+        - Trust Layer
+        - Arena (Blazor WASM)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: willingness
+    attributes:
+      label: Would you be willing to contribute this?
+      options:
+        - "Yes, I'd like to submit a PR"
+        - "I can help with testing"
+        - "No, just suggesting"
+    validations:
+      required: true

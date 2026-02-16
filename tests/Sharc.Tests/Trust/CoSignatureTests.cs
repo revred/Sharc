@@ -1,12 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Text;
-using System.Text.Json;
 using System.Buffers.Binary;
 // Using Sharc.Crypto.SharcSigner 
 // Check namespaces
-using Sharc.Core;
 using Sharc.Core.Trust;
 using Sharc.Trust;
 using Sharc.Crypto;

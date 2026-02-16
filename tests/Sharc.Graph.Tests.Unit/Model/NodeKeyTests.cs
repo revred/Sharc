@@ -15,9 +15,7 @@
   Licensed under the MIT License — free for personal and commercial use.                         |
 --------------------------------------------------------------------------------------------------*/
 
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Sharc.Graph.Model;
-using System.Text;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 

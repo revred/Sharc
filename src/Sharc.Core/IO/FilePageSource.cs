@@ -1,8 +1,6 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-
-using System.IO;
 using Microsoft.Win32.SafeHandles;
 using Sharc.Core.Format;
 

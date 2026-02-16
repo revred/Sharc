@@ -13,11 +13,11 @@ internal static class StreamingUnionExecutor
 {
     /// <summary>
     /// Returns true when a compound plan can use zero-materialization streaming:
-    /// UNION ALL, no final ORDER BY / LIMIT / OFFSET, simple two-way, no CTE references.
+    /// UNION ALL, no final ORDER BY / LIMIT / OFFSET, simple two-way, no Cote references.
     /// </summary>
     internal static bool CanStreamUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
         if (plan.Operator != CompoundOperator.UnionAll) return false;
         if (plan.FinalOrderBy is { Count: > 0 }) return false;
@@ -25,10 +25,10 @@ internal static class StreamingUnionExecutor
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
 
-        if (cteResults != null)
+        if (coteResults != null)
         {
-            if (cteResults.ContainsKey(plan.Left.TableName)) return false;
-            if (cteResults.ContainsKey(plan.RightSimple.TableName)) return false;
+            if (coteResults.ContainsKey(plan.Left.TableName)) return false;
+            if (coteResults.ContainsKey(plan.RightSimple.TableName)) return false;
         }
 
         return true;
@@ -52,11 +52,11 @@ internal static class StreamingUnionExecutor
 
     /// <summary>
     /// Returns true when a compound plan can use streaming UNION ALL + TopN:
-    /// UNION ALL with ORDER BY + LIMIT (no OFFSET), simple two-way, no CTE references.
+    /// UNION ALL with ORDER BY + LIMIT (no OFFSET), simple two-way, no Cote references.
     /// </summary>
     internal static bool CanStreamUnionAllTopN(
         CompoundQueryPlan plan,
-        Dictionary<string, (QueryValue[][] rows, string[] columns)>? cteResults)
+        Dictionary<string, (QueryValue[][] rows, string[] columns)>? coteResults)
     {
         if (plan.Operator != CompoundOperator.UnionAll) return false;
         if (plan.FinalOrderBy is not { Count: > 0 }) return false;
@@ -64,10 +64,10 @@ internal static class StreamingUnionExecutor
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
 
-        if (cteResults != null)
+        if (coteResults != null)
         {
-            if (cteResults.ContainsKey(plan.Left.TableName)) return false;
-            if (cteResults.ContainsKey(plan.RightSimple.TableName)) return false;
+            if (coteResults.ContainsKey(plan.Left.TableName)) return false;
+            if (coteResults.ContainsKey(plan.RightSimple.TableName)) return false;
         }
 
         return true;

@@ -1,9 +1,7 @@
 using Sharc.Core;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
-using Sharc.Core.Primitives;
 using Sharc.Core.Records;
-using System.Buffers.Binary;
 using System.Text;
 using Xunit;
 
