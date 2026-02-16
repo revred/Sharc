@@ -40,7 +40,7 @@ public sealed class SharcEngine : IDisposable
         _db = SharcDatabase.OpenMemory(_dbBytes);
 
         // Share the same IBTreeReader (and underlying MemoryPageSource) that
-        // SharcDatabase already created â€” zero duplication.
+        // SharcDatabase already created — zero duplication.
         _graph = new SharcContextGraph(_db.BTreeReader, new NativeSchemaAdapter());
         _graph.Initialize();
 
@@ -532,7 +532,7 @@ public sealed class SharcEngine : IDisposable
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        // Sustained scan â€” measure total allocation pressure
+        // Sustained scan — measure total allocation pressure
         long count = 0;
         using (var reader = _db.CreateReader("users", "id"))
         {
@@ -583,7 +583,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(allocKb, 0),
             Allocation = $"{allocKb:F0} KB (managed heap)",
-            Note = "Pure managed C# â€” no native WASM binary",
+            Note = "Pure managed C# — no native WASM binary",
         };
     }
 
@@ -677,7 +677,7 @@ public sealed class SharcEngine : IDisposable
     /// <summary>Disposes the current database (if any), ready for re-init at different scale.</summary>
     public void Reset()
     {
-        // Dispose graph FIRST â€” it shares _db's BTreeReader (and underlying page source)
+        // Dispose graph FIRST — it shares _db's BTreeReader (and underlying page source)
         _graph?.Dispose();
         _graph = null;
 

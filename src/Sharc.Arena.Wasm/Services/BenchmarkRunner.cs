@@ -11,7 +11,7 @@ namespace Sharc.Arena.Wasm.Services;
 ///
 /// Tier 1 (same .NET WASM runtime, Stopwatch + GC alloc tracking):
 ///   - Sharc:  pure C# format reader
-    ///   - SQLite: Microsoft.Data.Sqlite (C -> Emscripten -> P/Invoke)
+///   - SQLite: Microsoft.Data.Sqlite (C -> Emscripten -> P/Invoke)
 ///
 /// Tier 2 (browser API, JS interop, performance.now() timing):
 ///   - IndexedDB: browser-native key-value store
