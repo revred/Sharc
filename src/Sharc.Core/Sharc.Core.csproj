@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- Internal library — not published to NuGet -->
   <PropertyGroup>
     <RootNamespace>Sharc.Core</RootNamespace>
     <AssemblyName>Sharc.Core</AssemblyName>
