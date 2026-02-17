@@ -156,6 +156,117 @@ internal sealed class CacheEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Retrieves multiple cached values in a single lock acquisition.
+    /// Returns a dictionary with null values for misses and expired entries.
+    /// </summary>
+    public Dictionary<string, byte[]?> GetMany(IEnumerable<string> keys)
+    {
+        var result = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
+        var now = _timeProvider.GetUtcNow();
+
+        lock (_evictionLock)
+        {
+            foreach (var key in keys)
+            {
+                if (!_entries.TryGetValue(key, out var entry) || entry.IsExpired(now))
+                {
+                    result[key] = null;
+                    continue;
+                }
+
+                entry.Touch(now);
+                if (_lruLookup.TryGetValue(key, out var node))
+                {
+                    _lruList.Remove(node);
+                    _lruList.AddFirst(node);
+                }
+
+                result[key] = entry.Value;
+            }
+        }
+
+        // Clean up expired entries outside the lock
+        foreach (var kvp in result)
+        {
+            if (kvp.Value is null && _entries.TryGetValue(kvp.Key, out var entry) && entry.IsExpired(now))
+                RemoveInternal(kvp.Key);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Stores multiple entries in a single lock acquisition. Eviction runs once at the end.
+    /// </summary>
+    public void SetMany(IEnumerable<KeyValuePair<string, byte[]>> entries, CacheEntryOptions? options = null)
+    {
+        var now = _timeProvider.GetUtcNow();
+
+        DateTimeOffset? absoluteExpiration = options?.AbsoluteExpiration;
+        if (options?.AbsoluteExpirationRelativeToNow is { } relative)
+        {
+            var computed = now + relative;
+            absoluteExpiration = absoluteExpiration.HasValue
+                ? (computed < absoluteExpiration.Value ? computed : absoluteExpiration.Value)
+                : computed;
+        }
+
+        lock (_evictionLock)
+        {
+            foreach (var kvp in entries)
+            {
+                var entry = new CacheEntry(kvp.Value, absoluteExpiration, options?.SlidingExpiration, now);
+
+                if (_entries.TryGetValue(kvp.Key, out var existing))
+                {
+                    _currentSize -= existing.Size;
+                    if (_lruLookup.TryGetValue(kvp.Key, out var existingNode))
+                    {
+                        _lruList.Remove(existingNode);
+                        _lruLookup.Remove(kvp.Key);
+                    }
+                }
+
+                _entries[kvp.Key] = entry;
+                _currentSize += entry.Size;
+
+                var node = _lruList.AddFirst(kvp.Key);
+                _lruLookup[kvp.Key] = node;
+            }
+
+            EvictIfNeeded();
+        }
+    }
+
+    /// <summary>
+    /// Removes multiple entries in a single lock acquisition.
+    /// Returns the number of entries that were actually removed.
+    /// </summary>
+    public int RemoveMany(IEnumerable<string> keys)
+    {
+        int count = 0;
+
+        lock (_evictionLock)
+        {
+            foreach (var key in keys)
+            {
+                if (_entries.TryRemove(key, out var removed))
+                {
+                    _currentSize -= removed.Size;
+                    if (_lruLookup.TryGetValue(key, out var node))
+                    {
+                        _lruList.Remove(node);
+                        _lruLookup.Remove(key);
+                    }
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

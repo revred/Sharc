@@ -19,6 +19,9 @@ public sealed class DistributedCache : IDistributedCache, IDisposable
         _engine = engine;
     }
 
+    /// <summary>Gets the underlying cache engine for bulk operations.</summary>
+    internal CacheEngine Engine => _engine;
+
     /// <inheritdoc/>
     public byte[]? Get(string key)
     {
