@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-1%2C782_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-1%2C898_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -66,6 +66,48 @@ using var cte = db.Query(
 
 ---
 
+## GUID as Native Type
+
+Sharc treats GUIDs as a first-class storage type with two encoding paths:
+
+| Path | On-Disk Format | Alloc per GUID | Index Seek |
+| :--- | :--- | ---: | :--- |
+| **BLOB(16)** | Serial type 44 (16-byte blob) | 40 B | Byte comparison |
+| **Merged Int64 pair** | 2 × Int64 (`__hi`/`__lo` convention) | **0 B** | O(log N) via `SeekFirst(long)` |
+
+```sql
+-- BLOB(16) path: standard GUID column
+CREATE TABLE docs (id INTEGER PRIMARY KEY, doc_guid GUID);
+
+-- Merged path: two INTEGER columns → one logical GUID
+CREATE TABLE entities (
+    id INTEGER PRIMARY KEY,
+    owner_guid__hi INTEGER NOT NULL,  -- first 8 bytes (big-endian)
+    owner_guid__lo INTEGER NOT NULL   -- last 8 bytes
+);
+CREATE INDEX idx_owner ON entities (owner_guid__hi, owner_guid__lo);
+```
+
+```csharp
+// Both paths: GetGuid() auto-detects encoding
+using var reader = db.CreateReader("entities");
+while (reader.Read())
+{
+    Guid ownerGuid = reader.GetGuid(1);  // zero-alloc for merged path
+}
+
+// Write path: pass logical GUID, expansion handled automatically
+using var writer = SharcWriter.From(db);
+writer.Insert("entities",
+    ColumnValue.FromInt64(1, 1),
+    ColumnValue.FromGuid(Guid.NewGuid()),  // auto-splits to __hi/__lo
+    ColumnValue.Text(15, "Alice"u8.ToArray()));
+```
+
+`GetGuid(ordinal)` checks merged columns first (two `DecodeInt64Direct` calls, zero-alloc), then falls back to BLOB(16). Both paths produce identical `Guid` values.
+
+---
+
 ## Headline Numbers
 
 > BenchmarkDotNet v0.15.8 | .NET 10.0.2 | Windows 11 | Intel i7-11800H
@@ -82,6 +124,9 @@ using var cte = db.Query(
 | | Node Seek | **1,475 ns** | 21,349 ns | **14.5x** |
 | **Memory** | GC Pressure (sustained) | **648 B** | 688 B | Parity |
 | | Primitives | **0 B** | N/A | Zero-alloc |
+| **GUID** | Merged Int64 encode (per op) | **0 B** | N/A | Zero-alloc |
+| | BLOB(16) encode (per op) | 40 B | N/A | 1 alloc |
+| | Batch 1K GUIDs (merged) | **0 B** | N/A | Zero-alloc |
 
 ### Query Pipeline (Query API — full SQL roundtrip: parse, compile, execute, read)
 
@@ -151,7 +196,7 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 1,782 tests
+dotnet test                                             # Run all 1,898 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -167,8 +212,8 @@ src/
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
-  Sharc.Tests/              1,003 unit tests
-  Sharc.IntegrationTests/   265 end-to-end tests
+  Sharc.Tests/              1,103 unit tests
+  Sharc.IntegrationTests/   281 end-to-end tests
   Sharc.Query.Tests/        425 query pipeline tests
   Sharc.Graph.Tests.Unit/   53 graph tests
   Sharc.Index.Tests/        22 index CLI tests
@@ -186,7 +231,7 @@ PRC/                        Architecture decisions, specs, execution plans
 ## Current Limitations
 
 - **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
-- **Write support** -- INSERT with B-tree splits. UPDATE/DELETE planned
+- **Write support** -- INSERT, UPDATE, DELETE with B-tree splits and ACID transactions
 - **No JOIN support** -- single-table queries only; use UNION/Cote for multi-table workflows
 - **No virtual tables** -- FTS5, R-Tree not supported
 
