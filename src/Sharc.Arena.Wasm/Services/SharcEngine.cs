@@ -22,6 +22,9 @@ public sealed class SharcEngine : IDisposable
     private SharcDatabase? _db;
     private byte[]? _dbBytes;
 
+    /// <summary>Exposes the live database for query pipeline execution.</summary>
+    internal SharcDatabase? Database => _db;
+
     // Direct graph store access for O(log N + M) traversal via shared BTreeReader
     private SharcContextGraph? _graph;
 
