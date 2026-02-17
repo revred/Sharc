@@ -246,9 +246,10 @@ public sealed class SharcEngine : IDisposable
     {
         if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        using (var warmup = _db.CreateReader("users", "id"))
+        // Thorough warm-up (3 passes for WASM JIT tiering)
+        for (int w = 0; w < 3; w++)
         {
+            using var warmup = _db.CreateReader("users", "id");
             while (warmup.Read()) { _ = warmup.GetInt64(0); }
         }
 
@@ -256,8 +257,11 @@ public sealed class SharcEngine : IDisposable
         var sw = Stopwatch.StartNew();
 
         long count = 0;
-        using (var reader = _db.CreateReader("users", "id"))
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
         {
+            count = 0;
+            using var reader = _db.CreateReader("users", "id");
             while (reader.Read())
             {
                 _ = reader.GetInt64(0);
@@ -270,8 +274,8 @@ public sealed class SharcEngine : IDisposable
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
             Note = $"{count} integers decoded",
         };
     }
@@ -280,9 +284,10 @@ public sealed class SharcEngine : IDisposable
     {
         if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        using (var warmup = _db.CreateReader("users", "bio"))
+        // Thorough warm-up (3 passes for WASM JIT tiering)
+        for (int w = 0; w < 3; w++)
         {
+            using var warmup = _db.CreateReader("users", "bio");
             while (warmup.Read()) { _ = warmup.IsNull(0); }
         }
 
@@ -291,8 +296,12 @@ public sealed class SharcEngine : IDisposable
 
         long nullCount = 0;
         long totalCount = 0;
-        using (var reader = _db.CreateReader("users", "bio"))
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
         {
+            nullCount = 0;
+            totalCount = 0;
+            using var reader = _db.CreateReader("users", "bio");
             while (reader.Read())
             {
                 if (reader.IsNull(0)) nullCount++;
@@ -305,8 +314,8 @@ public sealed class SharcEngine : IDisposable
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
             Note = $"{nullCount}/{totalCount} nulls",
         };
     }
@@ -315,15 +324,19 @@ public sealed class SharcEngine : IDisposable
     {
         if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
+        // Column projection: only decode "id" on matched rows.
+        // Filters evaluate on raw bytes independently of projection.
+        var columns = new[] { "id" };
         var filters = new[]
         {
             new SharcFilter("age", SharcOperator.GreaterThan, (long)30),
             new SharcFilter("score", SharcOperator.LessThan, 50.0),
         };
 
-        // Warm-up
-        using (var warmup = _db.CreateReader("users", null, filters))
+        // Thorough warm-up (3 passes — JIT the filter path + reader creation)
+        for (int w = 0; w < 3; w++)
         {
+            using var warmup = _db.CreateReader("users", columns, filters);
             while (warmup.Read()) { _ = warmup.GetInt64(0); }
         }
 
@@ -331,8 +344,11 @@ public sealed class SharcEngine : IDisposable
         var sw = Stopwatch.StartNew();
 
         long matchCount = 0;
-        using (var reader = _db.CreateReader("users", null, filters))
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
         {
+            matchCount = 0;
+            using var reader = _db.CreateReader("users", columns, filters);
             while (reader.Read())
             {
                 _ = reader.GetInt64(0);
@@ -345,8 +361,8 @@ public sealed class SharcEngine : IDisposable
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
             Note = $"{matchCount} matches (age>30 AND score<50)",
         };
     }
@@ -471,24 +487,28 @@ public sealed class SharcEngine : IDisposable
     {
         if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // 2-hop BFS: find edges from start node, then edges from each target
         var startKey = (long)1;
 
-        // Warm-up
-        RunBfs(startKey);
+        // Warm-up (5 passes — JIT the cursor + index seek path)
+        for (int w = 0; w < 5; w++) RunBfs(startKey);
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var (hop1Count, hop2Count) = RunBfs(startKey);
+        const int iterations = 5;
+        int hop1Count = 0, hop2Count = 0;
+        for (int run = 0; run < iterations; run++)
+        {
+            (hop1Count, hop2Count) = RunBfs(startKey);
+        }
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
             Note = $"2-hop BFS: {hop1Count} + {hop2Count} nodes",
         };
     }
@@ -497,18 +517,23 @@ public sealed class SharcEngine : IDisposable
     {
         if (_graph == null) return (0, 0);
 
-        // Hop 1: edges from startKey using Index Scan (O(log N + M))
-        var hop1Targets = new HashSet<long>();
-        foreach (var edge in _graph.GetEdges(new NodeKey(startKey)))
+        // Use zero-allocation cursor — avoids string materialization in GetEdges/MapToEdge.
+        // GetEdgeCursor returns the raw IEdgeCursor with TargetKey property directly.
+        using var cursor = _graph.GetEdgeCursor(new NodeKey(startKey));
+
+        // Hop 1: collect unique target keys via index seek (O(log N + M))
+        var hop1Targets = new HashSet<long>(32);
+        while (cursor.MoveNext())
         {
-            hop1Targets.Add(edge.TargetKey.Value);
+            hop1Targets.Add(cursor.TargetKey);
         }
 
-        // Hop 2: edges from each hop-1 target
+        // Hop 2: count edges from each hop-1 target — reuse cursor via Reset
         var hop2Count = 0;
         foreach (var target in hop1Targets)
         {
-            foreach (var edge in _graph.GetEdges(new NodeKey(target)))
+            cursor.Reset(target);
+            while (cursor.MoveNext())
             {
                 hop2Count++;
             }
