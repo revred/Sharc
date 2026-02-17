@@ -13,7 +13,7 @@
 | :--- | :--- | :--- |
 | **61x faster** B-tree seeks | **~250 KB** engine footprint | **ECDSA** agent attestation |
 | **13.5x faster** graph traversal | **Zero** native dependencies | **AES-256-GCM** encryption |
-| **4.7x faster** UNION ALL queries | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
+| **5.4x faster** UNION ALL queries | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
 | **~0 B** per-row allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
 
 ---
@@ -89,36 +89,37 @@ using var cte = db.Query(
 
 | Category | Operation | Sharc | SQLite | Speedup |
 | :--- | :--- | ---: | ---: | ---: |
-| **Simple** | `SELECT * FROM t` (2.5K rows) | **64 us** | 586 us | **9.2x** |
-| **Filtered** | `SELECT WHERE age > 30` | **193 us** | 802 us | **4.1x** |
-| **Medium** | `WHERE + ORDER BY + LIMIT 100` | **434 us** | 580 us | **1.3x** |
-| **Aggregate** | `GROUP BY + COUNT + AVG` | **353 us** | 475 us | **1.3x** |
-| **Compound** | `UNION ALL` (2x2.5K rows) | **446 us** | 2,098 us | **4.7x** |
-| | `UNION` (deduplicated) | **787 us** | 1,668 us | **2.1x** |
-| | `INTERSECT` | **710 us** | 1,183 us | **1.7x** |
-| | `EXCEPT` | **748 us** | 1,231 us | **1.6x** |
-| | `UNION ALL + ORDER BY + LIMIT` | **465 us** | 482 us | **1.04x** |
-| | `3-way UNION ALL` | **279 us** | 1,225 us | **4.4x** |
-| **Cote** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** |
-| | `Cote + UNION ALL` | **580 us** | 791 us | **1.4x** |
-| **Parameterized** | `WHERE $param AND $param` | **179 us** | 591 us | **3.3x** |
+| **Simple** | `SELECT * FROM t` (2.5K rows) | **85 us** | 783 us | **9.2x** |
+| **Filtered** | `SELECT WHERE age > 30` | **240 us** | 1,181 us | **4.9x** |
+| **Medium** | `WHERE + ORDER BY + LIMIT 100` | **309 us** | 339 us | **1.1x** |
+| **Aggregate** | `GROUP BY + COUNT + AVG` | **444 us** | 630 us | **1.4x** |
+| **Compound** | `UNION ALL` (2x2.5K rows) | **583 us** | 3,155 us | **5.4x** |
+| | `UNION` (deduplicated) | **897 us** | 2,471 us | **2.8x** |
+| | `INTERSECT` | **862 us** | 1,763 us | **2.0x** |
+| | `EXCEPT` | **879 us** | 1,499 us | **1.7x** |
+| | `UNION ALL + ORDER BY + LIMIT` | **530 us** | 512 us | **~1x** |
+| | `3-way UNION ALL` | **344 us** | 1,684 us | **4.9x** |
+| **Cote** | `WITH ... AS SELECT WHERE` | **150 us** | 461 us | **3.1x** |
+| | `Cote + UNION ALL` | **273 us** | 972 us | **3.6x** |
+| **Parameterized** | `WHERE $param AND $param` | **223 us** | 819 us | **3.7x** |
 
 **Memory per query** (managed heap, † = managed-only; see note below):
 
 | Query Type | Sharc | SQLite | Notes |
 | :--- | ---: | ---: | :--- |
-| `SELECT *` (2.5K rows) | **568 B** | 688 B † | Lazy decode: only accessed columns materialized |
-| `WHERE` filter | 98 KB | 96 KB | Near parity — both allocate result strings |
-| `WHERE + ORDER BY + LIMIT` | 54 KB | 5.5 KB † | Streaming TopN heap avoids full materialization |
-| `UNION ALL` | 415 KB | 415 KB | Both sides materialized in managed arrays |
+| `SELECT *` (2.5K rows) | **576 B** | 688 B † | Lazy decode: only accessed columns materialized |
+| `WHERE` filter | 98 KB | 98 KB | Near parity — both allocate result strings |
+| `WHERE + ORDER BY + LIMIT` | 42 KB | 5.6 KB † | Streaming TopN heap avoids full materialization |
+| `UNION ALL` | 415 KB | 414 KB | Both sides materialized in managed arrays |
 | `UNION` / `INTERSECT` / `EXCEPT` | **1.4 KB** | 744 B † | ArrayPool-backed IndexSet — zero alloc after warmup |
-| `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3 KB † | Streaming concat → TopN, no full materialization |
+| `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3.1 KB † | Streaming concat → TopN, no full materialization |
 | `GROUP BY + COUNT + AVG` | **5.3 KB** | 920 B † | Streaming hash aggregator with fingerprint-based string pooling |
-| `Cote` | 309 KB | 31 KB | Cote rows materialized then re-scanned |
+| `Cote → SELECT WHERE` | **808 B** | 31 KB † | Cached intent resolution — inline filter, no materialization |
+| `Cote + UNION ALL` | **1.4 KB** | 816 B † | Resolved Cote inlined into compound pipeline |
 
 > **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's † numbers reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
 >
-> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) **wins every benchmark** — from 1.3x on sorted queries to 9.2x on full scans (lazy decode: **568 B** vs SQLite's 688 B). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan caching) deliver consistent wins across all query types.
+> **Takeaway**: Sharc's core engine (CreateReader) is 2-66x faster with zero-alloc reads. The SQL query pipeline (Query) **wins or ties every benchmark** — from 1.1x on sorted queries to 9.2x on full scans (lazy decode: **576 B** vs SQLite's 688 B). Cote queries use cached intent resolution with inlined filters (**808 B** for Cote → SELECT WHERE, 3.1x faster). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap with JIT-specialized struct comparer, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan + intent caching) deliver consistent wins across all query types.
 
 [**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc/)
 
