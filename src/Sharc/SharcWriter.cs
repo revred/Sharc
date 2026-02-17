@@ -1,5 +1,9 @@
+using System.Buffers.Binary;
+using System.Text;
 using Sharc.Core;
 using Sharc.Core.BTree;
+using Sharc.Core.Format;
+using Sharc.Core.IO;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Core.Trust;
@@ -374,6 +378,156 @@ public sealed class SharcWriter : IDisposable
         }
 
         return physical;
+    }
+
+    /// <summary>
+    /// Compacts the database by rebuilding all tables, removing fragmentation and clearing the freelist.
+    /// After vacuum, the database file size reflects only the pages actually in use.
+    /// </summary>
+    public void Vacuum()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var schema = _db.Schema;
+        int pageSize = _db.Header.PageSize;
+        int usableSize = _db.UsablePageSize;
+
+        // 1. Read all table data (raw record bytes + count)
+        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>();
+        foreach (var table in schema.Tables)
+        {
+            var records = new List<byte[]>();
+            using var cursor = new BTreeCursor(_db.PageSource, (uint)table.RootPage, usableSize);
+            while (cursor.MoveNext())
+            {
+                records.Add(cursor.Payload.ToArray());
+            }
+            tableRows.Add((table, records));
+        }
+
+        // 2. Build fresh database with same schema
+        int schemaPageCount = 1 + tableRows.Count; // page 1 (schema) + one page per table
+        var freshData = new byte[pageSize * schemaPageCount];
+
+        // Build header
+        var oldHeader = _db.Header;
+        var newHeader = new DatabaseHeader(
+            pageSize, oldHeader.WriteVersion, oldHeader.ReadVersion,
+            oldHeader.ReservedBytesPerPage, oldHeader.ChangeCounter + 1,
+            schemaPageCount, 0, 0, // freelist cleared
+            oldHeader.SchemaCookie, oldHeader.SchemaFormat,
+            oldHeader.TextEncoding, oldHeader.UserVersion,
+            oldHeader.ApplicationId, oldHeader.SqliteVersionNumber);
+        DatabaseHeader.Write(freshData, newHeader);
+
+        // Build sqlite_master entries (schema page on page 1)
+        var schemaCells = new List<(int Size, byte[] Cell)>();
+        for (int i = 0; i < tableRows.Count; i++)
+        {
+            var table = tableRows[i].Table;
+            uint rootPage = (uint)(i + 2); // tables start at page 2
+            var sqlBytes = Encoding.UTF8.GetBytes(table.Sql);
+            var nameBytes = Encoding.UTF8.GetBytes(table.Name);
+
+            var schemaCols = new ColumnValue[5];
+            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, Encoding.UTF8.GetBytes("table"));
+            schemaCols[1] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
+            schemaCols[2] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
+            schemaCols[3] = ColumnValue.FromInt64(1, (long)rootPage);
+            schemaCols[4] = ColumnValue.Text(2 * sqlBytes.Length + 13, sqlBytes);
+
+            int recSize = RecordEncoder.ComputeEncodedSize(schemaCols);
+            var recBuf = new byte[recSize];
+            RecordEncoder.EncodeRecord(schemaCols, recBuf);
+
+            long rowId = i + 1;
+            int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, recSize, usableSize);
+            var cellBuf = new byte[cellSize];
+            CellBuilder.BuildTableLeafCell(rowId, recBuf, cellBuf, usableSize);
+            schemaCells.Add((cellSize, cellBuf));
+        }
+
+        // Write schema cells to page 1 (after the 100-byte database header)
+        int hdrOff = SQLiteLayout.DatabaseHeaderSize; // 100
+        ushort cellContentOffset = (ushort)pageSize;
+        for (int i = 0; i < schemaCells.Count; i++)
+        {
+            var (size, cell) = schemaCells[i];
+            cellContentOffset -= (ushort)size;
+            cell.CopyTo(freshData.AsSpan(cellContentOffset));
+            // Write cell pointer
+            int ptrOff = hdrOff + SQLiteLayout.TableLeafHeaderSize + i * SQLiteLayout.CellPointerSize;
+            BinaryPrimitives.WriteUInt16BigEndian(freshData.AsSpan(ptrOff), cellContentOffset);
+        }
+
+        var schemaHdr = new BTreePageHeader(
+            BTreePageType.LeafTable, 0, (ushort)schemaCells.Count, cellContentOffset, 0, 0);
+        BTreePageHeader.Write(freshData.AsSpan(hdrOff), schemaHdr);
+
+        // Write empty table pages
+        for (int i = 0; i < tableRows.Count; i++)
+        {
+            int pageOff = pageSize * (i + 1);
+            var tableHdr = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+            BTreePageHeader.Write(freshData.AsSpan(pageOff), tableHdr);
+        }
+
+        // 3. Open fresh database and re-insert all rows
+        using var freshDb = SharcDatabase.OpenMemory(freshData);
+        using var freshWriter = SharcWriter.From(freshDb);
+
+        for (int t = 0; t < tableRows.Count; t++)
+        {
+            var (table, records) = tableRows[t];
+            if (records.Count == 0) continue;
+
+            uint rootPage = (uint)(t + 2);
+            using var tx = freshDb.BeginTransaction();
+            var mutator = tx.FetchMutator(usableSize);
+
+            for (int r = 0; r < records.Count; r++)
+            {
+                long rowId = r + 1;
+                rootPage = mutator.Insert(rootPage, rowId, records[r]);
+            }
+
+            // Update root page in schema if it changed
+            if (rootPage != (uint)(t + 2))
+            {
+                UpdateTableRootPage(tx.GetShadowSource(), table.Name, rootPage, usableSize);
+            }
+
+            tx.Commit();
+        }
+
+        // 4. Copy all pages from fresh database back to original source
+        using var vacuumTx = _db.BeginTransaction();
+        var shadow = vacuumTx.GetShadowSource();
+
+        int freshPageCount = freshDb.PageSource.PageCount;
+        Span<byte> pageBuf = stackalloc byte[pageSize];
+
+        for (uint p = 1; p <= (uint)freshPageCount; p++)
+        {
+            freshDb.PageSource.ReadPage(p, pageBuf);
+            shadow.WritePage(p, pageBuf);
+        }
+
+        // Update header on the vacuumed database
+        // Re-read page 1 from shadow, update header with correct page count and cleared freelist
+        shadow.ReadPage(1, pageBuf);
+        var vacuumHeader = DatabaseHeader.Parse(pageBuf);
+        var finalHeader = new DatabaseHeader(
+            vacuumHeader.PageSize, vacuumHeader.WriteVersion, vacuumHeader.ReadVersion,
+            vacuumHeader.ReservedBytesPerPage, vacuumHeader.ChangeCounter,
+            freshPageCount, 0, 0, // freelist cleared
+            vacuumHeader.SchemaCookie, vacuumHeader.SchemaFormat,
+            vacuumHeader.TextEncoding, vacuumHeader.UserVersion,
+            vacuumHeader.ApplicationId, vacuumHeader.SqliteVersionNumber);
+        DatabaseHeader.Write(pageBuf, finalHeader);
+        shadow.WritePage(1, pageBuf);
+
+        vacuumTx.Commit();
     }
 
     /// <inheritdoc />

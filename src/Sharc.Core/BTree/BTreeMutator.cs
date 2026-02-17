@@ -36,10 +36,16 @@ internal sealed class BTreeMutator : IDisposable
         public CellRef(int offset, int length) { Offset = offset; Length = length; }
     }
 
-    public BTreeMutator(IWritablePageSource source, int usablePageSize)
+    private readonly Func<uint>? _freePageAllocator;
+    private readonly Action<uint>? _freePageCallback;
+
+    public BTreeMutator(IWritablePageSource source, int usablePageSize,
+        Func<uint>? freePageAllocator = null, Action<uint>? freePageCallback = null)
     {
         _source = source;
         _usablePageSize = usablePageSize;
+        _freePageAllocator = freePageAllocator;
+        _freePageCallback = freePageCallback;
     }
 
     /// <summary>Number of pages currently held in the internal cache. Exposed for testing.</summary>
@@ -777,11 +783,18 @@ internal sealed class BTreeMutator : IDisposable
 
     private uint AllocateNewPage()
     {
-        if (_nextAllocPage == 0)
+        // Try reusing a free page from the freelist first
+        uint page = _freePageAllocator?.Invoke() ?? 0;
+
+        if (page == 0)
         {
-            _nextAllocPage = (uint)_source.PageCount + 1;
+            // No free page available — extend the file
+            if (_nextAllocPage == 0)
+            {
+                _nextAllocPage = (uint)_source.PageCount + 1;
+            }
+            page = _nextAllocPage++;
         }
-        uint page = _nextAllocPage++;
 
         var buf = RentPageBuffer();
         var hdr = new BTreePageHeader(
