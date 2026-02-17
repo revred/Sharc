@@ -39,7 +39,10 @@ internal sealed class EntitlementEncryptor : IDisposable
     public byte[] Encrypt(ReadOnlySpan<byte> plaintext, string scope, string cacheKey)
     {
         var scopeKey = GetOrDeriveKey(scope);
-        var aad = Encoding.UTF8.GetBytes(cacheKey);
+
+        int aadLen = Encoding.UTF8.GetByteCount(cacheKey);
+        Span<byte> aad = aadLen <= 256 ? stackalloc byte[aadLen] : new byte[aadLen];
+        Encoding.UTF8.GetBytes(cacheKey, aad);
 
         var output = new byte[NonceSize + plaintext.Length + TagSize];
         var nonce = output.AsSpan(0, NonceSize);
@@ -64,7 +67,10 @@ internal sealed class EntitlementEncryptor : IDisposable
             return null;
 
         var scopeKey = GetOrDeriveKey(scope);
-        var aad = Encoding.UTF8.GetBytes(cacheKey);
+
+        int aadLen = Encoding.UTF8.GetByteCount(cacheKey);
+        Span<byte> aad = aadLen <= 256 ? stackalloc byte[aadLen] : new byte[aadLen];
+        Encoding.UTF8.GetBytes(cacheKey, aad);
 
         var nonce = encrypted[..NonceSize];
         int ciphertextLen = encrypted.Length - NonceSize - TagSize;

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 
 namespace Sharc.Cache;
 
@@ -49,6 +50,9 @@ internal sealed class CacheEngine : IDisposable
             if (masterKey is null)
                 throw new ArgumentException("MasterKey or MasterKeyProvider is required when EnableEntitlement is true.", nameof(options));
             _encryptor = new EntitlementEncryptor(masterKey);
+            // Zero the source key — EntitlementEncryptor clones it internally.
+            if (options.MasterKey is not null)
+                CryptographicOperations.ZeroMemory(options.MasterKey);
         }
 
         if (options.SweepInterval > TimeSpan.Zero)

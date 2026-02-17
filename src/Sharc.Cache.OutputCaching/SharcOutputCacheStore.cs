@@ -12,11 +12,20 @@ namespace Sharc.Cache.OutputCaching;
 public sealed class SharcOutputCacheStore : IOutputCacheStore, IDisposable
 {
     private readonly CacheEngine _engine;
+    private readonly bool _ownsEngine;
 
-    /// <summary>Creates a new store with the given cache options.</summary>
+    /// <summary>Creates a new store with the given cache options (owns the engine).</summary>
     public SharcOutputCacheStore(CacheOptions options)
     {
         _engine = new CacheEngine(options);
+        _ownsEngine = true;
+    }
+
+    /// <summary>Creates a store backed by an existing engine (does not dispose it).</summary>
+    internal SharcOutputCacheStore(CacheEngine engine)
+    {
+        _engine = engine;
+        _ownsEngine = false;
     }
 
     /// <inheritdoc/>
@@ -47,5 +56,9 @@ public sealed class SharcOutputCacheStore : IOutputCacheStore, IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose() => _engine.Dispose();
+    public void Dispose()
+    {
+        if (_ownsEngine)
+            _engine.Dispose();
+    }
 }

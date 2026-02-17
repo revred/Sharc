@@ -14,15 +14,24 @@ public static class OutputCacheServiceCollectionExtensions
 {
     /// <summary>
     /// Registers a <see cref="SharcOutputCacheStore"/> as the <see cref="IOutputCacheStore"/> singleton.
+    /// When <c>AddSharcCache()</c> has already been called, the output cache store shares
+    /// the same engine. Otherwise a dedicated engine is created from <paramref name="configure"/>.
     /// </summary>
     public static IServiceCollection AddSharcOutputCache(
         this IServiceCollection services,
         Action<CacheOptions>? configure = null)
     {
-        var options = new CacheOptions();
-        configure?.Invoke(options);
+        services.TryAddSingleton<IOutputCacheStore>(sp =>
+        {
+            // Reuse existing CacheEngine if AddSharcCache() was called first.
+            var engine = sp.GetService<CacheEngine>();
+            if (engine is not null)
+                return new SharcOutputCacheStore(engine);
 
-        services.TryAddSingleton<IOutputCacheStore>(new SharcOutputCacheStore(options));
+            var options = new CacheOptions();
+            configure?.Invoke(options);
+            return new SharcOutputCacheStore(options);
+        });
         return services;
     }
 }
