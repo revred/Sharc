@@ -294,16 +294,20 @@ public sealed class SharcWriter : IDisposable
     /// <summary>
     /// Updates the root page of a table in sqlite_master after a root split.
     /// </summary>
+    /// <remarks>
+    /// PHASE 1 LIMITATION: Root page updates are not yet persisted to sqlite_master.
+    /// This means operations that trigger a B-tree root split will not be reflected
+    /// in the schema table. In practice, root splits only occur during Insert when a
+    /// leaf page overflows — Delete and Update do not cause root splits because they
+    /// do not increase tree size. For tables with existing data, root splits are rare
+    /// unless bulk-inserting enough rows to overflow the initial leaf page.
+    /// This will be fully implemented in Phase 2 (sqlite_master record re-encoding).
+    /// </remarks>
     private static void UpdateTableRootPage(IWritablePageSource source, string tableName,
         uint newRootPage, int usableSize)
     {
-        // Read page 1, find the sqlite_master entry for this table,
-        // update column 3 (rootpage) with the new value.
-        // This is a simplified implementation — a full implementation would
-        // re-encode the record and update the cell in place.
-
-        // For now, we'll handle this in a future iteration.
-        // Most inserts won't trigger a root split on a table that already has data.
+        // TODO(phase2): Read page 1, find the sqlite_master entry for this table,
+        // re-encode the record with the new rootpage value, and update the cell.
     }
 
     /// <inheritdoc />

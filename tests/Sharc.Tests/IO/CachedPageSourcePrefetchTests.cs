@@ -296,4 +296,29 @@ public sealed class CachedPageSourcePrefetchTests
         Assert.Equal(0, cached.CacheHitCount);
         Assert.Equal(0, cached.CacheMissCount);
     }
+
+    [Fact]
+    public void WritePage_ResetsSequentialTracking_NoFalsePrefetch()
+    {
+        var data = CreateMinimalDatabase(pageCount: 20);
+        using var inner = new MemoryPageSource(data);
+        var opts = new PrefetchOptions { SequentialThreshold = 3, PrefetchDepth = 4 };
+        using var cached = new CachedPageSource(inner, capacity: 20, prefetchOptions: opts);
+
+        // Build up sequential pattern: pages 1, 2 (2 of 3 threshold)
+        cached.GetPage(1);
+        cached.GetPage(2);
+
+        // Write breaks the sequential pattern
+        var writeData = new byte[inner.PageSize];
+        cached.WritePage(5, writeData);
+
+        // Read page 3 — should NOT trigger prefetch because write reset the counter
+        int missesBefore = cached.CacheMissCount;
+        cached.GetPage(3);
+        int missesAfter = cached.CacheMissCount;
+
+        // Only 1 miss for page 3 itself (no prefetch triggered)
+        Assert.Equal(1, missesAfter - missesBefore);
+    }
 }
