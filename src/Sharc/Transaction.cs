@@ -1,5 +1,6 @@
 using Sharc.Core;
 using Sharc.Core.BTree;
+using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Sharc.Exceptions;
 
@@ -16,6 +17,7 @@ public sealed class Transaction : IDisposable
     private readonly IWritablePageSource _baseSource;
     private readonly ShadowPageSource _shadowSource;
     private BTreeMutator? _mutator;
+    private FreelistManager? _freelistManager;
     private bool _isCompleted;
     private bool _disposed;
 
@@ -36,7 +38,19 @@ public sealed class Transaction : IDisposable
     /// </summary>
     internal BTreeMutator FetchMutator(int usablePageSize)
     {
-        return _mutator ??= new BTreeMutator(_shadowSource, usablePageSize);
+        if (_mutator != null)
+            return _mutator;
+
+        // Initialize freelist from the database header
+        var header = _db.Header;
+        _freelistManager = new FreelistManager(_shadowSource, _shadowSource.PageSize);
+        _freelistManager.Initialize(header.FirstFreelistPage, header.FreelistPageCount);
+
+        Func<uint>? freePageAllocator = _freelistManager.HasFreePages ? _freelistManager.PopFreePage : null;
+
+        _mutator = new BTreeMutator(_shadowSource, usablePageSize,
+            freePageAllocator, _freelistManager.PushFreePage);
+        return _mutator;
     }
 
     internal Transaction(SharcDatabase db, IWritablePageSource baseSource)
@@ -58,6 +72,9 @@ public sealed class Transaction : IDisposable
 
         try
         {
+            // Track whether B-tree operations occurred (mutator was used)
+            bool hadMutator = _mutator != null;
+
             // Dispose mutator first to return pooled buffers before flushing dirty pages
             _mutator?.Dispose();
             _mutator = null;
@@ -69,6 +86,14 @@ public sealed class Transaction : IDisposable
                 _db.EndTransaction(this);
                 return;
             }
+
+            // Update page 1 header only when B-tree operations modified the database.
+            // Raw page writes (without mutator) skip header update — the caller manages the header.
+            if (hadMutator)
+                UpdateDatabaseHeader();
+
+            // Re-read dirty pages after header update (page 1 may now be dirty)
+            dirtyPages = _shadowSource.GetDirtyPages();
 
             string? journalPath = null;
             if (_db.FilePath != null)
@@ -119,6 +144,52 @@ public sealed class Transaction : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_isCompleted) throw new InvalidOperationException("Transaction already completed.");
         _shadowSource.WritePage(pageNumber, source);
+    }
+
+    /// <summary>
+    /// Updates the database header on page 1 with current metadata.
+    /// Called during commit to persist PageCount, ChangeCounter, and freelist pointers.
+    /// </summary>
+    private void UpdateDatabaseHeader()
+    {
+        int pageSize = _shadowSource.PageSize;
+
+        // Read page 1 (may already be in shadow if modified during this transaction)
+        Span<byte> page1 = stackalloc byte[pageSize];
+        _shadowSource.ReadPage(1, page1);
+
+        // Parse existing header
+        var oldHeader = DatabaseHeader.Parse(page1);
+
+        // Compute new values
+        int newPageCount = _shadowSource.PageCount;
+        uint newChangeCounter = oldHeader.ChangeCounter + 1;
+
+        // Read freelist state from manager (if active), otherwise preserve existing values
+        uint freelistFirstPage = _freelistManager?.FirstTrunkPage ?? oldHeader.FirstFreelistPage;
+        int freelistCount = _freelistManager?.FreelistPageCount ?? oldHeader.FreelistPageCount;
+
+        // Build updated header preserving all fields except PageCount, ChangeCounter, and freelist
+        var newHeader = new DatabaseHeader(
+            pageSize: oldHeader.PageSize,
+            writeVersion: oldHeader.WriteVersion,
+            readVersion: oldHeader.ReadVersion,
+            reservedBytesPerPage: oldHeader.ReservedBytesPerPage,
+            changeCounter: newChangeCounter,
+            pageCount: newPageCount,
+            firstFreelistPage: freelistFirstPage,
+            freelistPageCount: freelistCount,
+            schemaCookie: oldHeader.SchemaCookie,
+            schemaFormat: oldHeader.SchemaFormat,
+            textEncoding: oldHeader.TextEncoding,
+            userVersion: oldHeader.UserVersion,
+            applicationId: oldHeader.ApplicationId,
+            sqliteVersionNumber: oldHeader.SqliteVersionNumber
+        );
+
+        // Write updated header back to page 1
+        DatabaseHeader.Write(page1, newHeader);
+        _shadowSource.WritePage(1, page1);
     }
 
     /// <inheritdoc />
