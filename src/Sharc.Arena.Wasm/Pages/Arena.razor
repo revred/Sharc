@@ -375,33 +375,57 @@ else
         StateHasChanged();
 
         var sw = Stopwatch.StartNew();
-        var activePreset = _presets.FirstOrDefault(p => p.Id == _preset)!;
+        var activePreset = _presets.FirstOrDefault(p => p.Id == _preset);
+        if (activePreset is null) { Stop(); return; }
 
-        for (var i = 0; i < _slides.Count; i++)
+        try
         {
-            if (token.IsCancellationRequested) break;
+            for (var i = 0; i < _slides.Count; i++)
+            {
+                if (token.IsCancellationRequested) break;
 
-            var slide = _slides[i];
-            _currentIndex = i;
-            _elapsedMs = sw.Elapsed.TotalMilliseconds;
-            StateHasChanged();
+                var slide = _slides[i];
+                _currentIndex = i;
+                _elapsedMs = sw.Elapsed.TotalMilliseconds;
+                StateHasChanged();
+                await Task.Yield();
 
-            // Transition delay
-            await Task.Delay(activePreset.TransitionMs, token).ConfigureAwait(false);
-            if (token.IsCancellationRequested) break;
+                try
+                {
+                    await Task.Delay(activePreset.TransitionMs, token);
+                }
+                catch (OperationCanceledException) { break; }
+                if (token.IsCancellationRequested) break;
 
-            // Run benchmark
-            var scale = GetScaleForSlide(slide);
-            IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
-            var data = await engine.RunSlideAsync(slide, scale, token);
+                // Run benchmark
+                try
+                {
+                    var scale = GetScaleForSlide(slide);
+                    IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
+                    var data = await engine.RunSlideAsync(slide, scale, token);
 
-            _results[slide.Id] = data;
-            _doneSlides.Add(slide.Id);
-            _elapsedMs = sw.Elapsed.TotalMilliseconds;
-            StateHasChanged();
+                    _results[slide.Id] = data;
+                    _doneSlides.Add(slide.Id);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.Message}");
+                    _doneSlides.Add(slide.Id);
+                }
 
-            // Pause delay
-            await Task.Delay(activePreset.PauseMs, token).ConfigureAwait(false);
+                _elapsedMs = sw.Elapsed.TotalMilliseconds;
+                StateHasChanged();
+
+                try
+                {
+                    await Task.Delay(activePreset.PauseMs, token);
+                }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Arena] RunAll failed: {ex.GetType().Name}: {ex.Message}");
         }
 
         sw.Stop();
