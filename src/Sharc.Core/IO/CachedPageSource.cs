@@ -164,8 +164,11 @@ public sealed class CachedPageSource : IWritablePageSource
             if (_capacity > 0 && _lookup.TryGetValue(pageNumber, out int slot))
             {
                 source.CopyTo(_slots[slot].Data);
-                MoveToHead(slot); 
+                MoveToHead(slot);
             }
+
+            // A write breaks sequential read-ahead patterns.
+            _sequentialCount = 0;
 
             // Write through
             if (_inner is IWritablePageSource writable)

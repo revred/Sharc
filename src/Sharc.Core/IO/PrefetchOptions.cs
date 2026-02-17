@@ -12,16 +12,16 @@ public sealed class PrefetchOptions
     /// Number of consecutive sequential page accesses that trigger prefetch.
     /// Default: 3.
     /// </summary>
-    public int SequentialThreshold { get; set; } = 3;
+    public int SequentialThreshold { get; init; } = 3;
 
     /// <summary>
     /// Number of pages to prefetch ahead once sequential access is detected.
     /// Default: 4.
     /// </summary>
-    public int PrefetchDepth { get; set; } = 4;
+    public int PrefetchDepth { get; init; } = 4;
 
     /// <summary>
     /// Disable prefetch entirely. Default: false.
     /// </summary>
-    public bool Disabled { get; set; }
+    public bool Disabled { get; init; }
 }
