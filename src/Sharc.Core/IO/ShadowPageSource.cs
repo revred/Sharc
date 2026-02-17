@@ -1,14 +1,18 @@
+using System.Buffers;
+
 namespace Sharc.Core.IO;
 
 /// <summary>
 /// A page source that shadows an underlying source.
 /// All writes are stored in memory until committed.
 /// Reads check the shadow (dirty) pages first.
+/// Dirty page buffers are rented from <see cref="ArrayPool{T}"/> and returned on clear/dispose.
 /// </summary>
 public sealed class ShadowPageSource : IWritablePageSource
 {
     private readonly IPageSource _baseSource;
     private readonly Dictionary<uint, byte[]> _dirtyPages = new();
+    private uint _maxDirtyPage;
     private bool _disposed;
 
     /// <inheritdoc />
@@ -21,14 +25,13 @@ public sealed class ShadowPageSource : IWritablePageSource
     public int PageSize => _baseSource.PageSize;
 
     /// <inheritdoc />
-    public int PageCount 
+    public int PageCount
     {
         get
         {
             int baseCount = _baseSource.PageCount;
             if (_dirtyPages.Count == 0) return baseCount;
-            int maxDirty = (int)_dirtyPages.Keys.Max();
-            return Math.Max(baseCount, maxDirty);
+            return Math.Max(baseCount, (int)_maxDirtyPage);
         }
     }
 
@@ -36,7 +39,8 @@ public sealed class ShadowPageSource : IWritablePageSource
     public ReadOnlySpan<byte> GetPage(uint pageNumber)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_dirtyPages.TryGetValue(pageNumber, out var dirty)) return dirty;
+        if (_dirtyPages.TryGetValue(pageNumber, out var dirty))
+            return dirty.AsSpan(0, PageSize);
         return _baseSource.GetPage(pageNumber);
     }
 
@@ -46,7 +50,7 @@ public sealed class ShadowPageSource : IWritablePageSource
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_dirtyPages.TryGetValue(pageNumber, out var dirty))
         {
-            dirty.CopyTo(destination);
+            dirty.AsSpan(0, PageSize).CopyTo(destination);
             return PageSize;
         }
         return _baseSource.ReadPage(pageNumber, destination);
@@ -58,10 +62,12 @@ public sealed class ShadowPageSource : IWritablePageSource
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_dirtyPages.TryGetValue(pageNumber, out var dirty))
         {
-            dirty = new byte[PageSize];
+            dirty = ArrayPool<byte>.Shared.Rent(PageSize);
+            dirty.AsSpan(0, PageSize).Clear();
             _dirtyPages[pageNumber] = dirty;
         }
         source.CopyTo(dirty);
+        if (pageNumber > _maxDirtyPage) _maxDirtyPage = pageNumber;
     }
 
     /// <inheritdoc />
@@ -78,13 +84,26 @@ public sealed class ShadowPageSource : IWritablePageSource
     /// <summary>
     /// Clears all dirty pages (Rollback equivalent).
     /// </summary>
-    internal void ClearShadow() => _dirtyPages.Clear();
+    internal void ClearShadow()
+    {
+        ReturnAllBuffers();
+        _dirtyPages.Clear();
+        _maxDirtyPage = 0;
+    }
 
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        ReturnAllBuffers();
         _dirtyPages.Clear();
+        _maxDirtyPage = 0;
+    }
+
+    private void ReturnAllBuffers()
+    {
+        foreach (var buf in _dirtyPages.Values)
+            ArrayPool<byte>.Shared.Return(buf);
     }
 }

@@ -1,4 +1,5 @@
 using Sharc.Core;
+using Sharc.Core.BTree;
 using Sharc.Core.IO;
 using Sharc.Exceptions;
 
@@ -14,6 +15,7 @@ public sealed class Transaction : IDisposable
     private readonly SharcDatabase _db;
     private readonly IWritablePageSource _baseSource;
     private readonly ShadowPageSource _shadowSource;
+    private BTreeMutator? _mutator;
     private bool _isCompleted;
     private bool _disposed;
 
@@ -27,6 +29,15 @@ public sealed class Transaction : IDisposable
     /// Returns the shadow page source for advanced write operations.
     /// </summary>
     internal ShadowPageSource GetShadowSource() => _shadowSource;
+
+    /// <summary>
+    /// Returns a cached <see cref="BTreeMutator"/> for this transaction, creating one on first call.
+    /// The mutator's page cache is shared across all operations within the transaction.
+    /// </summary>
+    internal BTreeMutator FetchMutator(int usablePageSize)
+    {
+        return _mutator ??= new BTreeMutator(_shadowSource, usablePageSize);
+    }
 
     internal Transaction(SharcDatabase db, IWritablePageSource baseSource)
     {
@@ -47,6 +58,10 @@ public sealed class Transaction : IDisposable
 
         try
         {
+            // Dispose mutator first to return pooled buffers before flushing dirty pages
+            _mutator?.Dispose();
+            _mutator = null;
+
             var dirtyPages = _shadowSource.GetDirtyPages();
             if (dirtyPages.Count == 0)
             {
@@ -62,9 +77,10 @@ public sealed class Transaction : IDisposable
                 RollbackJournal.CreateJournal(journalPath, _baseSource, dirtyPages.Keys);
             }
 
+            int pageSize = _shadowSource.PageSize;
             foreach (var (pageNumber, data) in dirtyPages)
             {
-                _baseSource.WritePage(pageNumber, data);
+                _baseSource.WritePage(pageNumber, data.AsSpan(0, pageSize));
             }
             _baseSource.Flush();
 
@@ -88,6 +104,8 @@ public sealed class Transaction : IDisposable
     public void Rollback()
     {
         if (_disposed || _isCompleted) return;
+        _mutator?.Dispose();
+        _mutator = null;
         _shadowSource.ClearShadow();
         _isCompleted = true;
         _db.EndTransaction(this);
@@ -111,6 +129,8 @@ public sealed class Transaction : IDisposable
         {
             Rollback();
         }
+        _mutator?.Dispose();
+        _mutator = null;
         _shadowSource.Dispose();
         _disposed = true;
     }
