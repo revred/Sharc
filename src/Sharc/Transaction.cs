@@ -146,6 +146,36 @@ public sealed class Transaction : IDisposable
         _shadowSource.WritePage(pageNumber, source);
     }
 
+    private uint? _newSchemaCookie;
+
+    /// <summary>
+    /// Allocates a new root page for a table.
+    /// </summary>
+    internal uint AllocateTableRoot(int usablePageSize)
+    {
+        var mutator = FetchMutator(usablePageSize);
+        return mutator.AllocateNewPage();
+    }
+
+    /// <summary>
+    /// Sets the new schema cookie value to be written to the database header on commit.
+    /// </summary>
+    internal void SetSchemaCookie(uint cookie)
+    {
+        _newSchemaCookie = cookie;
+    }
+
+    /// <summary>
+    /// Executes a DDL statement (CREATE TABLE, ALTER TABLE, etc) within this transaction.
+    /// </summary>
+    public void Execute(string sql, Core.Trust.AgentInfo? agent = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_isCompleted) throw new InvalidOperationException("Transaction already completed.");
+
+        SharcSchemaWriter.Execute(_db, this, sql, agent);
+    }
+
     /// <summary>
     /// Updates the database header on page 1 with current metadata.
     /// Called during commit to persist PageCount, ChangeCounter, and freelist pointers.
@@ -168,6 +198,8 @@ public sealed class Transaction : IDisposable
         // Read freelist state from manager (if active), otherwise preserve existing values
         uint freelistFirstPage = _freelistManager?.FirstTrunkPage ?? oldHeader.FirstFreelistPage;
         int freelistCount = _freelistManager?.FreelistPageCount ?? oldHeader.FreelistPageCount;
+        
+        uint schemaCookie = _newSchemaCookie ?? oldHeader.SchemaCookie;
 
         // Build updated header preserving all fields except PageCount, ChangeCounter, and freelist
         var newHeader = new DatabaseHeader(
@@ -179,7 +211,7 @@ public sealed class Transaction : IDisposable
             pageCount: newPageCount,
             firstFreelistPage: freelistFirstPage,
             freelistPageCount: freelistCount,
-            schemaCookie: oldHeader.SchemaCookie,
+            schemaCookie: schemaCookie,
             schemaFormat: oldHeader.SchemaFormat,
             textEncoding: oldHeader.TextEncoding,
             userVersion: oldHeader.UserVersion,

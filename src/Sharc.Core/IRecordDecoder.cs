@@ -103,8 +103,10 @@ public interface IRecordDecoder
     /// </summary>
     /// <param name="payload">The raw record bytes.</param>
     /// <param name="filters">The filters to evaluate.</param>
+    /// <param name="rowId">The rowid of the current record.</param>
+    /// <param name="rowidAliasOrdinal">The logical ordinal of the column that aliases the rowid (INTEGER PRIMARY KEY), or -1 if none.</param>
     /// <returns>True if the record matches all filters; otherwise, false.</returns>
-    bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters);
+    bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters, long rowId, int rowidAliasOrdinal = -1);
 }
 
 /// <summary>

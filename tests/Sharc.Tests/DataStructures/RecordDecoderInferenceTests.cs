@@ -296,7 +296,8 @@ public class RecordDecoderInferenceTests
     public void DecodeColumn_BeyondCount_ThrowsArgumentOutOfRange()
     {
         var record = BuildRecord((1, [42]));
-        Assert.Throws<ArgumentOutOfRangeException>(() => _decoder.DecodeColumn(record, 1));
+        var result = _decoder.DecodeColumn(record, 1);
+        Assert.True(result.IsNull, "Missing columns should decode as NULL to support schema evolution");
     }
 
     // --- All integer sizes in one record ---

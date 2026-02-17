@@ -86,12 +86,26 @@ public sealed class SharcWriteTransaction : IDisposable
         _completed = true;
     }
 
+    /// <summary>
+    /// Executes a Data Definition Language (DDL) statement (e.g., CREATE TABLE, ALTER TABLE).
+    /// </summary>
+    public void Execute(string sql, Core.Trust.AgentInfo? agent = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_completed) throw new InvalidOperationException("Transaction already completed.");
+
+        SharcSchemaWriter.Execute(_db, _innerTx, sql, agent);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
-        if (!_completed) _innerTx.Rollback();
+        if (!_completed)
+        {
+            Rollback();
+        }
         _innerTx.Dispose();
+        _disposed = true;
     }
 }

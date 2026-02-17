@@ -244,8 +244,9 @@ public class ConcurrencyTests
                     case 0:
                         // Read schema
                         var tables = db.Schema.Tables;
-                        Assert.Single(tables);
-                        Assert.Equal("users", tables[0].Name);
+                        Assert.Equal(2, tables.Count); // users + sqlite_master
+                        Assert.Contains(tables, t => t.Name == "users");
+                        Assert.Contains(tables, t => t.Name == "sqlite_master");
                         break;
                     case 1:
                         // GetRowCount

@@ -47,6 +47,18 @@ internal static class EntitlementEnforcer
     }
 
     /// <summary>
+    /// Validates that the agent has schema administration rights.
+    /// Throws <see cref="UnauthorizedAccessException"/> if access is denied.
+    /// </summary>
+    internal static void EnforceSchemaAdmin(AgentInfo agent)
+    {
+        ValidateAgentActive(agent);
+        var scope = ScopeDescriptor.Parse(agent.WriteScope);
+        if (!scope.IsSchemaAdmin)
+             throw new UnauthorizedAccessException($"Agent '{agent.AgentId}' does not have schema administration rights.");
+    }
+
+    /// <summary>
     /// Validates that the agent's validity window covers the current time.
     /// A value of 0 for ValidityStart or ValidityEnd means no restriction.
     /// </summary>

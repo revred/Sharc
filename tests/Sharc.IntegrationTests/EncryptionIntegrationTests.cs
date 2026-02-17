@@ -117,7 +117,7 @@ public class EncryptionIntegrationTests : IDisposable
             Encryption = new SharcEncryptionOptions { Password = TestPassword }
         });
 
-        Assert.Equal(2, db.Schema.Tables.Count);
+        Assert.Equal(3, db.Schema.Tables.Count); // users, posts, sqlite_master
 
         using var userReader = db.CreateReader("users");
         Assert.True(userReader.Read());

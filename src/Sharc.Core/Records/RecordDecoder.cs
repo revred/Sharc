@@ -128,8 +128,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         }
 
         if (!found)
-            throw new ArgumentOutOfRangeException(nameof(columnIndex),
-                columnIndex, "Column index exceeds record column count.");
+        {
+            // Missing column -> NULL (ALTER TABLE support)
+            return ColumnValue.Null();
+        }
 
         int contentSize = SerialTypeCodec.GetContentSize(targetSerialType);
         return DecodeValue(payload.Slice(bodyOffset, contentSize), targetSerialType);
@@ -140,8 +142,13 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     [SuppressMessage("Performance", "CA1822:Mark members as static")]
     public ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset)
     {
-        if (columnIndex < 0 || columnIndex >= serialTypes.Length)
-            throw new ArgumentOutOfRangeException(nameof(columnIndex), columnIndex, "Column index is out of range.");
+        if (columnIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(columnIndex), columnIndex, "Column index is negative.");
+        
+        // If the record has fewer columns than requested, return NULL.
+        // This handles ALTER TABLE ADD COLUMN where old records are not rewritten.
+        if (columnIndex >= serialTypes.Length)
+            return ColumnValue.Null();
 
         int currentOffset = bodyOffset;
         for (int i = 0; i < columnIndex; i++)
@@ -345,7 +352,7 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     }
 
     /// <inheritdoc />
-    public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters)
+    public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters, long rowId, int rowidAliasOrdinal = -1)
     {
         // 1. Calculate max column ordinal to bound the serial type parsing
         int maxOrdinal = -1;
@@ -363,6 +370,14 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         for (int i = 0; i < filters.Length; i++)
         {
             ref readonly var f = ref filters[i];
+
+            // SPECIAL CASE: INTEGER PRIMARY KEY alias
+            // The record stores NULL for this column, but the value is the rowid.
+            if (f.ColumnOrdinal == rowidAliasOrdinal)
+            {
+                if (!MatchesRowId(rowId, f.Operator, f.Value)) return false;
+                continue;
+            }
 
             // If filter column is out of range, treat as NULL
             if (f.ColumnOrdinal >= colCount)
@@ -388,6 +403,31 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         }
 
         return true;
+    }
+
+    private static bool MatchesRowId(long rowId, SharcOperator op, object? filterValue)
+    {
+        if (filterValue is null) return false;
+
+        int cmp;
+        switch (filterValue)
+        {
+            case long l: cmp = rowId.CompareTo(l); break;
+            case int i: cmp = rowId.CompareTo((long)i); break;
+            case double d: cmp = ((double)rowId).CompareTo(d); break;
+            default: return false; // Type mismatch
+        }
+
+        return op switch
+        {
+            SharcOperator.Equal => cmp == 0,
+            SharcOperator.NotEqual => cmp != 0,
+            SharcOperator.LessThan => cmp < 0,
+            SharcOperator.GreaterThan => cmp > 0,
+            SharcOperator.LessOrEqual => cmp <= 0,
+            SharcOperator.GreaterOrEqual => cmp >= 0,
+            _ => false
+        };
     }
 
     private static bool MatchesRawValue(ReadOnlySpan<byte> data, long st, SharcOperator op, object? filterValue)
