@@ -111,6 +111,64 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Deletes a single record by rowid. Auto-commits.
+    /// Returns true if the row existed and was removed.
+    /// </summary>
+    public bool Delete(string tableName, long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        using var tx = _db.BeginTransaction();
+        bool found = DeleteCore(tx, tableName, rowId);
+        tx.Commit();
+        return found;
+    }
+
+    /// <summary>
+    /// Deletes a single record with agent write-scope enforcement. Auto-commits.
+    /// Throws <see cref="UnauthorizedAccessException"/> if the agent's WriteScope denies access.
+    /// </summary>
+    public bool Delete(AgentInfo agent, string tableName, long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+
+        using var tx = _db.BeginTransaction();
+        bool found = DeleteCore(tx, tableName, rowId);
+        tx.Commit();
+        return found;
+    }
+
+    /// <summary>
+    /// Updates a single record by rowid with new column values. Auto-commits.
+    /// Returns true if the row existed and was updated.
+    /// </summary>
+    public bool Update(string tableName, long rowId, params ColumnValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        using var tx = _db.BeginTransaction();
+        bool found = UpdateCore(tx, tableName, rowId, values);
+        tx.Commit();
+        return found;
+    }
+
+    /// <summary>
+    /// Updates a single record with agent write-scope enforcement. Auto-commits.
+    /// Throws <see cref="UnauthorizedAccessException"/> if the agent's WriteScope denies access.
+    /// </summary>
+    public bool Update(AgentInfo agent, string tableName, long rowId, params ColumnValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+
+        using var tx = _db.BeginTransaction();
+        bool found = UpdateCore(tx, tableName, rowId, values);
+        tx.Commit();
+        return found;
+    }
+
+    /// <summary>
     /// Begins an explicit write transaction.
     /// </summary>
     public SharcWriteTransaction BeginTransaction()
@@ -158,6 +216,52 @@ public sealed class SharcWriter : IDisposable
         }
 
         return rowId;
+    }
+
+    /// <summary>
+    /// Core delete: find table root → mutator.Delete → update root if changed.
+    /// </summary>
+    internal static bool DeleteCore(Transaction tx, string tableName, long rowId)
+    {
+        var shadow = tx.GetShadowSource();
+        int usableSize = shadow.PageSize;
+
+        uint rootPage = FindTableRootPage(shadow, tableName, usableSize);
+        if (rootPage == 0)
+            throw new InvalidOperationException($"Table '{tableName}' not found.");
+
+        var mutator = new BTreeMutator(shadow, usableSize);
+        var (found, newRoot) = mutator.Delete(rootPage, rowId);
+
+        if (found && newRoot != rootPage)
+            UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
+
+        return found;
+    }
+
+    /// <summary>
+    /// Core update: find table root → encode record → mutator.Update → update root if changed.
+    /// </summary>
+    internal static bool UpdateCore(Transaction tx, string tableName, long rowId, ColumnValue[] values)
+    {
+        var shadow = tx.GetShadowSource();
+        int usableSize = shadow.PageSize;
+
+        uint rootPage = FindTableRootPage(shadow, tableName, usableSize);
+        if (rootPage == 0)
+            throw new InvalidOperationException($"Table '{tableName}' not found.");
+
+        int encodedSize = RecordEncoder.ComputeEncodedSize(values);
+        Span<byte> recordBuf = encodedSize <= 512 ? stackalloc byte[encodedSize] : new byte[encodedSize];
+        RecordEncoder.EncodeRecord(values, recordBuf);
+
+        var mutator = new BTreeMutator(shadow, usableSize);
+        var (found, newRoot) = mutator.Update(rootPage, rowId, recordBuf);
+
+        if (found && newRoot != rootPage)
+            UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
+
+        return found;
     }
 
     /// <summary>
