@@ -166,8 +166,8 @@ sharc/
 │   ├── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
 │   └── Sharc.Scene/                   ← Trust Playground (agent simulation & visualization)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (832 tests: core + trust + write + crypto)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (146 tests)
+│   ├── Sharc.Tests/                   ← Unit tests (1,103 tests: core + trust + write + crypto + GUID)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (281 tests)
 │   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (50 tests)
 │   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
 │   └── Sharc.Index.Tests/             ← Index CLI tests (22 tests)
@@ -181,7 +181,7 @@ sharc/
 
 ## Current Status
 
-**1,067 tests passing** across 5 test projects (832 unit + 146 integration + 53 graph + 22 index + 14 context).
+**1,898 tests passing** across 7 test projects (1,103 unit + 281 integration + 425 query + 53 graph + 22 index + 14 context).
 
 All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage (SeekFirst O(log N)), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (INSERT with B-tree splits, ACID transactions), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring). See README.md for benchmark results.
 

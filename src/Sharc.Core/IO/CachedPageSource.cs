@@ -14,6 +14,9 @@ public sealed class CachedPageSource : IWritablePageSource
 {
     private readonly IPageSource _inner;
     private readonly int _capacity;
+    private readonly PrefetchOptions? _prefetchOptions;
+    private uint _lastAccessedPage;
+    private int _sequentialCount;
     private bool _disposed;
 
     // Zero-allocation LRU Implementation
@@ -59,12 +62,24 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <param name="inner">The underlying page source.</param>
     /// <param name="capacity">Maximum number of pages to cache. 0 disables caching.</param>
     public CachedPageSource(IPageSource inner, int capacity)
+        : this(inner, capacity, prefetchOptions: null)
+    {
+    }
+
+    /// <summary>
+    /// Wraps an inner page source with an LRU cache and optional sequential read-ahead prefetch.
+    /// </summary>
+    /// <param name="inner">The underlying page source.</param>
+    /// <param name="capacity">Maximum number of pages to cache. 0 disables caching.</param>
+    /// <param name="prefetchOptions">Optional prefetch configuration. Null disables prefetch.</param>
+    public CachedPageSource(IPageSource inner, int capacity, PrefetchOptions? prefetchOptions)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfNegative(capacity);
 
         _inner = inner;
         _capacity = capacity;
+        _prefetchOptions = prefetchOptions;
         
         if (capacity > 0)
         {
@@ -108,37 +123,25 @@ public sealed class CachedPageSource : IWritablePageSource
                 // Hit
                 MoveToHead(slotIndex);
                 CacheHitCount++;
+                UpdateSequentialTracking(pageNumber);
                 return _slots[slotIndex].Data.AsSpan(0, PageSize);
             }
 
             // Miss
             CacheMissCount++;
-            int slot;
-            
-            if (_count < _capacity)
-            {
-                // Use free slot
-                slot = _freeSlots.Pop();
-                _count++;
-            }
-            else
-            {
-                // Evict tail (LRU)
-                slot = _tail;
-                var victimPage = _slots[slot].PageNumber;
-                _lookup.Remove(victimPage);
-                RemoveNode(slot);
-                // Note: We don't push to free slots because we immediately reuse it
-            }
+            int slot = AllocateSlot();
 
             // Load data
             _inner.ReadPage(pageNumber, _slots[slot].Data);
             _slots[slot].PageNumber = pageNumber;
-            
+
             // Add to head and lookup
             AddFirst(slot);
             _lookup[pageNumber] = slot;
-            
+
+            // Sequential access detection and prefetch
+            TryPrefetch(pageNumber);
+
             return _slots[slot].Data.AsSpan(0, PageSize);
         }
     }
@@ -161,8 +164,11 @@ public sealed class CachedPageSource : IWritablePageSource
             if (_capacity > 0 && _lookup.TryGetValue(pageNumber, out int slot))
             {
                 source.CopyTo(_slots[slot].Data);
-                MoveToHead(slot); 
+                MoveToHead(slot);
             }
+
+            // A write breaks sequential read-ahead patterns.
+            _sequentialCount = 0;
 
             // Write through
             if (_inner is IWritablePageSource writable)
@@ -244,6 +250,72 @@ public sealed class CachedPageSource : IWritablePageSource
         
         _prev[slot] = -1;
         _next[slot] = -1;
+    }
+
+    // --- Prefetch Helpers ---
+
+    /// <summary>Allocates a cache slot, evicting LRU if full. Must be called under _syncRoot.</summary>
+    private int AllocateSlot()
+    {
+        if (_count < _capacity)
+        {
+            int slot = _freeSlots.Pop();
+            _count++;
+            return slot;
+        }
+        else
+        {
+            int slot = _tail;
+            var victimPage = _slots[slot].PageNumber;
+            _lookup.Remove(victimPage);
+            RemoveNode(slot);
+            return slot;
+        }
+    }
+
+    /// <summary>Updates sequential access tracking. Must be called under _syncRoot.</summary>
+    private void UpdateSequentialTracking(uint pageNumber)
+    {
+        if (pageNumber == _lastAccessedPage + 1)
+            _sequentialCount++;
+        else
+            _sequentialCount = 1;
+
+        _lastAccessedPage = pageNumber;
+    }
+
+    /// <summary>
+    /// Detects sequential access patterns and prefetches ahead. Must be called under _syncRoot.
+    /// </summary>
+    private void TryPrefetch(uint pageNumber)
+    {
+        UpdateSequentialTracking(pageNumber);
+
+        if (_prefetchOptions is null || _prefetchOptions.Disabled)
+            return;
+
+        if (_sequentialCount < _prefetchOptions.SequentialThreshold)
+            return;
+
+        uint pageCount = (uint)PageCount;
+        for (int i = 1; i <= _prefetchOptions.PrefetchDepth; i++)
+        {
+            uint prefetchPage = pageNumber + (uint)i;
+            if (prefetchPage > pageCount)
+                break;
+
+            if (_lookup.ContainsKey(prefetchPage))
+                continue;
+
+            CacheMissCount++;
+            int slot = AllocateSlot();
+
+            _inner.ReadPage(prefetchPage, _slots[slot].Data);
+            _slots[slot].PageNumber = prefetchPage;
+
+            AddFirst(slot);
+            _lookup[prefetchPage] = slot;
+        }
     }
 
     private struct CacheSlot
