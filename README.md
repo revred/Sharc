@@ -11,7 +11,7 @@
 
 | **Speed** | **Size** | **Trust** |
 | :--- | :--- | :--- |
-| **61x faster** B-tree seeks | **~250 KB** engine footprint | **ECDSA** agent attestation |
+| **61x faster** B-tree seeks | **~52 KB** engine footprint | **ECDSA** agent attestation |
 | **13.5x faster** graph traversal | **Zero** native dependencies | **AES-256-GCM** encryption |
 | **5.4x faster** UNION ALL queries | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
 | **~0 B** per-row allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
