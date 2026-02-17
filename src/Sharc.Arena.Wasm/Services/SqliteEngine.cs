@@ -391,11 +391,27 @@ public sealed class SqliteEngine : IDisposable
     {
         if (_dbBytes is null) return new EngineBaseResult { Value = null, Note = "No data" };
 
+        // SQLite memory footprint in WASM is dominated by the 1.5MB binary itself,
+        // plus the managed SQLiteConnection overhead.
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        using (var probe = new SqliteConnection($"Data Source={_tempPath};Mode=ReadOnly"))
+        {
+            probe.Open();
+            using var cmd = probe.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master";
+            _ = cmd.ExecuteScalar();
+        }
+        var allocAfter = GC.GetAllocatedBytesForCurrentThread();
+        var managedOverheadKb = (allocAfter - allocBefore) / 1024.0;
+        
+        var baseSizeKb = _dbBytes.Length / 1024.0;
+        var totalKb = baseSizeKb + managedOverheadKb;
+
         return new EngineBaseResult
         {
-            Value = Math.Round(_dbBytes.Length / 1024.0, 0),
-            Allocation = $"{_dbBytes.Length / 1024.0:F0} KB (SQLite file)",
-            Note = "SQLitePCLRaw e_sqlite3 WASM + database file",
+            Value = Math.Round(totalKb, 0),
+            Allocation = $"{totalKb:F0} KB (WASM binary + heap)",
+            Note = "e_sqlite3.wasm (1.5MB) + managed overhead",
         };
     }
 
