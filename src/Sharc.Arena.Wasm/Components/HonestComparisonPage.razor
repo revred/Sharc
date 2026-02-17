@@ -1,10 +1,16 @@
 @* Page 6: Where Sharc Excels vs Where SQLite Excels *@
+@using Sharc.Arena.Wasm.Services
+@using Sharc.Arena.Wasm.Models
+@inject SharcEngine Sharc
+@inject SqliteEngine Sqlite
+@inject BenchmarkRunner Runner
 
 <div class="honest-page">
     <div class="honest-badge">HONEST ASSESSMENT</div>
     <h2 class="honest-title">Where Each Engine Excels</h2>
     <p class="honest-subtitle">
         No database is best at everything. Here's when to choose each.
+        @if (_isMeasuring) { <span class="measuring-note">(Running live measurements...)</span> }
     </p>
 
     <div class="honest-grid">
@@ -14,10 +20,10 @@
                 <span class="honest-card-title" style="color: var(--sharc)">Sharc Excels At</span>
             </div>
             <ul class="honest-list">
-                <li><strong>Cold start</strong> &mdash; 4 &#x00B5;s vs 142 ms (35,000x)</li>
-                <li><strong>Point lookups</strong> &mdash; 3.4 &#x00B5;s B-tree seeks</li>
-                <li><strong>Graph traversal</strong> &mdash; 6 &#x00B5;s 2-hop BFS</li>
-                <li><strong>Footprint</strong> &mdash; 50 KB vs 1.5 MB</li>
+                <li><strong>Cold start</strong> &mdash; @FormatTime(_sharcColdStart) vs @FormatTime(_sqliteColdStart) (@FormatRatio(_sqliteColdStart / _sharcColdStart)x)</li>
+                <li><strong>Point lookups</strong> &mdash; @FormatNs(_sharcPoint) B-tree seeks</li>
+                <li><strong>Graph traversal</strong> &mdash; @FormatTime(_sharcGraph) 2-hop BFS</li>
+                <li><strong>Footprint</strong> &mdash; @(_sharcFootprint.ToString("F0")) KB vs @(_sqliteFootprint.ToString("F0")) KB</li>
                 <li><strong>Page encryption</strong> &mdash; AES-256-GCM built-in</li>
                 <li><strong>Trust layer</strong> &mdash; ECDSA + hash-chain ledger</li>
                 <li><strong>WASM deployment</strong> &mdash; no native dependencies</li>
@@ -32,7 +38,7 @@
             <ul class="honest-list">
                 <li><strong>Complex queries</strong> &mdash; full SQL optimizer (VDBE)</li>
                 <li><strong>WHERE filtering</strong> &mdash; predicate pushdown wins</li>
-                <li><strong>CTEs</strong> &mdash; mature query planner, faster at complex CTEs (Cotes in Sharc)</li>
+                <li><strong>CTEs</strong> &mdash; mature query planner, faster at complex CTEs</li>
                 <li><strong>Write throughput</strong> &mdash; decades of WAL optimization</li>
                 <li><strong>Ecosystem</strong> &mdash; every language has a binding</li>
                 <li><strong>Maturity</strong> &mdash; 24 years of battle testing</li>
@@ -48,4 +54,70 @@
 </div>
 
 @code {
+    private bool _isMeasuring = true;
+    private double _sharcColdStart = 0.004;
+    private double _sqliteColdStart = 142;
+    private double _sharcPoint = 3444;
+    private double _sharcGraph = 6.0;
+    private double _sharcFootprint = 50;
+    private double _sqliteFootprint = 1536;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isMeasuring = true;
+        
+        // Yield to allow UI to render the "measuring" state
+        await Task.Yield();
+
+        try 
+        {
+            // 1. Cold Start
+            var cold = Runner.TimeColdStart(500, 100);
+            _sharcColdStart = cold.SharcMs;
+            _sqliteColdStart = cold.SqliteMs;
+
+            // 2. Point Lookups (Sharc)
+            var pointResult = Sharc.RunPointLookup();
+            if (pointResult.Value.HasValue) _sharcPoint = pointResult.Value.Value;
+
+            // 3. Graph Traversal (Sharc)
+            var graphResult = Sharc.RunGraphTraverse();
+            if (graphResult.Value.HasValue) _sharcGraph = graphResult.Value.Value / 1000.0; // convert us to ms
+
+            // 4. Memory Footprint
+            var sharcMem = Sharc.RunMemoryFootprint();
+            if (sharcMem.Value.HasValue) _sharcFootprint = sharcMem.Value.Value;
+
+            var sqliteMem = Sqlite.RunMemoryFootprint();
+            if (sqliteMem.Value.HasValue) _sqliteFootprint = sqliteMem.Value.Value;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[HonestPage] Error running live benchmarks: {ex.Message}");
+        }
+        finally
+        {
+            _isMeasuring = false;
+        }
+    }
+
+    private string FormatTime(double ms)
+    {
+        if (ms < 0.1) return $"{(ms * 1000):F0} \u00B5s";
+        if (ms < 1000) return $"{ms:F1} ms";
+        return $"{(ms / 1000.0):F2} s";
+    }
+
+    private string FormatNs(double ns)
+    {
+        if (ns < 1000) return $"{ns:F0} ns";
+        return $"{(ns / 1000.0):F1} \u00B5s";
+    }
+
+    private string FormatRatio(double ratio)
+    {
+        if (ratio > 1000) return $"{(ratio / 1000.0):F0}k";
+        if (ratio > 10) return ratio.ToString("F0");
+        return ratio.ToString("F1");
+    }
 }
