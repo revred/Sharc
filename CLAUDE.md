@@ -181,7 +181,7 @@ sharc/
 
 ## Current Status
 
-**1,898 tests passing** across 7 test projects (1,103 unit + 281 integration + 425 query + 53 graph + 22 index + 14 context).
+**2,016 tests passing** across 6 test projects (1,207 unit + 293 integration + 425 query + 55 graph + 22 index + 14 context).
 
 All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage (SeekFirst O(log N)), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (INSERT with B-tree splits, ACID transactions), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring). See README.md for benchmark results.
 
