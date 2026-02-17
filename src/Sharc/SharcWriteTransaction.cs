@@ -1,9 +1,10 @@
 using Sharc.Core;
+using Sharc.Core.Schema;
 
 namespace Sharc;
 
 /// <summary>
-/// An explicit write transaction. All inserts are buffered until 
+/// An explicit write transaction. All inserts are buffered until
 /// <see cref="Commit"/> is called. On <see cref="Dispose"/> without
 /// commit, changes are rolled back.
 /// </summary>
@@ -28,7 +29,40 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.InsertCore(_innerTx, tableName, values);
+        return SharcWriter.InsertCore(_innerTx, tableName, values, TryGetTableInfo(tableName));
+    }
+
+    /// <summary>
+    /// Deletes a record by rowid within this transaction.
+    /// Returns true if the row existed and was removed.
+    /// </summary>
+    public bool Delete(string tableName, long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_completed) throw new InvalidOperationException("Transaction already completed.");
+        return SharcWriter.DeleteCore(_innerTx, tableName, rowId);
+    }
+
+    /// <summary>
+    /// Updates a record by rowid with new column values within this transaction.
+    /// Returns true if the row existed and was updated.
+    /// </summary>
+    public bool Update(string tableName, long rowId, params ColumnValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_completed) throw new InvalidOperationException("Transaction already completed.");
+        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, TryGetTableInfo(tableName));
+    }
+
+    private TableInfo? TryGetTableInfo(string tableName)
+    {
+        var tables = _db.Schema.Tables;
+        for (int i = 0; i < tables.Count; i++)
+        {
+            if (tables[i].Name.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+                return tables[i];
+        }
+        return null;
     }
 
     /// <summary>

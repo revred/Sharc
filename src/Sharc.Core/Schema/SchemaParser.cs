@@ -68,10 +68,12 @@ internal static class SchemaParser
         if (name.Length == 0) return null;
         string type = ReadUntilKeyword(definition, ref pos);
         var rem = definition.Slice(pos);
-        return new ColumnInfo { 
+        return new ColumnInfo {
             Name = name, DeclaredType = type, Ordinal = ordinal,
             IsPrimaryKey = Contains(rem, "PRIMARY KEY"),
-            IsNotNull = Contains(rem, "NOT NULL") || Contains(rem, "PRIMARY KEY")
+            IsNotNull = Contains(rem, "NOT NULL") || Contains(rem, "PRIMARY KEY"),
+            IsGuidColumn = type.Equals("GUID", StringComparison.OrdinalIgnoreCase) ||
+                           type.Equals("UUID", StringComparison.OrdinalIgnoreCase)
         };
     }
 
@@ -85,6 +87,89 @@ internal static class SchemaParser
             Name = name, Ordinal = ordinal,
             IsDescending = Contains(rem, "DESC")
         };
+    }
+
+    /// <summary>
+    /// Detects __hi/__lo column pairs and merges them into logical GUID columns.
+    /// Columns named "foo__hi" + "foo__lo" become a single "foo" of type GUID.
+    /// </summary>
+    public static (IReadOnlyList<ColumnInfo> LogicalColumns, int PhysicalColumnCount) MergeColumnPairs(
+        IReadOnlyList<ColumnInfo> physicalColumns)
+    {
+        if (physicalColumns.Count < 2)
+            return (physicalColumns, physicalColumns.Count);
+
+        // Build a set of __lo names for quick lookup
+        var loNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < physicalColumns.Count; i++)
+        {
+            if (physicalColumns[i].Name.EndsWith("__lo", StringComparison.OrdinalIgnoreCase))
+                loNames.Add(physicalColumns[i].Name);
+        }
+
+        if (loNames.Count == 0)
+            return (physicalColumns, physicalColumns.Count);
+
+        var consumed = new HashSet<int>(); // physical ordinals consumed by merges
+        var result = new List<ColumnInfo>();
+        int logicalOrdinal = 0;
+
+        for (int i = 0; i < physicalColumns.Count; i++)
+        {
+            if (consumed.Contains(i)) continue;
+
+            var col = physicalColumns[i];
+            if (col.Name.EndsWith("__hi", StringComparison.OrdinalIgnoreCase))
+            {
+                string baseName = col.Name[..^4]; // strip __hi
+                string expectedLo = baseName + "__lo";
+
+                // Find matching __lo
+                int loIndex = -1;
+                for (int j = i + 1; j < physicalColumns.Count; j++)
+                {
+                    if (physicalColumns[j].Name.Equals(expectedLo, StringComparison.OrdinalIgnoreCase))
+                    {
+                        loIndex = j;
+                        break;
+                    }
+                }
+
+                if (loIndex >= 0)
+                {
+                    var loCol = physicalColumns[loIndex];
+                    consumed.Add(i);
+                    consumed.Add(loIndex);
+                    result.Add(new ColumnInfo
+                    {
+                        Name = baseName,
+                        DeclaredType = "GUID",
+                        Ordinal = logicalOrdinal++,
+                        IsPrimaryKey = col.IsPrimaryKey && loCol.IsPrimaryKey,
+                        IsNotNull = col.IsNotNull && loCol.IsNotNull,
+                        IsGuidColumn = true,
+                        MergedPhysicalOrdinals = [col.Ordinal, loCol.Ordinal]
+                    });
+                    continue;
+                }
+            }
+
+            // Regular column — pass through with updated ordinal.
+            // Store the original physical ordinal so the reader can map
+            // logical → physical when merged columns shift ordinals.
+            result.Add(new ColumnInfo
+            {
+                Name = col.Name,
+                DeclaredType = col.DeclaredType,
+                Ordinal = logicalOrdinal++,
+                IsPrimaryKey = col.IsPrimaryKey,
+                IsNotNull = col.IsNotNull,
+                IsGuidColumn = col.IsGuidColumn,
+                MergedPhysicalOrdinals = [col.Ordinal]
+            });
+        }
+
+        return (result, physicalColumns.Count);
     }
 
     private static int FindMatchingParen(ReadOnlySpan<char> sql, int openIndex)

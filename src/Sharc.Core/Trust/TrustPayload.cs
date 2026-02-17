@@ -31,11 +31,14 @@ public enum PayloadType
 
 /// <summary>
 /// Represents a cryptographic reference to a specific row in a database table.
+/// When <see cref="RowGuid"/> is present, it provides a globally unique identity
+/// that is portable across databases — unlike <see cref="RowId"/> which is local.
 /// </summary>
 /// <param name="Table">The name of the table containing the evidence.</param>
-/// <param name="RowId">The row ID of the specific record.</param>
+/// <param name="RowId">The local row ID of the specific record (performance hint).</param>
 /// <param name="RowHash">The cryptographic hash of the row content at the time of citation.</param>
-public record EvidenceRef(string Table, long RowId, byte[] RowHash);
+/// <param name="RowGuid">Optional globally unique identifier for the row, portable across databases.</param>
+public record EvidenceRef(string Table, long RowId, byte[] RowHash, Guid? RowGuid = null);
 
 /// <summary>
 /// Represents a structured payload in the distributed ledger.

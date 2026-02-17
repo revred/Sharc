@@ -153,6 +153,14 @@ public readonly struct ColumnValue
     public static ColumnValue Blob(long serialType, ReadOnlyMemory<byte> data) =>
         new(serialType, ColumnStorageClass.Blob, blobValue: data);
 
+    /// <summary>Creates a GUID column value stored as a 16-byte big-endian BLOB (serial type 44).</summary>
+    public static ColumnValue FromGuid(Guid value)
+    {
+        var bytes = new byte[16];
+        Primitives.GuidCodec.Encode(value, bytes);
+        return new(Primitives.GuidCodec.GuidSerialType, ColumnStorageClass.UniqueId, blobValue: bytes);
+    }
+
     /// <summary>Gets the integer value. Only valid when StorageClass is Integer.</summary>
     public long AsInt64() => _intValue;
 
@@ -165,8 +173,21 @@ public readonly struct ColumnValue
     /// <summary>Gets the text value as a string. Only valid when StorageClass is Text.</summary>
     public string AsString() => System.Text.Encoding.UTF8.GetString(_blobValue.Span);
 
+    /// <summary>Gets the GUID value. Only valid when StorageClass is Guid.</summary>
+    public Guid AsGuid() => Primitives.GuidCodec.Decode(_blobValue.Span);
+
     /// <summary>Returns true if this is a NULL value.</summary>
     public bool IsNull => StorageClass == ColumnStorageClass.Null;
+
+    /// <summary>
+    /// Splits a GUID into two Int64 column values for merged-column storage.
+    /// The hi value contains the first 8 bytes, lo contains the last 8 bytes (big-endian).
+    /// </summary>
+    public static (ColumnValue Hi, ColumnValue Lo) SplitGuidForMerge(Guid value)
+    {
+        var (hi, lo) = Primitives.GuidCodec.ToInt64Pair(value);
+        return (FromInt64(6, hi), FromInt64(6, lo));
+    }
 }
 
 /// <summary>
@@ -183,5 +204,7 @@ public enum ColumnStorageClass
     /// <summary>UTF-8 text string.</summary>
     Text = 3,
     /// <summary>Binary large object.</summary>
-    Blob = 4
+    Blob = 4,
+    /// <summary>GUID / UUID stored as 16-byte big-endian BLOB (serial type 44).</summary>
+    UniqueId = 5
 }

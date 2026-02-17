@@ -304,6 +304,73 @@ public class RecordEncoderTests
         Assert.Empty(decoded);
     }
 
+    // ── Single column: GUID ──
+
+    [Fact]
+    public void EncodeRecord_SingleGuid_RoundTripsCorrectly()
+    {
+        var guid = new Guid("01020304-0506-0708-090a-0b0c0d0e0f10");
+        var columns = new[] { ColumnValue.FromGuid(guid) };
+        var buffer = new byte[64];
+        int written = RecordEncoder.EncodeRecord(columns, buffer);
+
+        // Decoded as Blob(16) since serial type 44 = BLOB on disk
+        var decoded = _decoder.DecodeRecord(buffer.AsSpan(0, written));
+        Assert.Single(decoded);
+        Assert.Equal(ColumnStorageClass.Blob, decoded[0].StorageClass);
+        Assert.Equal(16, decoded[0].AsBytes().Length);
+
+        // Verify the bytes are the original GUID in RFC 4122 big-endian form
+        var decodedGuid = Sharc.Core.Primitives.GuidCodec.Decode(decoded[0].AsBytes().Span);
+        Assert.Equal(guid, decodedGuid);
+    }
+
+    [Fact]
+    public void EncodeRecord_GuidWithOtherColumns_RoundTripsCorrectly()
+    {
+        var guid = Guid.NewGuid();
+        byte[] text = "owner"u8.ToArray();
+        var columns = new[]
+        {
+            ColumnValue.FromInt64(0, 42),
+            ColumnValue.FromGuid(guid),
+            ColumnValue.Text(0, text),
+        };
+        var buffer = new byte[128];
+        int written = RecordEncoder.EncodeRecord(columns, buffer);
+
+        var decoded = _decoder.DecodeRecord(buffer.AsSpan(0, written));
+        Assert.Equal(3, decoded.Length);
+        Assert.Equal(42L, decoded[0].AsInt64());
+        // GUID decoded as BLOB(16)
+        Assert.Equal(ColumnStorageClass.Blob, decoded[1].StorageClass);
+        Assert.Equal(guid, Sharc.Core.Primitives.GuidCodec.Decode(decoded[1].AsBytes().Span));
+        Assert.Equal("owner", decoded[2].AsString());
+    }
+
+    [Fact]
+    public void ComputeEncodedSize_Guid_MatchesActualEncoding()
+    {
+        var columns = new[] { ColumnValue.FromGuid(Guid.NewGuid()) };
+        int computed = RecordEncoder.ComputeEncodedSize(columns);
+        var buffer = new byte[64];
+        int actual = RecordEncoder.EncodeRecord(columns, buffer);
+        Assert.Equal(actual, computed);
+    }
+
+    [Fact]
+    public void EncodeRecord_EmptyGuid_RoundTripsCorrectly()
+    {
+        var columns = new[] { ColumnValue.FromGuid(Guid.Empty) };
+        var buffer = new byte[64];
+        int written = RecordEncoder.EncodeRecord(columns, buffer);
+
+        var decoded = _decoder.DecodeRecord(buffer.AsSpan(0, written));
+        Assert.Single(decoded);
+        var decodedGuid = Sharc.Core.Primitives.GuidCodec.Decode(decoded[0].AsBytes().Span);
+        Assert.Equal(Guid.Empty, decodedGuid);
+    }
+
     // ── Fuzz: random round-trips ──
 
     [Fact]
