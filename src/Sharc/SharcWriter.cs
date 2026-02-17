@@ -83,7 +83,7 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var tableInfo = TryGetTableInfo(tableName);
-        var rowIds = new List<long>();
+        var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
         using var tx = _db.BeginTransaction();
         foreach (var values in records)
         {
@@ -103,7 +103,7 @@ public sealed class SharcWriter : IDisposable
         Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
         var tableInfo = TryGetTableInfo(tableName);
-        var rowIds = new List<long>();
+        var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
         using var tx = _db.BeginTransaction();
         foreach (var values in records)
         {
@@ -201,7 +201,7 @@ public sealed class SharcWriter : IDisposable
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         long rowId = mutator.GetMaxRowId(rootPage) + 1;
 
         // Encode the record
@@ -235,7 +235,7 @@ public sealed class SharcWriter : IDisposable
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Delete(rootPage, rowId);
 
         if (found && newRoot != rootPage)
@@ -265,7 +265,7 @@ public sealed class SharcWriter : IDisposable
         Span<byte> recordBuf = encodedSize <= 512 ? stackalloc byte[encodedSize] : new byte[encodedSize];
         RecordEncoder.EncodeRecord(values, recordBuf);
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Update(rootPage, rowId, recordBuf);
 
         if (found && newRoot != rootPage)

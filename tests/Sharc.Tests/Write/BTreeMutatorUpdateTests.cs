@@ -121,7 +121,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         // Fill the page with many rows to approach capacity
         uint root = 2;
@@ -155,7 +155,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 20; i++)
@@ -191,7 +191,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         // Strategy: fill page nearly to capacity, delete middle rows to create fragmentation,
         // then insert rows until contiguous space is exhausted — forcing DefragmentPage.
@@ -246,7 +246,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "one");
@@ -266,7 +266,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertRow(mutator, 2, 1, 42, "AAAA");
 
@@ -284,7 +284,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertRow(mutator, 2, 1, 42, "a_long_string_value");
 
@@ -302,7 +302,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertRow(mutator, 2, 1, 42, "hi");
 
@@ -320,7 +320,7 @@ public sealed class BTreeMutatorUpdateTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 200; i++)
