@@ -71,6 +71,50 @@ internal sealed class BTreeMutator
     }
 
     /// <summary>
+    /// Deletes a record from the table B-tree by rowid.
+    /// Returns whether the row was found and the (unchanged) root page number.
+    /// Interior page keys are NOT modified — they remain as valid routing hints per SQLite spec.
+    /// </summary>
+    public (bool Found, uint RootPage) Delete(uint rootPage, long rowId)
+    {
+        // Navigate from root to the correct leaf
+        uint currentPage = rootPage;
+        while (true)
+        {
+            var page = ReadPageBuffer(currentPage);
+            int hdrOff = currentPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+            var hdr = BTreePageHeader.Parse(page.AsSpan(hdrOff));
+
+            if (hdr.IsLeaf)
+            {
+                var (cellIdx, found) = FindLeafCellByRowId(page, hdrOff, hdr, rowId);
+                if (!found)
+                    return (false, rootPage);
+
+                RemoveCellFromPage(page, hdrOff, hdr, cellIdx);
+                WritePageBuffer(currentPage, page);
+                return (true, rootPage);
+            }
+
+            // Interior page — descend to child
+            FindInteriorChild(page, hdrOff, hdr, rowId, out uint childPage);
+            currentPage = childPage;
+        }
+    }
+
+    /// <summary>
+    /// Updates a record in the table B-tree by deleting the old record and inserting a new one
+    /// with the same rowid. Returns whether the row was found and the (possibly new) root page.
+    /// </summary>
+    public (bool Found, uint RootPage) Update(uint rootPage, long rowId, ReadOnlySpan<byte> newRecordPayload)
+    {
+        var (found, root) = Delete(rootPage, rowId);
+        if (!found) return (false, root);
+        root = Insert(root, rowId, newRecordPayload);
+        return (true, root);
+    }
+
+    /// <summary>
     /// Returns the maximum rowid in the table B-tree, or 0 if the tree is empty.
     /// </summary>
     public long GetMaxRowId(uint rootPage)
@@ -97,6 +141,26 @@ internal sealed class BTreeMutator
     }
 
     // ── Navigation helpers ─────────────────────────────────────────
+
+    /// <summary>
+    /// Binary-search a leaf page for an exact rowid match.
+    /// Returns the cell index and whether it was an exact match.
+    /// </summary>
+    private static (int Index, bool Found) FindLeafCellByRowId(byte[] page, int hdrOff, BTreePageHeader hdr, long rowId)
+    {
+        int lo = 0, hi = hdr.CellCount - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            int cellPtr = hdr.GetCellPointer(page.AsSpan(hdrOff), mid);
+            CellParser.ParseTableLeafCell(page.AsSpan(cellPtr), out _, out long midRowId);
+
+            if (midRowId < rowId) lo = mid + 1;
+            else if (midRowId > rowId) hi = mid - 1;
+            else return (mid, true);
+        }
+        return (lo, false);
+    }
 
     /// <summary>Binary-search a leaf page for the insertion index of <paramref name="rowId"/>.</summary>
     private static int FindLeafInsertionPoint(byte[] page, int hdrOff, BTreePageHeader hdr, long rowId)
@@ -377,7 +441,21 @@ internal sealed class BTreeMutator
         int availableSpace = cellContentStart - cellPtrArrayEnd;
 
         if (availableSpace < requiredSpace)
-            return false;
+        {
+            // Check if defragmentation can recover enough space
+            int totalFree = availableSpace + hdr.FragmentedFreeBytes;
+            if (totalFree >= requiredSpace)
+            {
+                DefragmentPage(pageBuf, hdrOff, hdr);
+                hdr = BTreePageHeader.Parse(pageBuf.AsSpan(hdrOff));
+                cellContentStart = hdr.CellContentOffset == 0 ? _usablePageSize : hdr.CellContentOffset;
+                cellPtrArrayEnd = hdrOff + headerSize + (hdr.CellCount + 1) * 2;
+                availableSpace = cellContentStart - cellPtrArrayEnd;
+            }
+
+            if (availableSpace < requiredSpace)
+                return false;
+        }
 
         // Write cell content at the bottom of the free area
         int newCellOffset = cellContentStart - cellBytes.Length;
@@ -523,6 +601,121 @@ internal sealed class BTreeMutator
             rightChildPage
         );
         BTreePageHeader.Write(span[hdrOff..], hdr);
+    }
+
+    // ── Delete helpers ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Removes the cell at <paramref name="cellIndex"/> from a leaf page.
+    /// Shifts the cell pointer array left and recomputes FragmentedFreeBytes accurately.
+    /// </summary>
+    private void RemoveCellFromPage(byte[] pageBuf, int hdrOff, BTreePageHeader hdr, int cellIndex)
+    {
+        var pageSpan = pageBuf.AsSpan();
+        int headerSize = hdr.HeaderSize;
+        int ptrBase = hdrOff + headerSize;
+
+        // Shift cell pointers left: [cellIndex+1..cellCount-1] → [cellIndex..cellCount-2]
+        for (int i = cellIndex; i < hdr.CellCount - 1; i++)
+        {
+            ushort ptr = BinaryPrimitives.ReadUInt16BigEndian(pageSpan[(ptrBase + (i + 1) * 2)..]);
+            BinaryPrimitives.WriteUInt16BigEndian(pageSpan[(ptrBase + i * 2)..], ptr);
+        }
+
+        // Clear the now-unused last pointer slot
+        BinaryPrimitives.WriteUInt16BigEndian(pageSpan[(ptrBase + (hdr.CellCount - 1) * 2)..], 0);
+
+        int newCellCount = hdr.CellCount - 1;
+
+        if (newCellCount == 0)
+        {
+            // Page is now empty — reset everything
+            var emptyHdr = new BTreePageHeader(
+                hdr.PageType, 0, 0, (ushort)_usablePageSize, 0, hdr.RightChildPage);
+            BTreePageHeader.Write(pageSpan[hdrOff..], emptyHdr);
+            return;
+        }
+
+        // Recompute CellContentOffset (minimum cell pointer) and total cell bytes
+        ushort newCellContentOffset = ushort.MaxValue;
+        int totalCellBytes = 0;
+        for (int i = 0; i < newCellCount; i++)
+        {
+            ushort ptr = BinaryPrimitives.ReadUInt16BigEndian(pageSpan[(ptrBase + i * 2)..]);
+            if (ptr < newCellContentOffset) newCellContentOffset = ptr;
+            totalCellBytes += MeasureCell(pageSpan[ptr..], hdr.IsLeaf);
+        }
+
+        // FragmentedFreeBytes = (cell content area size) - (actual cell bytes)
+        // Cell content area = usablePageSize - CellContentOffset
+        int cellContentAreaSize = _usablePageSize - newCellContentOffset;
+        int newFragmented = cellContentAreaSize - totalCellBytes;
+
+        // If fragmented bytes would overflow byte range, defragment
+        if (newFragmented > 255)
+        {
+            var cells = new List<byte[]>(newCellCount);
+            for (int i = 0; i < newCellCount; i++)
+            {
+                int ptr = BinaryPrimitives.ReadUInt16BigEndian(pageSpan[(ptrBase + i * 2)..]);
+                int len = MeasureCell(pageSpan[ptr..], hdr.IsLeaf);
+                cells.Add(pageSpan.Slice(ptr, len).ToArray());
+            }
+            BuildLeafPage(pageBuf, hdrOff, cells, 0, cells.Count - 1);
+            return;
+        }
+
+        // Write updated header
+        var newHdr = new BTreePageHeader(
+            hdr.PageType,
+            hdr.FirstFreeblockOffset,
+            (ushort)newCellCount,
+            newCellContentOffset,
+            (byte)newFragmented,
+            hdr.RightChildPage
+        );
+        BTreePageHeader.Write(pageSpan[hdrOff..], newHdr);
+    }
+
+    /// <summary>
+    /// Compacts all cells on a page to recover fragmented free space.
+    /// Rewrites cells contiguously from the bottom of the page upward.
+    /// </summary>
+    private void DefragmentPage(byte[] pageBuf, int hdrOff, BTreePageHeader hdr)
+    {
+        var pageSpan = pageBuf.AsSpan();
+        int headerSize = hdr.HeaderSize;
+        int ptrBase = hdrOff + headerSize;
+
+        // Collect all existing cells
+        var cells = new List<(int PtrIndex, byte[] Data)>(hdr.CellCount);
+        for (int i = 0; i < hdr.CellCount; i++)
+        {
+            int ptr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
+            int len = MeasureCell(pageSpan[ptr..], hdr.IsLeaf);
+            cells.Add((i, pageSpan.Slice(ptr, len).ToArray()));
+        }
+
+        // Rewrite cells contiguously from the end of the page
+        int contentEnd = _usablePageSize;
+        for (int i = 0; i < cells.Count; i++)
+        {
+            var cell = cells[i].Data;
+            contentEnd -= cell.Length;
+            cell.CopyTo(pageSpan[contentEnd..]);
+            BinaryPrimitives.WriteUInt16BigEndian(pageSpan[(ptrBase + i * 2)..], (ushort)contentEnd);
+        }
+
+        // Update header: new content offset, zero fragmented bytes
+        var newHdr = new BTreePageHeader(
+            hdr.PageType,
+            0, // no freeblocks after defrag
+            hdr.CellCount,
+            (ushort)contentEnd,
+            0, // zero fragmented bytes
+            hdr.RightChildPage
+        );
+        BTreePageHeader.Write(pageSpan[hdrOff..], newHdr);
     }
 
     // ── I/O helpers ────────────────────────────────────────────────
