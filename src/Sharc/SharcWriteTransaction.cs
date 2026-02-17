@@ -1,9 +1,10 @@
 using Sharc.Core;
+using Sharc.Core.Schema;
 
 namespace Sharc;
 
 /// <summary>
-/// An explicit write transaction. All inserts are buffered until 
+/// An explicit write transaction. All inserts are buffered until
 /// <see cref="Commit"/> is called. On <see cref="Dispose"/> without
 /// commit, changes are rolled back.
 /// </summary>
@@ -28,7 +29,7 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.InsertCore(_innerTx, tableName, values);
+        return SharcWriter.InsertCore(_innerTx, tableName, values, TryGetTableInfo(tableName));
     }
 
     /// <summary>
@@ -50,7 +51,18 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values);
+        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, TryGetTableInfo(tableName));
+    }
+
+    private TableInfo? TryGetTableInfo(string tableName)
+    {
+        var tables = _db.Schema.Tables;
+        for (int i = 0; i < tables.Count; i++)
+        {
+            if (tables[i].Name.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+                return tables[i];
+        }
+        return null;
     }
 
     /// <summary>

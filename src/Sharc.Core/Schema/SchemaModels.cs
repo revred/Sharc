@@ -61,6 +61,15 @@ public sealed class TableInfo
     /// <summary>Whether this is a WITHOUT ROWID table.</summary>
     public required bool IsWithoutRowId { get; init; }
 
+    /// <summary>
+    /// Physical column count on disk. Equals Columns.Count when no merged columns exist.
+    /// Greater than Columns.Count when __hi/__lo pairs are merged into logical GUID columns.
+    /// </summary>
+    public int PhysicalColumnCount { get; internal set; }
+
+    /// <summary>True if any column is a merged column (physical count exceeds logical count).</summary>
+    public bool HasMergedColumns => PhysicalColumnCount > Columns.Count;
+
     private Dictionary<string, int>? _columnMap;
 
     /// <summary>
@@ -92,6 +101,18 @@ public sealed class ColumnInfo
 
     /// <summary>Whether the column has a NOT NULL constraint.</summary>
     public required bool IsNotNull { get; init; }
+
+    /// <summary>Whether the declared type is GUID or UUID, indicating a 16-byte unique identifier.</summary>
+    public bool IsGuidColumn { get; init; }
+
+    /// <summary>
+    /// Physical ordinals of the __hi and __lo columns when this is a merged GUID column.
+    /// Null for regular (non-merged) columns.
+    /// </summary>
+    public int[]? MergedPhysicalOrdinals { get; init; }
+
+    /// <summary>True if this is a merged GUID column backed by two physical Int64 columns.</summary>
+    public bool IsMergedGuidColumn => MergedPhysicalOrdinals is { Length: 2 };
 }
 
 /// <summary>

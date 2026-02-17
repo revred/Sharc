@@ -51,16 +51,19 @@ internal sealed class SchemaReader
                 case "table":
                     if (sql != null)
                     {
-                        var columnInfos = SchemaParser.ParseTableColumns(sql.AsSpan());
-                        tables.Add(new TableInfo
+                        var physicalColumns = SchemaParser.ParseTableColumns(sql.AsSpan());
+                        var (logicalColumns, physicalCount) = SchemaParser.MergeColumnPairs(physicalColumns);
+                        var tableInfo = new TableInfo
                         {
                             Name = name,
                             RootPage = rootPage,
                             Sql = sql,
-                            Columns = columnInfos,
+                            Columns = logicalColumns,
                             IsWithoutRowId = sql.Contains("WITHOUT ROWID",
                                 StringComparison.OrdinalIgnoreCase)
-                        });
+                        };
+                        tableInfo.PhysicalColumnCount = physicalCount;
+                        tables.Add(tableInfo);
                     }
                     break;
 

@@ -229,4 +229,24 @@ public class SerialTypeCodecTests
     {
         Assert.Equal(expected, SerialTypeCodec.IsReal(serialType));
     }
+
+    // --- GUID ---
+
+    [Theory]
+    [InlineData(44, true)]
+    [InlineData(42, false)]
+    [InlineData(46, false)]
+    [InlineData(0, false)]
+    [InlineData(7, false)]
+    public void IsGuid_VariousTypes_ReturnsCorrectly(long serialType, bool expected)
+    {
+        Assert.Equal(expected, SerialTypeCodec.IsGuid(serialType));
+    }
+
+    [Fact]
+    public void GetSerialType_Guid_Returns44()
+    {
+        var value = ColumnValue.FromGuid(Guid.NewGuid());
+        Assert.Equal(44L, SerialTypeCodec.GetSerialType(value));
+    }
 }
