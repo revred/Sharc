@@ -381,22 +381,35 @@ else
             _elapsedMs = sw.Elapsed.TotalMilliseconds;
             StateHasChanged();
 
-            // Transition delay
-            await Task.Delay(activePreset.TransitionMs, token).ConfigureAwait(false);
-            if (token.IsCancellationRequested) break;
+            try
+            {
+                // Transition delay
+                await Task.Delay(activePreset.TransitionMs, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested) break;
 
-            // Run benchmark
-            var scale = GetScaleForSlide(slide);
-            IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
-            var data = await engine.RunSlideAsync(slide, scale, token);
+                // Run benchmark
+                var scale = GetScaleForSlide(slide);
+                IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
+                var data = await engine.RunSlideAsync(slide, scale, token);
 
-            _results[slide.Id] = data;
+                _results[slide.Id] = data;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.Message}");
+            }
+
             _doneSlides.Add(slide.Id);
             _elapsedMs = sw.Elapsed.TotalMilliseconds;
             StateHasChanged();
 
             // Pause delay
-            await Task.Delay(activePreset.PauseMs, token).ConfigureAwait(false);
+            try { await Task.Delay(activePreset.PauseMs, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
         }
 
         sw.Stop();
