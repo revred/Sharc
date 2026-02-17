@@ -33,6 +33,9 @@ public sealed class SharcDataReader : IDisposable
     private readonly int[]? _projection;
     private readonly int _rowidAliasOrdinal;
     private readonly int _columnCount;
+    private readonly int _physicalColumnCount;
+    private readonly Dictionary<int, int[]>? _mergedColumns;
+    private readonly int[]? _physicalOrdinals;
     private ColumnValue[]? _currentRow;
     private ColumnValue[]? _reusableBuffer;
     private bool _disposed;
@@ -97,26 +100,60 @@ public sealed class SharcDataReader : IDisposable
         _concreteFilterNode = filterNode as FilterNode;
         _columnCount = columns.Count;
 
+        // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
+        // When merged columns exist, buffers must be sized to physical column count.
+        _physicalColumnCount = columns.Count;
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].IsMergedGuidColumn)
+            {
+                var mergedOrdinals = columns[i].MergedPhysicalOrdinals!;
+                _mergedColumns ??= new Dictionary<int, int[]>();
+                _mergedColumns[i] = mergedOrdinals;
+                // Compute physical column count from max physical ordinal
+                int maxPhys = Math.Max(mergedOrdinals[0], mergedOrdinals[1]);
+                _physicalColumnCount = Math.Max(_physicalColumnCount, maxPhys + 1);
+            }
+        }
+
+        // Build logical → physical ordinal mapping when merges exist
+        if (_mergedColumns != null)
+        {
+            _physicalOrdinals = new int[columns.Count];
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var phys = columns[i].MergedPhysicalOrdinals;
+                if (phys is { Length: 2 })
+                    _physicalOrdinals[i] = phys[0]; // hi ordinal for non-guid access
+                else if (phys is { Length: 1 })
+                    _physicalOrdinals[i] = phys[0]; // direct physical ordinal
+                else
+                    _physicalOrdinals[i] = i; // fallback (no merge)
+            }
+        }
+
+        int bufferSize = _physicalColumnCount;
+
         // Rent a reusable buffer from ArrayPool — returned in Dispose()
-        _reusableBuffer = ArrayPool<ColumnValue>.Shared.Rent(columns.Count);
+        _reusableBuffer = ArrayPool<ColumnValue>.Shared.Rent(bufferSize);
 
         // Always use lazy decode — parse serial type headers on Read(),
         // decode individual columns only when Get*() is called. This avoids
         // string allocation for columns that are never accessed (e.g. SELECT *
         // where the caller only reads column 0).
-        _serialTypes = ArrayPool<long>.Shared.Rent(columns.Count);
-        _decodedGenerations = ArrayPool<int>.Shared.Rent(columns.Count);
-        _serialTypes.AsSpan(0, columns.Count).Clear();
-        _decodedGenerations.AsSpan(0, columns.Count).Clear();
+        _serialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
+        _decodedGenerations = ArrayPool<int>.Shared.Rent(bufferSize);
+        _serialTypes.AsSpan(0, bufferSize).Clear();
+        _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
         // Pool serial type buffer for byte-level filter evaluation
         if (filterNode != null)
         {
-            _filterSerialTypes = ArrayPool<long>.Shared.Rent(columns.Count);
-            _filterSerialTypes.AsSpan(0, columns.Count).Clear();
+            _filterSerialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
+            _filterSerialTypes.AsSpan(0, bufferSize).Clear();
         }
 
-        // Detect INTEGER PRIMARY KEY (rowid alias) â€” SQLite stores NULL in the record
+        // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
         // for this column; the real value is the b-tree key (rowid).
         _rowidAliasOrdinal = -1;
         for (int i = 0; i < columns.Count; i++)
@@ -124,7 +161,10 @@ public sealed class SharcDataReader : IDisposable
             if (columns[i].IsPrimaryKey &&
                 columns[i].DeclaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase))
             {
-                _rowidAliasOrdinal = columns[i].Ordinal;
+                // Use physical ordinal for rowid alias so it matches buffer indices
+                _rowidAliasOrdinal = _physicalOrdinals != null
+                    ? _physicalOrdinals[i]
+                    : columns[i].Ordinal;
                 break;
             }
         }
@@ -493,13 +533,16 @@ public sealed class SharcDataReader : IDisposable
         if (_currentRow == null)
             throw new InvalidOperationException("No current row. Call Read() first.");
 
-        int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        int logicalOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        int actualOrdinal = _physicalOrdinals != null
+            ? _physicalOrdinals[logicalOrdinal]
+            : logicalOrdinal;
 
         // Fast path: in lazy mode, check serial type directly (no body decode needed)
         if (_lazyMode)
         {
             _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _);
-            // INTEGER PRIMARY KEY stores NULL in record; real value is rowid â€” not actually null
+            // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;
             return _serialTypes![actualOrdinal] == 0;
@@ -526,6 +569,7 @@ public sealed class SharcDataReader : IDisposable
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
             if (actualOrdinal == _rowidAliasOrdinal)
                 return _cursor!.RowId;
             return _recordDecoder!.DecodeInt64Direct(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
@@ -562,6 +606,7 @@ public sealed class SharcDataReader : IDisposable
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
             return _recordDecoder!.DecodeDoubleDirect(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
         }
         return GetColumnValue(ordinal).AsDouble();
@@ -585,6 +630,7 @@ public sealed class SharcDataReader : IDisposable
         if (_lazyMode)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+            if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
             return _recordDecoder!.DecodeStringDirect(_cursor!.Payload, actualOrdinal, _serialTypes!, _currentBodyOffset);
         }
         return GetColumnValue(ordinal).AsString();
@@ -734,11 +780,16 @@ public sealed class SharcDataReader : IDisposable
         if (_currentRow == null)
             throw new InvalidOperationException("No current row. Call Read() first.");
 
-        int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        int logicalOrdinal = _projection != null ? _projection[ordinal] : ordinal;
 
-        if (actualOrdinal < 0 || actualOrdinal >= _columnCount)
+        if (logicalOrdinal < 0 || logicalOrdinal >= _columnCount)
             throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal,
                 "Column ordinal is out of range.");
+
+        // Map logical ordinal to physical ordinal when merged columns shift positions
+        int actualOrdinal = _physicalOrdinals != null
+            ? _physicalOrdinals[logicalOrdinal]
+            : logicalOrdinal;
 
         // Lazy decode: decode this column on first access (projection path only)
         if (_lazyMode && _decodedGenerations![actualOrdinal] != _decodedGeneration)
@@ -772,6 +823,36 @@ public sealed class SharcDataReader : IDisposable
             return System.Text.Encoding.UTF8.GetBytes(CurrentMaterializedRow[ordinal].AsString());
 
         return GetColumnValue(ordinal).AsBytes().Span;
+    }
+
+    /// <summary>
+    /// Gets a column value as a GUID.
+    /// Supports both BLOB(16) storage (serial type 44) and merged column storage
+    /// (two Int64 columns named __hi/__lo combined into a single logical GUID).
+    /// </summary>
+    public Guid GetGuid(int ordinal)
+    {
+        if (_dedupUnderlying != null)
+            return _dedupUnderlying.GetGuid(ordinal);
+        if (_concatFirst != null)
+            return ActiveConcatReader.GetGuid(ordinal);
+
+        if (IsQueryValueMode)
+            return Core.Primitives.GuidCodec.Decode(CurrentMaterializedRow[ordinal].AsBlob());
+
+        // Merged column path: read two physical Int64 columns, combine into GUID.
+        // Zero-alloc: DecodeInt64Direct reads directly from the page span.
+        if (_mergedColumns != null && _mergedColumns.TryGetValue(ordinal, out var phys))
+        {
+            long hi = _recordDecoder!.DecodeInt64Direct(
+                _cursor!.Payload, phys[0], _serialTypes!, _currentBodyOffset);
+            long lo = _recordDecoder!.DecodeInt64Direct(
+                _cursor!.Payload, phys[1], _serialTypes!, _currentBodyOffset);
+            return Core.Primitives.GuidCodec.FromInt64Pair(hi, lo);
+        }
+
+        // BLOB(16) path: standard GUID storage
+        return Core.Primitives.GuidCodec.Decode(GetColumnValue(ordinal).AsBytes().Span);
     }
 
     // ─── Fingerprinting ──────────────────────────────────────────

@@ -90,4 +90,61 @@ public class ColumnValueTests
         Assert.Equal(9L, val.SerialType);
         Assert.Equal(1L, val.AsInt64());
     }
+
+    // --- GUID ---
+
+    [Fact]
+    public void Guid_StoresAndRetrievesValue()
+    {
+        var guid = Guid.NewGuid();
+        var val = ColumnValue.FromGuid(guid);
+        Assert.False(val.IsNull);
+        Assert.Equal(ColumnStorageClass.UniqueId, val.StorageClass);
+        Assert.Equal(guid, val.AsGuid());
+    }
+
+    [Fact]
+    public void Guid_SerialType_Is44()
+    {
+        var val = ColumnValue.FromGuid(Guid.NewGuid());
+        Assert.Equal(44L, val.SerialType);
+    }
+
+    [Fact]
+    public void Guid_EmptyGuid_RoundTrips()
+    {
+        var val = ColumnValue.FromGuid(Guid.Empty);
+        Assert.Equal(Guid.Empty, val.AsGuid());
+    }
+
+    [Fact]
+    public void Guid_AsBytes_Returns16Bytes()
+    {
+        var val = ColumnValue.FromGuid(Guid.NewGuid());
+        Assert.Equal(16, val.AsBytes().Length);
+    }
+
+    // --- SplitGuidForMerge ---
+
+    [Fact]
+    public void SplitGuidForMerge_KnownGuid_MatchesToInt64Pair()
+    {
+        var guid = new Guid("01020304-0506-0708-090a-0b0c0d0e0f10");
+        var (hi, lo) = ColumnValue.SplitGuidForMerge(guid);
+
+        Assert.Equal(ColumnStorageClass.Integral, hi.StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, lo.StorageClass);
+        Assert.Equal(6L, hi.SerialType); // 64-bit int
+        Assert.Equal(6L, lo.SerialType); // 64-bit int
+        Assert.Equal(0x0102030405060708L, hi.AsInt64());
+        Assert.Equal(0x090a0b0c0d0e0f10L, lo.AsInt64());
+    }
+
+    [Fact]
+    public void SplitGuidForMerge_EmptyGuid_ReturnsBothZero()
+    {
+        var (hi, lo) = ColumnValue.SplitGuidForMerge(Guid.Empty);
+        Assert.Equal(0L, hi.AsInt64());
+        Assert.Equal(0L, lo.AsInt64());
+    }
 }

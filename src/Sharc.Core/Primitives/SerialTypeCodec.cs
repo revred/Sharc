@@ -86,6 +86,12 @@ public static class SerialTypeCodec
     public static bool IsBlob(long serialType) => serialType >= 12 && (serialType & 1) == 0;
 
     /// <summary>
+    /// Returns true if the serial type represents a GUID (16-byte BLOB, serial type 44).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsGuid(long serialType) => serialType == GuidCodec.GuidSerialType;
+
+    /// <summary>
     /// Determines the optimal SQLite serial type for a given column value.
     /// This is the write-side inverse of <see cref="GetContentSize"/> and <see cref="GetStorageClass"/>.
     /// </summary>
@@ -120,6 +126,9 @@ public static class SerialTypeCodec
 
             case ColumnStorageClass.Blob:
                 return 2L * value.AsBytes().Length + 12;
+
+            case ColumnStorageClass.UniqueId:
+                return GuidCodec.GuidSerialType; // 44 = BLOB of 16 bytes
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(value),
