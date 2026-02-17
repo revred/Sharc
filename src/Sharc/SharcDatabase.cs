@@ -169,10 +169,6 @@ public sealed class SharcDatabase : IDisposable
     /// Lazily loads the schema on first access. Avoids ~15-28 KB allocation on
     /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
     /// </summary>
-    /// <summary>
-    /// Lazily loads the schema on first access. Avoids ~15-28 KB allocation on
-    /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
-    /// </summary>
     private SharcSchema GetSchema() =>
         _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
         
