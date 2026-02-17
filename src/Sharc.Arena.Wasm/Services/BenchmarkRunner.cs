@@ -23,7 +23,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     private readonly SqliteEngine _sqliteEngine;
     private readonly IndexedDbEngine _indexedDbEngine;
     private readonly ReferenceEngine _referenceEngine;
-    private readonly DataGenerator _dataGenerator = new();
+    private readonly DataGenerator _dataGenerator;
 
     private byte[]? _dbBytes;
     private int _lastUserCount;
@@ -33,12 +33,14 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         SharcEngine sharcEngine,
         SqliteEngine sqliteEngine,
         IndexedDbEngine indexedDbEngine,
-        ReferenceEngine referenceEngine)
+        ReferenceEngine referenceEngine,
+        DataGenerator dataGenerator)
     {
         _sharcEngine = sharcEngine;
         _sqliteEngine = sqliteEngine;
         _indexedDbEngine = indexedDbEngine;
         _referenceEngine = referenceEngine;
+        _dataGenerator = dataGenerator;
     }
 
     public async Task<IReadOnlyDictionary<string, EngineBaseResult>> RunSlideAsync(
