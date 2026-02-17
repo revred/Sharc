@@ -67,6 +67,7 @@ public sealed class SharcDataReader : IDisposable
 
     // Unboxed materialized mode — QueryValue stores int/double inline without boxing
     private readonly Query.QueryValue[][]? _queryValueRows;
+    private readonly List<Query.QueryValue[]>? _queryValueList;
 
     // Concatenating mode — streams two readers sequentially for UNION ALL
     private readonly SharcDataReader? _concatFirst;
@@ -143,6 +144,18 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Creates an unboxed materialized reader from a List of <see cref="Query.QueryValue"/> rows.
+    /// Eliminates the <c>.ToArray()</c> copy that the array constructor requires.
+    /// </summary>
+    internal SharcDataReader(List<Query.QueryValue[]> rows, string[] columnNames)
+    {
+        _queryValueList = rows;
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
     /// Creates a concatenating reader that streams from <paramref name="first"/> then
     /// <paramref name="second"/>. Used for zero-materialization UNION ALL.
     /// </summary>
@@ -180,7 +193,15 @@ public sealed class SharcDataReader : IDisposable
         ?? _columns!.Count;
 
     /// <summary>Returns true when the reader is in unboxed <see cref="Query.QueryValue"/> mode.</summary>
-    private bool IsQueryValueMode => _queryValueRows != null;
+    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null;
+
+    /// <summary>Gets the current row in materialized mode (array or list).</summary>
+    private Query.QueryValue[] CurrentMaterializedRow
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _queryValueRows != null ? _queryValueRows[_materializedIndex]
+            : _queryValueList![_materializedIndex];
+    }
 
     /// <summary>Returns true when the reader is in concatenating mode (streaming UNION ALL).</summary>
     private bool IsConcatMode => _concatFirst != null;
@@ -358,11 +379,16 @@ public sealed class SharcDataReader : IDisposable
             return _concatSecond!.Read();
         }
 
-        // Unboxed materialized mode: iterate QueryValue rows
+        // Unboxed materialized mode: iterate QueryValue rows (array or list)
         if (_queryValueRows != null)
         {
             _materializedIndex++;
             return _materializedIndex < _queryValueRows.Length;
+        }
+        if (_queryValueList != null)
+        {
+            _materializedIndex++;
+            return _materializedIndex < _queryValueList.Count;
         }
 
         while (_cursor!.MoveNext())
@@ -461,8 +487,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.IsNull(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].IsNull;
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].IsNull;
 
         if (_currentRow == null)
             throw new InvalidOperationException("No current row. Call Read() first.");
@@ -493,8 +519,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetInt64(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].AsInt64();
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].AsInt64();
 
         // Fast path: decode directly from page span (skip ColumnValue construction)
         if (_lazyMode)
@@ -526,9 +552,9 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetDouble(ordinal);
 
-        if (_queryValueRows != null)
+        if (IsQueryValueMode)
         {
-            var qv = _queryValueRows[_materializedIndex][ordinal];
+            var qv = CurrentMaterializedRow[ordinal];
             return qv.Type == Query.QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
         }
 
@@ -552,8 +578,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetString(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].AsString();
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].AsString();
 
         // Fast path: decode UTF-8 directly from page span (eliminates intermediate byte[] allocation)
         if (_lazyMode)
@@ -574,8 +600,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetBlob(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].AsBlob();
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].AsBlob();
 
         return GetColumnValue(ordinal).AsBytes().ToArray();
     }
@@ -591,8 +617,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetBlobSpan(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].AsBlob();
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].AsBlob();
 
         return GetColumnValue(ordinal).AsBytes().Span;
     }
@@ -652,9 +678,9 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetColumnType(ordinal);
 
-        if (_queryValueRows != null)
+        if (IsQueryValueMode)
         {
-            return _queryValueRows[_materializedIndex][ordinal].Type switch
+            return CurrentMaterializedRow[ordinal].Type switch
             {
                 Query.QueryValueType.Null => SharcColumnType.Null,
                 Query.QueryValueType.Int64 => SharcColumnType.Integral,
@@ -688,8 +714,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetValue(ordinal);
 
-        if (_queryValueRows != null)
-            return _queryValueRows[_materializedIndex][ordinal].ToObject();
+        if (IsQueryValueMode)
+            return CurrentMaterializedRow[ordinal].ToObject();
 
         var val = GetColumnValue(ordinal);
         return val.StorageClass switch
@@ -742,8 +768,8 @@ public sealed class SharcDataReader : IDisposable
         if (_concatFirst != null)
             return ActiveConcatReader.GetUtf8Span(ordinal);
 
-        if (_queryValueRows != null)
-            return System.Text.Encoding.UTF8.GetBytes(_queryValueRows[_materializedIndex][ordinal].AsString());
+        if (IsQueryValueMode)
+            return System.Text.Encoding.UTF8.GetBytes(CurrentMaterializedRow[ordinal].AsString());
 
         return GetColumnValue(ordinal).AsBytes().Span;
     }
@@ -770,7 +796,7 @@ public sealed class SharcDataReader : IDisposable
             return ActiveConcatReader.GetRowFingerprint();
 
         // Materialized mode: hash from QueryValue[]
-        if (_queryValueRows != null)
+        if (IsQueryValueMode)
             return GetMaterializedRowFingerprint();
 
         // Cursor mode: hash raw payload bytes (zero string allocation)
@@ -843,7 +869,7 @@ public sealed class SharcDataReader : IDisposable
 
     private Fingerprint128 GetMaterializedRowFingerprint()
     {
-        var row = _queryValueRows![_materializedIndex];
+        var row = CurrentMaterializedRow;
         var hasher = new Fnv1aHasher();
         for (int i = 0; i < _columnCount && i < row.Length; i++)
         {
@@ -881,9 +907,9 @@ public sealed class SharcDataReader : IDisposable
         if (_dedupUnderlying != null) return _dedupUnderlying.GetColumnFingerprint(ordinal);
         if (_concatFirst != null) return ActiveConcatReader.GetColumnFingerprint(ordinal);
 
-        if (_queryValueRows != null)
+        if (IsQueryValueMode)
         {
-            ref var val = ref _queryValueRows![_materializedIndex][ordinal];
+            ref var val = ref CurrentMaterializedRow[ordinal];
             var h = new Fnv1aHasher();
             switch (val.Type)
             {

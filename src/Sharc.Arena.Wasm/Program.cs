@@ -47,5 +47,8 @@ public partial class Program
 
         // Query pipeline: reference data for 13-query comparison
         builder.Services.AddScoped<QueryPipelineEngine>();
+
+        // SQL Playground: live Sharc vs SQLite query comparison
+        builder.Services.AddScoped<SqlPlaygroundEngine>();
     }
 }

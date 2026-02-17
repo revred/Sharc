@@ -23,4 +23,17 @@ public sealed class QueryPlan
 
     /// <summary>True if the query has Cote definitions.</summary>
     public bool HasCotes => Cotes is { Count: > 0 };
+
+    /// <summary>
+    /// Cached resolved intent for simple Cote queries (Cote → SELECT WHERE).
+    /// Set on first execution so the same object reference is reused,
+    /// enabling reader-info cache hits in <c>CreateReaderFromIntent</c>.
+    /// </summary>
+    internal QueryIntent? ResolvedSimple { get; set; }
+
+    /// <summary>
+    /// Cached resolved compound plan for Cote + compound queries.
+    /// Set on first execution so streaming paths reuse cached reader info.
+    /// </summary>
+    internal CompoundQueryPlan? ResolvedCompound { get; set; }
 }

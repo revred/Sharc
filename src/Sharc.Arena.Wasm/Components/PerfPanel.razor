@@ -1,0 +1,56 @@
+@* Side-by-side Sharc vs SQLite performance comparison panel *@
+
+<div class="playground-perf">
+    <div class="playground-perf-card @(Result.Winner == "sharc" ? "winner" : "")" style="border-color: var(--sharc);">
+        <div class="playground-perf-engine">&#x1F988; Sharc</div>
+        @if (Result.SharcError is not null)
+        {
+            <div class="playground-error">@Result.SharcError</div>
+        }
+        else
+        {
+            <div class="playground-perf-time" style="color: var(--sharc)">@FormatTime(Result.SharcTimeUs)</div>
+            <div class="playground-perf-alloc">@Result.SharcAlloc</div>
+            <div class="playground-perf-rows">@Result.SharcRowCount rows</div>
+        }
+    </div>
+
+    <div class="playground-perf-card @(Result.Winner == "sqlite" ? "winner" : "")" style="border-color: var(--sqlite);">
+        <div class="playground-perf-engine">&#x26A1; SQLite</div>
+        @if (Result.SqliteError is not null)
+        {
+            <div class="playground-error">@Result.SqliteError</div>
+        }
+        else
+        {
+            <div class="playground-perf-time" style="color: var(--sqlite)">@FormatTime(Result.SqliteTimeUs)</div>
+            <div class="playground-perf-alloc">@Result.SqliteAlloc</div>
+            <div class="playground-perf-rows">@Result.SqliteRowCount rows</div>
+        }
+    </div>
+</div>
+
+@if (Result.SharcError is null && Result.SqliteError is null && Result.Speedup > 1.05)
+{
+    <div class="playground-winner" style="color: var(--@Result.Winner)">
+        @if (Result.Winner == "sharc")
+        {
+            <span>&#x1F988; Sharc @Result.Speedup.ToString("F1")x faster</span>
+        }
+        else
+        {
+            <span>&#x26A1; SQLite @Result.Speedup.ToString("F1")x faster</span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public required PlaygroundResult Result { get; set; }
+
+    private static string FormatTime(double us)
+    {
+        if (us >= 1000) return $"{us / 1000.0:F1} ms";
+        if (us < 1) return $"{us * 1000:F0} ns";
+        return $"{us:F0} \u03BCs";
+    }
+}

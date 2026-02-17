@@ -161,19 +161,21 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 
 | Category | Operation | Sharc | SQLite | Speedup | Sharc Alloc |
 |:---|:---|---:|---:|:---:|---:|
-| **Simple** | `SELECT * FROM t` (2.5K rows) | **64 us** | 586 us | **9.2x** | 568 B |
-| **Filtered** | `SELECT WHERE age > 30` | **193 us** | 802 us | **4.1x** | 98 KB |
-| **Medium** | `WHERE + ORDER BY + LIMIT 100` | **434 us** | 580 us | **1.3x** | 424 KB |
-| **Aggregate** | `GROUP BY + COUNT + AVG` | **353 us** | 475 us | **1.3x** | 5.3 KB |
-| **Compound** | `UNION ALL` (2x2.5K rows) | **446 us** | 2,098 us | **4.7x** | 415 KB |
-| | `UNION` (deduplicated) | **787 us** | 1,668 us | **2.1x** | 1.4 KB |
-| | `INTERSECT` | **710 us** | 1,183 us | **1.7x** | 1.4 KB |
-| | `EXCEPT` | **748 us** | 1,231 us | **1.6x** | 1.4 KB |
-| | `3-way UNION ALL` | **279 us** | 1,225 us | **4.4x** | 2.3 KB |
-| **Cote** | `WITH ... AS SELECT WHERE` | **331 us** | 349 us | **1.05x** | 309 KB |
-| **Parameterized** | `WHERE $param AND $param` | **179 us** | 591 us | **3.3x** | 81 KB |
+| **Simple** | `SELECT * FROM t` (2.5K rows) | **85 us** | 783 us | **9.2x** | 576 B |
+| **Filtered** | `SELECT WHERE age > 30` | **240 us** | 1,181 us | **4.9x** | 98 KB |
+| **Medium** | `WHERE + ORDER BY + LIMIT 100` | **309 us** | 339 us | **1.1x** | 42 KB |
+| **Aggregate** | `GROUP BY + COUNT + AVG` | **444 us** | 630 us | **1.4x** | 5.3 KB |
+| **Compound** | `UNION ALL` (2x2.5K rows) | **583 us** | 3,155 us | **5.4x** | 415 KB |
+| | `UNION` (deduplicated) | **897 us** | 2,471 us | **2.8x** | 1.6 KB |
+| | `INTERSECT` | **862 us** | 1,763 us | **2.0x** | 1.4 KB |
+| | `EXCEPT` | **879 us** | 1,499 us | **1.7x** | 1.4 KB |
+| | `UNION ALL + ORDER BY + LIMIT` | **530 us** | 512 us | **~1x** | 32 KB |
+| | `3-way UNION ALL` | **344 us** | 1,684 us | **4.9x** | 2.3 KB |
+| **Cote** | `WITH ... AS SELECT WHERE` | **150 us** | 461 us | **3.1x** | 808 B |
+| | `Cote + UNION ALL` | **273 us** | 972 us | **3.6x** | 1.4 KB |
+| **Parameterized** | `WHERE $param AND $param` | **223 us** | 819 us | **3.7x** | 81 KB |
 
-> **Sharc wins every benchmark.** Key optimizations: lazy column decode (568 B for full-table scan), predicate pushdown, filter compilation caching, query plan caching, streaming 3-way UNION ALL, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
+> **Sharc wins or ties every benchmark.** Key optimizations: lazy column decode (576 B for full-table scan), cached Cote intent resolution with inlined filters (808 B, 3.1x faster), predicate pushdown, filter compilation caching, query plan + intent caching, streaming 3-way UNION ALL, JIT-specialized struct comparer for TopN heap, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
 
 ---
 
@@ -223,7 +225,7 @@ BenchmarkDotNet runs 15 iterations with 8 warmups per benchmark (DefaultJob), re
 
 **QueryPlanCache advantage:** Sharc caches compiled query plans in a `ConcurrentDictionary` (`QueryPlanCache`). After BenchmarkDotNet's warmup iterations, subsequent iterations skip SQL parsing entirely. The SQLite benchmarks create a `new SqliteCommand` and set `CommandText` per iteration — re-parsing each time. In production, SQLite typically uses pre-prepared statements which would narrow the gap on parse overhead. The core engine benchmarks (`CreateReader`) bypass the query pipeline entirely, so this advantage does not apply to those numbers.
 
-**UNION ALL win is architectural:** Sharc's 4.7x advantage on `UNION ALL` comes from avoiding the P/Invoke boundary — both tables are scanned in managed memory and concatenated without crossing to native code. This is a legitimate in-process advantage, specific to the "multiple full table scans" pattern.
+**UNION ALL win is architectural:** Sharc's 5.4x advantage on `UNION ALL` comes from avoiding the P/Invoke boundary — both tables are scanned in managed memory and concatenated without crossing to native code. This is a legitimate in-process advantage, specific to the "multiple full table scans" pattern.
 
 **Memory reporting:** SQLite's managed allocation numbers (688 B, 744 B) reflect only the .NET-side marshaling cost. SQLite's native C allocations (query plans, sort buffers, hash tables) are invisible to BenchmarkDotNet's `MemoryDiagnoser`. Sharc's numbers reflect total allocation since all work happens in managed code.
 

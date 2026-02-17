@@ -11,20 +11,28 @@ public class TopNHeapTests
     private static QueryValue[] Row(long val) => [QueryValue.FromInt64(val)];
     private static QueryValue[] Row(long a, string b) => [QueryValue.FromInt64(a), QueryValue.FromString(b)];
 
+    /// <summary>Adapts a Comparison delegate to IComparer for TopNHeap's generic parameter.</summary>
+    private readonly struct DelegateComparer : IComparer<QueryValue[]>
+    {
+        private readonly Comparison<QueryValue[]> _cmp;
+        public DelegateComparer(Comparison<QueryValue[]> cmp) => _cmp = cmp;
+        public int Compare(QueryValue[]? a, QueryValue[]? b) => _cmp(a!, b!);
+    }
+
     // Ascending comparison: "worst" = largest (so root holds the max, evicted first)
-    private static int AscWorstFirst(QueryValue[] a, QueryValue[] b) =>
-        QueryPostProcessor.CompareValues(a[0], b[0]);
+    private static readonly DelegateComparer AscWorstFirst = new(
+        (a, b) => QueryPostProcessor.CompareValues(a[0], b[0]));
 
     // Descending comparison: "worst" = smallest
-    private static int DescWorstFirst(QueryValue[] a, QueryValue[] b) =>
-        QueryPostProcessor.CompareValues(b[0], a[0]);
+    private static readonly DelegateComparer DescWorstFirst = new(
+        (a, b) => QueryPostProcessor.CompareValues(b[0], a[0]));
 
     // ─── Basic insertion ──────────────────────────────────────────
 
     [Fact]
     public void TryInsert_LessThanCapacity_AllRetained()
     {
-        var heap = new TopNHeap(5, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(5, AscWorstFirst);
         heap.TryInsert(Row(3));
         heap.TryInsert(Row(1));
         heap.TryInsert(Row(2));
@@ -37,7 +45,7 @@ public class TopNHeapTests
     [Fact]
     public void TryInsert_ExactlyCapacity_AllRetained()
     {
-        var heap = new TopNHeap(3, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, AscWorstFirst);
         heap.TryInsert(Row(30));
         heap.TryInsert(Row(10));
         heap.TryInsert(Row(20));
@@ -48,7 +56,7 @@ public class TopNHeapTests
     [Fact]
     public void TryInsert_MoreThanCapacity_EvictsWorst()
     {
-        var heap = new TopNHeap(3, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, AscWorstFirst);
         heap.TryInsert(Row(50));
         heap.TryInsert(Row(30));
         heap.TryInsert(Row(10));
@@ -68,7 +76,7 @@ public class TopNHeapTests
     [Fact]
     public void ExtractSorted_ReturnsAscendingOrder()
     {
-        var heap = new TopNHeap(5, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(5, AscWorstFirst);
         heap.TryInsert(Row(5));
         heap.TryInsert(Row(3));
         heap.TryInsert(Row(1));
@@ -84,7 +92,7 @@ public class TopNHeapTests
     [Fact]
     public void ExtractSorted_WithEviction_ReturnsAscendingOrder()
     {
-        var heap = new TopNHeap(3, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, AscWorstFirst);
         for (long i = 10; i >= 1; i--)
             heap.TryInsert(Row(i));
 
@@ -100,7 +108,7 @@ public class TopNHeapTests
     [Fact]
     public void DescendingSort_KeepsLargest()
     {
-        var heap = new TopNHeap(3, DescWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, DescWorstFirst);
         heap.TryInsert(Row(1));
         heap.TryInsert(Row(5));
         heap.TryInsert(Row(3));
@@ -121,14 +129,14 @@ public class TopNHeapTests
     public void MultiColumnSort_CorrectOrder()
     {
         // Sort by col0 ASC, col1 ASC
-        static int Cmp(QueryValue[] a, QueryValue[] b)
+        var cmp = new DelegateComparer((a, b) =>
         {
             int c = QueryPostProcessor.CompareValues(a[0], b[0]);
             if (c != 0) return c;
             return QueryPostProcessor.CompareValues(a[1], b[1]);
-        }
+        });
 
-        var heap = new TopNHeap(3, Cmp);
+        var heap = new TopNHeap<DelegateComparer>(3, cmp);
         heap.TryInsert(Row(2, "b"));
         heap.TryInsert(Row(1, "z"));
         heap.TryInsert(Row(1, "a"));
@@ -150,7 +158,7 @@ public class TopNHeapTests
     [Fact]
     public void NullValues_SortLast()
     {
-        var heap = new TopNHeap(3, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, AscWorstFirst);
         heap.TryInsert([QueryValue.Null]);
         heap.TryInsert(Row(1));
         heap.TryInsert(Row(2));
@@ -170,7 +178,7 @@ public class TopNHeapTests
     [Fact]
     public void SingleElement_Works()
     {
-        var heap = new TopNHeap(1, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(1, AscWorstFirst);
         heap.TryInsert(Row(5));
         heap.TryInsert(Row(3));
         heap.TryInsert(Row(1));
@@ -183,7 +191,7 @@ public class TopNHeapTests
     [Fact]
     public void DuplicateValues_AllRetained()
     {
-        var heap = new TopNHeap(3, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(3, AscWorstFirst);
         heap.TryInsert(Row(1));
         heap.TryInsert(Row(1));
         heap.TryInsert(Row(1));
@@ -199,7 +207,7 @@ public class TopNHeapTests
     [Fact]
     public void EmptyHeap_ExtractSorted_ReturnsEmpty()
     {
-        var heap = new TopNHeap(5, AscWorstFirst);
+        var heap = new TopNHeap<DelegateComparer>(5, AscWorstFirst);
         var sorted = heap.ExtractSorted();
         Assert.Empty(sorted);
     }
