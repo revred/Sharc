@@ -505,24 +505,28 @@ public sealed class SharcEngine : IDisposable
     {
         if (_graph == null) return (0, 0);
 
-        // Hop 1: edges from startKey using Index Scan (O(log N + M))
-        var hop1Targets = new HashSet<long>();
-        foreach (var edge in _graph.GetEdges(new NodeKey(startKey)))
+        // Usage of the library's zero-alloc traversal engine
+        var policy = new TraversalPolicy
         {
-            hop1Targets.Add(edge.TargetKey.Value);
+            Direction = TraversalDirection.Outgoing,
+            MaxDepth = 2,
+            IncludeData = false, // We only need counts
+            IncludePaths = false
+        };
+
+        var result = _graph.Traverse(new NodeKey(startKey), policy);
+        
+        // Count hops from the result (excluding start node at depth 0)
+        int hop1 = 0;
+        int hop2 = 0;
+
+        foreach (var node in result.Nodes)
+        {
+            if (node.Depth == 1) hop1++;
+            else if (node.Depth == 2) hop2++;
         }
 
-        // Hop 2: edges from each hop-1 target
-        var hop2Count = 0;
-        foreach (var target in hop1Targets)
-        {
-            foreach (var edge in _graph.GetEdges(new NodeKey(target)))
-            {
-                hop2Count++;
-            }
-        }
-
-        return (hop1Targets.Count, hop2Count);
+        return (hop1, hop2);
     }
 
     public EngineBaseResult RunGcPressure(double scale)

@@ -31,7 +31,8 @@ public class EndToEndTests
         using var db = SharcDatabase.OpenMemory(data);
 
         Assert.NotNull(db.Schema);
-        Assert.Empty(db.Schema.Tables);
+        Assert.Single(db.Schema.Tables);
+        Assert.Equal("sqlite_master", db.Schema.Tables[0].Name);
     }
 
     // --- Simple Table: users ---
@@ -42,8 +43,9 @@ public class EndToEndTests
         var data = TestDatabaseFactory.CreateUsersDatabase();
         using var db = SharcDatabase.OpenMemory(data);
 
-        Assert.Single(db.Schema.Tables);
-        Assert.Equal("users", db.Schema.Tables[0].Name);
+        Assert.Equal(2, db.Schema.Tables.Count);
+        Assert.Contains(db.Schema.Tables, t => t.Name == "users");
+        Assert.Equal("users", db.Schema.Tables[1].Name);
     }
 
     [Fact]
@@ -52,7 +54,7 @@ public class EndToEndTests
         var data = TestDatabaseFactory.CreateUsersDatabase();
         using var db = SharcDatabase.OpenMemory(data);
 
-        var table = db.Schema.Tables[0];
+        var table = db.Schema.GetTable("users");
         var colNames = table.Columns.Select(c => c.Name).ToList();
 
         Assert.Equal(5, table.Columns.Count);
@@ -231,7 +233,7 @@ public class EndToEndTests
 
         var tableNames = db.Schema.Tables.Select(t => t.Name).OrderBy(n => n).ToList();
 
-        Assert.Equal(5, db.Schema.Tables.Count);
+        Assert.Equal(6, db.Schema.Tables.Count);
         Assert.Contains("products", tableNames);
         Assert.Contains("orders", tableNames);
         Assert.Contains("customers", tableNames);

@@ -362,6 +362,12 @@ internal sealed class BTreeMutator : IDisposable
             // Now 'pageNum' (Root) can be overwritten as the new Interior Root.
             var rootBuf = RentPageBuffer();
 
+            // CRITICAL: If we are splitting the root on Page 1, we MUST preserve the 100-byte database header.
+            if (pageNum == 1)
+            {
+                pageBuf.AsSpan(0, SQLiteLayout.DatabaseHeaderSize).CopyTo(rootBuf);
+            }
+
             // Build interior cell: leftChild=newLeftPage, rowId=medianRowId
             Span<byte> interiorCell = stackalloc byte[16]; // max interior cell size
             int interiorSize = CellBuilder.BuildTableInteriorCell(newLeftPage, medianRowId, interiorCell);
@@ -561,7 +567,8 @@ internal sealed class BTreeMutator : IDisposable
     private void BuildLeafPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, List<CellRef> refs, int from, int to)
     {
         var span = pageBuf.AsSpan(0, _source.PageSize);
-        span.Clear();
+        // Clear only the B-Tree portion of the page to preserve any headers (e.g. on Page 1)
+        span[hdrOff..].Clear();
 
         int cellCount = to - from + 1;
         if (cellCount <= 0) cellCount = 0;
@@ -593,7 +600,8 @@ internal sealed class BTreeMutator : IDisposable
         int from, int to, uint rightChildPage)
     {
         var span = pageBuf.AsSpan(0, _source.PageSize);
-        span.Clear();
+        // Clear only the B-Tree portion of the page to preserve any headers (e.g. on Page 1)
+        span[hdrOff..].Clear();
 
         int cellCount = to - from + 1;
         if (cellCount <= 0) cellCount = 0;
@@ -781,7 +789,7 @@ internal sealed class BTreeMutator : IDisposable
 
     private uint _nextAllocPage;
 
-    private uint AllocateNewPage()
+    internal uint AllocateNewPage()
     {
         // Try reusing a free page from the freelist first
         uint page = _freePageAllocator?.Invoke() ?? 0;

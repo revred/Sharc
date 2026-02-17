@@ -33,6 +33,7 @@ internal sealed class ConceptStore
     private int _colSync = -1;
     private int _colUpdated = -1;
     private int _colTokens = -1;
+    private int _colAlias = -1;
 
     // Persistent cursors for reuse
     private IIndexBTreeCursor? _reusableIndexCursor;
@@ -66,6 +67,7 @@ internal sealed class ConceptStore
         _colSync = _schema.NodeSyncColumn != null ? GetOrdinal(table, _schema.NodeSyncColumn) : -1;
         _colUpdated = _schema.NodeUpdatedColumn != null ? GetOrdinal(table, _schema.NodeUpdatedColumn) : -1;
         _colTokens = _schema.NodeTokensColumn != null ? GetOrdinal(table, _schema.NodeTokensColumn) : -1;
+        _colAlias = _schema.NodeAliasColumn != null ? GetOrdinal(table, _schema.NodeAliasColumn) : -1;
 
         // Key Index (Integer based)
         var keyIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
@@ -195,7 +197,8 @@ internal sealed class ConceptStore
             CVN = _colCvn >= 0 && _colCvn < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colCvn, _serialsBuffer, bodyOffset) : 0,
             LVN = _colLvn >= 0 && _colLvn < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colLvn, _serialsBuffer, bodyOffset) : 0,
             SyncStatus = _colSync >= 0 && _colSync < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colSync, _serialsBuffer, bodyOffset) : 0,
-            Tokens = _colTokens >= 0 && _colTokens < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colTokens, _serialsBuffer, bodyOffset) : 0
+            Tokens = _colTokens >= 0 && _colTokens < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colTokens, _serialsBuffer, bodyOffset) : 0,
+            Alias = (_colAlias >= 0 && _colAlias < _columnCount && _serialsBuffer[_colAlias] != 0) ? _decoder.DecodeStringDirect(payload, _colAlias, _serialsBuffer, bodyOffset) : null
         };
         
         return result;

@@ -396,6 +396,7 @@ public sealed class SharcWriter : IDisposable
         var tableRows = new List<(TableInfo Table, List<byte[]> Records)>();
         foreach (var table in schema.Tables)
         {
+            if (table.Name.Equals("sqlite_master", StringComparison.OrdinalIgnoreCase)) continue;
             var records = new List<byte[]>();
             using var cursor = new BTreeCursor(_db.PageSource, (uint)table.RootPage, usableSize);
             while (cursor.MoveNext())

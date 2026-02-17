@@ -42,11 +42,14 @@ public readonly record struct GraphRecord
     /// <summary>Estimated token count (for CSE budgeting).</summary>
     public int Tokens { get; init; }
 
+    /// <summary>Alternative identifier (e.g., username, slug).</summary>
+    public string? Alias { get; init; }
+
     /// <summary>
     /// Creates a new GraphRecord.
     /// </summary>
     public GraphRecord(RecordId id, NodeKey key, int typeId, string? jsonData = null, 
-        DateTimeOffset? createdAt = null, DateTimeOffset? updatedAt = null)
+        DateTimeOffset? createdAt = null, DateTimeOffset? updatedAt = null, string? alias = null)
     {
         Id = id;
         Key = key;
@@ -58,6 +61,7 @@ public readonly record struct GraphRecord
         LVN = 0;
         SyncStatus = 0;
         Tokens = 0;
+        Alias = alias;
     }
 
     // Methods for JSON extraction will be added later
