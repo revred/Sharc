@@ -12,6 +12,8 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc.Cache.Tests" />
+    <InternalsVisibleTo Include="Sharc.Cache.OutputCaching" />
+    <InternalsVisibleTo Include="Sharc.Cache.OutputCaching.Tests" />
     <InternalsVisibleTo Include="Sharc.CacheBenchmarks" />
   </ItemGroup>
 </Project>

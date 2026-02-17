@@ -19,4 +19,19 @@ public sealed class CacheOptions
 
     /// <summary>Time provider for testability. Defaults to <see cref="TimeProvider.System"/>.</summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>Whether entitlement-based per-scope encryption is enabled. Default: false.</summary>
+    public bool EnableEntitlement { get; set; }
+
+    /// <summary>
+    /// 32-byte master key for HKDF scope key derivation.
+    /// Required when <see cref="EnableEntitlement"/> is true (unless <see cref="MasterKeyProvider"/> is set).
+    /// </summary>
+    public byte[]? MasterKey { get; set; }
+
+    /// <summary>
+    /// Callback that provides the master key. Evaluated once at engine construction.
+    /// Takes precedence over <see cref="MasterKey"/> if both are set.
+    /// </summary>
+    public Func<byte[]>? MasterKeyProvider { get; set; }
 }

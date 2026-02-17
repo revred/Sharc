@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Sharc.Cache.OutputCaching</RootNamespace>
+    <AssemblyName>Sharc.Cache.OutputCaching</AssemblyName>
+    <Description>ASP.NET Core IOutputCacheStore backed by Sharc.Cache in-memory engine. Zero-infrastructure output caching with tag-based eviction.</Description>
+    <PackageTags>output-cache;aspnetcore;sharc;cache;response-caching</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sharc.Cache\Sharc.Cache.csproj" />
+  </ItemGroup>
+</Project>

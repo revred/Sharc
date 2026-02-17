@@ -16,4 +16,10 @@ internal sealed class CacheEntryOptions
 
     /// <summary>Sliding expiration window that resets on each access.</summary>
     public TimeSpan? SlidingExpiration { get; init; }
+
+    /// <summary>Tags associated with this cache entry for group eviction.</summary>
+    public string[]? Tags { get; init; }
+
+    /// <summary>Entitlement scope for this entry. Null means public (no encryption).</summary>
+    public string? Scope { get; init; }
 }

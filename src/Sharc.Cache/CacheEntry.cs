@@ -21,19 +21,29 @@ internal sealed class CacheEntry
     /// <summary>Last time this entry was accessed. Updated on Get and Refresh for sliding expiry.</summary>
     public DateTimeOffset LastAccess { get; set; }
 
+    /// <summary>Tags associated with this entry, or null if untagged.</summary>
+    public string[]? Tags { get; }
+
+    /// <summary>Entitlement scope for this entry, or null for public entries.</summary>
+    public string? Scope { get; }
+
     /// <summary>Estimated memory footprint of this entry in bytes (value length + overhead).</summary>
     public long Size { get; }
 
     private const int OverheadBytes = 96; // object header + fields + dictionary entry
+    private const int PerTagOverhead = 64; // string reference + object header + typical short tag
 
     public CacheEntry(byte[] value, DateTimeOffset? absoluteExpiration,
-                      TimeSpan? slidingExpiration, DateTimeOffset now)
+                      TimeSpan? slidingExpiration, DateTimeOffset now,
+                      string[]? tags = null, string? scope = null)
     {
         Value = value;
         AbsoluteExpiration = absoluteExpiration;
         SlidingExpiration = slidingExpiration;
         LastAccess = now;
-        Size = value.Length + OverheadBytes;
+        Tags = tags;
+        Scope = scope;
+        Size = value.Length + OverheadBytes + (tags?.Length * PerTagOverhead ?? 0);
     }
 
     /// <summary>
