@@ -15,19 +15,18 @@ internal static class CoteExecutor
     /// <summary>
     /// Materializes all Cotes in order, returning a lookup of Cote name → (rows, columns).
     /// </summary>
-    internal static Dictionary<string, (List<QueryValue[]> rows, string[] columns)> MaterializeCotes(
+    internal static Dictionary<string, MaterializedResultSet> MaterializeCotes(
         SharcDatabase db,
         IReadOnlyList<CoteIntent> cotes,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        var results = new Dictionary<string, (List<QueryValue[]> rows, string[] columns)>(
+        var results = new Dictionary<string, MaterializedResultSet>(
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var cote in cotes)
         {
-            var (rows, columns) = CompoundQueryExecutor.ExecuteAndMaterialize(
+            results[cote.Name] = CompoundQueryExecutor.ExecuteAndMaterialize(
                 db, cote.Query, parameters, results);
-            results[cote.Name] = (rows, columns);
         }
 
         return results;
@@ -41,7 +40,7 @@ internal static class CoteExecutor
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)> coteResults)
+        Dictionary<string, MaterializedResultSet> coteResults)
     {
         if (coteResults.TryGetValue(intent.TableName, out var coteData))
         {
@@ -52,10 +51,10 @@ internal static class CoteExecutor
             bool needsDistinct = intent.IsDistinct;
 
             if (!needsFilter && !needsAggregate && !needsDistinct && !needsSort && !needsLimit)
-                return new SharcDataReader(coteData.rows, coteData.columns);
+                return new SharcDataReader(coteData.Rows, coteData.Columns);
 
-            var rows = new List<QueryValue[]>(coteData.rows);
-            var columnNames = coteData.columns;
+            var rows = new List<QueryValue[]>(coteData.Rows);
+            var columnNames = coteData.Columns;
 
             // Apply outer WHERE filter to Cote data
             if (needsFilter)

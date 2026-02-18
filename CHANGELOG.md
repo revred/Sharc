@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Governance** — configurable trust policies
 
 ### Infrastructure
-- **1,730 tests** across 6 test projects (unit, integration, query, graph, index, context)
+- **2,038 tests** across 6 test projects (unit, integration, query, graph, index, context)
 - **Live Arena** — Blazor WASM benchmark app at [revred.github.io/Sharc](https://revred.github.io/Sharc/)
 - **BenchmarkDotNet suite** — Sharc vs SQLite comparisons
 - **MCP Context Server** — Model Context Protocol integration

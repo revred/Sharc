@@ -56,7 +56,7 @@ internal static class CompoundQueryExecutor
         }
 
         // ─── Fallback: materialize Cotes for complex cases ────────────
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults = null;
+        Dictionary<string, MaterializedResultSet>? coteResults = null;
         if (plan.HasCotes)
             coteResults = CoteExecutor.MaterializeCotes(db, plan.Cotes!, parameters);
 
@@ -265,11 +265,11 @@ internal static class CompoundQueryExecutor
 
     // ─── Compound execution ──────────────────────────────────────
 
-    private static (List<QueryValue[]> rows, string[] columns) ExecuteCompoundCore(
+    private static MaterializedResultSet ExecuteCompoundCore(
         SharcDatabase db,
         CompoundQueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         // Streaming path: UNION/INTERSECT/EXCEPT with two simple sides, no Cote references.
         // Avoids full materialization of both sides — reads directly from B-tree cursors.
@@ -283,7 +283,7 @@ internal static class CompoundQueryExecutor
             if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, plan.FinalLimit, plan.FinalOffset);
 
-            return (rows, columns);
+            return new MaterializedResultSet(rows, columns);
         }
 
         // Materialized path: complex compounds, Cote references, or UNION ALL.
@@ -314,7 +314,7 @@ internal static class CompoundQueryExecutor
         if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
             combined = QueryPostProcessor.ApplyLimitOffset(combined, plan.FinalLimit, plan.FinalOffset);
 
-        return (combined, leftColumns);
+        return new MaterializedResultSet(combined, leftColumns);
     }
 
     /// <summary>
@@ -323,7 +323,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamSetOp(
         CompoundQueryPlan plan,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         if (plan.Operator == CompoundOperator.UnionAll) return false;
         if (plan.RightCompound != null) return false;
@@ -341,7 +341,7 @@ internal static class CompoundQueryExecutor
     /// <summary>
     /// Executes a streaming set operation using <see cref="StreamingSetOpProcessor"/>.
     /// </summary>
-    private static (List<QueryValue[]> rows, string[] columns) ExecuteStreamingSetOp(
+    private static MaterializedResultSet ExecuteStreamingSetOp(
         SharcDatabase db,
         CompoundQueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters)
@@ -366,7 +366,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamChainedUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         var current = plan;
         while (current != null)
@@ -502,16 +502,16 @@ internal static class CompoundQueryExecutor
 
     // ─── Sub-query execution ─────────────────────────────────────
 
-    internal static (List<QueryValue[]> rows, string[] columns) ExecuteAndMaterialize(
+    internal static MaterializedResultSet ExecuteAndMaterialize(
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
         {
-            var rows = new List<QueryValue[]>(coteData.rows);
-            var columnNames = coteData.columns;
+            var rows = new List<QueryValue[]>(coteData.Rows);
+            var columnNames = coteData.Columns;
 
             bool needsAggregate = intent.HasAggregates;
             bool needsDistinct = intent.IsDistinct;
@@ -536,7 +536,7 @@ internal static class CompoundQueryExecutor
             if (needsLimit)
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
-            return (rows, columnNames);
+            return new MaterializedResultSet(rows, columnNames);
         }
 
         using var reader = ExecuteIntent(db, intent, parameters);
@@ -553,6 +553,6 @@ internal static class CompoundQueryExecutor
     }
 
     // Forwarder — kept for backward compatibility with SharcDatabase.
-    internal static List<(string table, string[]? columns)> CollectTableReferences(QueryPlan plan)
+    internal static List<TableReference> CollectTableReferences(QueryPlan plan)
         => TableReferenceCollector.Collect(plan);
 }

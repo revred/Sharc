@@ -115,6 +115,6 @@ internal static class StreamingAggregateProcessor
         if (needsLimit)
             rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
-        return new SharcDataReader(rows.ToArray(), outColumnNames);
+        return new SharcDataReader(rows, outColumnNames);
     }
 }

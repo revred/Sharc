@@ -22,7 +22,7 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 - Column decode cost: O(K²) → O(K) per row (4x fewer `GetContentSize` calls for 9-column table)
 - Benchmark noise: eliminated single-sample WASM JIT variance
-- All 1,613 tests pass (0 warnings, 0 errors)
+- All 2,038 tests pass (0 warnings, 0 errors)
 
 **Consequences**:
 

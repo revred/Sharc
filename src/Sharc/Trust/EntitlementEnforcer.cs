@@ -36,7 +36,7 @@ internal static class EntitlementEnforcer
     /// Validates that the agent's ReadScope permits access to ALL tables in a compound/Cote query.
     /// Throws <see cref="UnauthorizedAccessException"/> if access to any table is denied.
     /// </summary>
-    internal static void EnforceAll(AgentInfo agent, List<(string table, string[]? columns)> targets)
+    internal static void EnforceAll(AgentInfo agent, List<Query.TableReference> targets)
     {
         ValidateAgentActive(agent);
         var scope = ScopeDescriptor.Parse(agent.ReadScope);

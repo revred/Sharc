@@ -71,7 +71,7 @@ internal static class QueryPostProcessor
 
     // ─── Materialization ──────────────────────────────────────────
 
-    internal static (List<QueryValue[]> rows, string[] columnNames) Materialize(SharcDataReader reader)
+    internal static MaterializedResultSet Materialize(SharcDataReader reader)
     {
         int fieldCount = reader.FieldCount;
         var columnNames = reader.GetColumnNames();
@@ -85,7 +85,7 @@ internal static class QueryPostProcessor
             rows.Add(row);
         }
 
-        return (rows, columnNames);
+        return new MaterializedResultSet(rows, columnNames);
     }
 
     // ─── ORDER BY ─────────────────────────────────────────────────

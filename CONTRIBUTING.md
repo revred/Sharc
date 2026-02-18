@@ -13,7 +13,7 @@ dotnet build
 dotnet test
 ```
 
-All 1,730 tests must pass before submitting a PR.
+All 2,038 tests must pass before submitting a PR.
 
 ## Development Workflow
 
@@ -62,10 +62,10 @@ src/Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
 src/Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
 src/Sharc.Graph.Surface/      Graph interfaces and models
 src/Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
-tests/Sharc.Tests/            1,003 unit tests
-tests/Sharc.IntegrationTests/ 213 end-to-end tests
+tests/Sharc.Tests/            1,229 unit tests
+tests/Sharc.IntegrationTests/ 293 end-to-end tests
 tests/Sharc.Query.Tests/      425 query pipeline tests
-tests/Sharc.Graph.Tests.Unit/ 53 graph tests
+tests/Sharc.Graph.Tests.Unit/ 55 graph tests
 tests/Sharc.Index.Tests/      22 index CLI tests
 tests/Sharc.Context.Tests/    14 MCP context tests
 bench/Sharc.Benchmarks/       BenchmarkDotNet suite (Sharc vs SQLite)

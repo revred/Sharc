@@ -19,8 +19,21 @@ dotnet test tests/Sharc.IntegrationTests
 # Run all tests
 dotnet test
 
-# Run benchmarks (Release only)
-dotnet run -c Release --project bench/Sharc.Benchmarks
+# Run benchmarks — ALWAYS use targeted runs, never the full suite
+# Preferred: run by tier (micro ~1.5min, mini ~4min, standard ~20min)
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --tier micro
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --tier mini
+
+# Run by specific benchmark name (fastest feedback loop)
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter '*TableScanBenchmarks*'
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter '*VarintBenchmarks.Read_1Byte'
+
+# Comparisons project (graph + core + write + query benchmarks)
+dotnet run -c Release --project bench/Sharc.Comparisons -- --tier micro
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter '*WriteBenchmarks*'
+
+# List available benchmarks without running them
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --list flat
 
 # Run a specific test class
 dotnet test tests/Sharc.Tests --filter "FullyQualifiedName~VarintDecoderTests"
@@ -166,9 +179,10 @@ sharc/
 │   ├── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
 │   └── Sharc.Scene/                   ← Trust Playground (agent simulation & visualization)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (1,103 tests: core + trust + write + crypto + GUID)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (281 tests)
-│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (50 tests)
+│   ├── Sharc.Tests/                   ← Unit tests (1,229 tests: core + trust + write + crypto + GUID)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (293 tests)
+│   ├── Sharc.Query.Tests/             ← Query pipeline tests (425 tests)
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (55 tests)
 │   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
 │   └── Sharc.Index.Tests/             ← Index CLI tests (22 tests)
 ├── bench/
