@@ -87,7 +87,7 @@ public sealed class BTreeMutatorTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         // Insert a row: id=42, name='hello'
         var cols = new ColumnValue[]
@@ -122,7 +122,7 @@ public sealed class BTreeMutatorTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 10; i++)
@@ -158,7 +158,7 @@ public sealed class BTreeMutatorTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         // Insert enough rows to trigger at least one page split.
         // Each row is ~50 bytes, page usable is ~4088 bytes → ~80 rows per page.
@@ -199,7 +199,7 @@ public sealed class BTreeMutatorTests
     public void GetMaxRowId_EmptyTree_ReturnsZero()
     {
         var source = CreateDatabaseWithEmptyTable();
-        var mutator = new BTreeMutator(source, UsableSize);
+        using var mutator = new BTreeMutator(source, UsableSize);
         Assert.Equal(0L, mutator.GetMaxRowId(2));
     }
 
@@ -208,7 +208,7 @@ public sealed class BTreeMutatorTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 50; i++)

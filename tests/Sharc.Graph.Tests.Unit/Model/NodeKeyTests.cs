@@ -16,20 +16,20 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class NodeKeyTests
 {
-    [TestMethod]
+    [Fact]
     public void Value_StoresInteger()
     {
         var key = new NodeKey(42);
-        Assert.AreEqual(42L, key.Value);
+        Assert.Equal(42L, key.Value);
     }
 
-    [TestMethod]
+    [Fact]
     public void ToAscii_DecodesBarId()
     {
         // "CMUSQD" -> 73999423066436
@@ -39,82 +39,74 @@ public class NodeKeyTests
         long barId = 73999423066436;
         var key = new NodeKey(barId);
         
-        Assert.AreEqual("CMUSQD", key.ToAscii());
+        Assert.Equal("CMUSQD", key.ToAscii());
     }
 
-    [TestMethod]
+    [Fact]
     public void FromAscii_EncodesCorrectly()
     {
         var key = NodeKey.FromAscii("CMUSQD");
-        Assert.AreEqual(73999423066436L, key.Value);
+        Assert.Equal(73999423066436L, key.Value);
     }
 
-    [TestMethod]
+    [Fact]
     public void RoundTrip_AsciiToIntegerAndBack()
     {
         string original = "ABC123";
         var key = NodeKey.FromAscii(original);
-        Assert.AreEqual(original, key.ToAscii());
+        Assert.Equal(original, key.ToAscii());
     }
 
-    [TestMethod]
+    [Fact]
     public void ImplicitLong_Works()
     {
         NodeKey k = 123;
-        Assert.AreEqual(123L, k.Value);
+        Assert.Equal(123L, k.Value);
         
         long v = k;
-        Assert.AreEqual(123L, v);
+        Assert.Equal(123L, v);
     }
 
-    [TestMethod]
+    [Fact]
     public void Equality_SameValue_Equal()
     {
         var k1 = new NodeKey(12345);
         var k2 = new NodeKey(12345);
-        Assert.AreEqual(k1, k2);
-        Assert.IsTrue(k1 == k2);
+        Assert.Equal(k1, k2);
+        Assert.True(k1 == k2);
     }
 
-    [TestMethod]
+    [Fact]
     public void Equality_DifferentValue_NotEqual()
     {
         var k1 = new NodeKey(12345);
         var k2 = new NodeKey(67890);
-        Assert.AreNotEqual(k1, k2);
-        Assert.IsFalse(k1 == k2);
+        Assert.NotEqual(k1, k2);
+        Assert.False(k1 == k2);
     }
 
-    [TestMethod]
+    [Fact]
     public void ToAscii_ZeroValue_ReturnsZero()
     {
         var k = new NodeKey(0);
-        Assert.AreEqual("0", k.ToAscii());
+        Assert.Equal("0", k.ToAscii());
     }
 
-    [TestMethod]
+    [Fact]
     public void FromAscii_TooLong_Throws()
     {
-        try
-        {
-            NodeKey.FromAscii("123456789"); // Too long for 8 bytes
-            Assert.Fail("Expected ArgumentException was not thrown.");
-        }
-        catch (ArgumentException)
-        {
-            // Expected
-        }
+        Assert.Throws<ArgumentException>(() => NodeKey.FromAscii("123456789"));
     }
 
-    [TestMethod]
+    [Fact]
     public void ToAscii_NonAsciiValue_ReturnsNumericString()
     {
         // Value that contains non-printable ASCII (e.g., 0x01)
         var key = new NodeKey(1); // 00 00 00 00 00 00 00 01
-        Assert.AreEqual("1", key.ToAscii());
+        Assert.Equal("1", key.ToAscii());
 
         // Value that would be garbage ASCII
         var key2 = new NodeKey(0x0102030405060708L);
-        Assert.AreEqual(0x0102030405060708L.ToString(System.Globalization.CultureInfo.InvariantCulture), key2.ToAscii());
+        Assert.Equal(0x0102030405060708L.ToString(System.Globalization.CultureInfo.InvariantCulture), key2.ToAscii());
     }
 }

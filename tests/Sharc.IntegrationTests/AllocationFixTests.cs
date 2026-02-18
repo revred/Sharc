@@ -51,9 +51,10 @@ public class AllocationFixTests
 
         // Now access Schema (should trigger lazy parse)
         var schema = db.Schema;
-        Assert.Single(schema.Tables);
-        Assert.Equal("users", schema.Tables[0].Name);
-        Assert.Equal(5, schema.Tables[0].Columns.Count);
+        var tables = schema.Tables.Where(t => t.Name != "sqlite_master").ToList();
+        Assert.Single(tables);
+        Assert.Equal("users", tables[0].Name);
+        Assert.Equal(5, tables[0].Columns.Count);
     }
 
     [Fact]

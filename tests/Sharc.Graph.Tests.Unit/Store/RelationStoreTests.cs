@@ -6,13 +6,13 @@ using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Graph.Store;
 using Sharc.Core.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Store;
 
-[TestClass]
 public class RelationStoreTests
 {
-    [TestMethod]
+    [Fact]
     public void CreateEdgeCursor_WithMatchingOrigin_ReturnsEdges()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
@@ -31,12 +31,12 @@ public class RelationStoreTests
         while (cursor.MoveNext())
             targets.Add(cursor.TargetKey);
 
-        Assert.HasCount(2, targets);
-        Assert.AreEqual(200, targets[0]);
-        Assert.AreEqual(300, targets[1]);
+        Assert.Equal(2, targets.Count);
+        Assert.Equal(200, targets[0]);
+        Assert.Equal(300, targets[1]);
     }
 
-    [TestMethod]
+    [Fact]
     public void CreateEdgeCursor_WithKindFilter_FiltersCorrectly()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
@@ -58,11 +58,11 @@ public class RelationStoreTests
             kind = cursor.Kind;
         }
 
-        Assert.AreEqual(1, count);
-        Assert.AreEqual(10, kind);
+        Assert.Equal(1, count);
+        Assert.Equal(10, kind);
     }
 
-    [TestMethod]
+    [Fact]
     public void CreateEdgeCursor_NoMatchingOrigin_ReturnsEmpty()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
@@ -79,10 +79,10 @@ public class RelationStoreTests
         while (cursor.MoveNext())
             count++;
 
-        Assert.AreEqual(0, count);
+        Assert.Equal(0, count);
     }
 
-    [TestMethod]
+    [Fact]
     public void CreateIncomingEdgeCursor_WithMatchingTarget_ReturnsEdges()
     {
         var (schema, adapter) = CreateEdgeTestSetup();
@@ -102,7 +102,7 @@ public class RelationStoreTests
         while (cursor.MoveNext())
             origins.Add(cursor.OriginKey);
 
-        Assert.HasCount(2, origins);
+        Assert.Equal(2, origins.Count);
         Assert.Contains(100L, origins);
         Assert.Contains(50L, origins);
     }

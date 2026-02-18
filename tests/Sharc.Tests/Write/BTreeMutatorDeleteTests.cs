@@ -98,7 +98,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         var (found, root) = mutator.Delete(2, 1);
 
@@ -111,7 +111,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "one");
@@ -136,14 +136,14 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertRow(mutator, 2, 1, 42, "hello");
 
         var (found, newRoot) = mutator.Delete(root, 1);
 
         Assert.True(found);
-        Assert.Equal(0, ScanAllRowIds(shadow, newRoot).Count);
+        Assert.Empty(ScanAllRowIds(shadow, newRoot));
         Assert.Equal(0L, mutator.GetMaxRowId(newRoot));
     }
 
@@ -152,7 +152,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "one");
@@ -171,7 +171,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "one");
@@ -190,7 +190,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "one");
@@ -210,7 +210,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 5; i++)
@@ -224,7 +224,7 @@ public sealed class BTreeMutatorDeleteTests
             root = newRoot;
         }
 
-        Assert.Equal(0, ScanAllRowIds(shadow, root).Count);
+        Assert.Empty(ScanAllRowIds(shadow, root));
         Assert.Equal(0L, mutator.GetMaxRowId(root));
     }
 
@@ -233,7 +233,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         root = InsertRow(mutator, root, 1, 10, "aaaa");
@@ -261,7 +261,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         // Insert 2 rows — second row has lowest cell offset (grows downward)
         uint root = 2;
@@ -290,7 +290,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertRow(mutator, 2, 1, 42, "hello");
 
@@ -318,7 +318,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 
@@ -335,7 +335,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 
@@ -352,7 +352,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 
@@ -370,7 +370,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 
@@ -392,7 +392,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = 2;
         for (int i = 1; i <= 5; i++)
@@ -417,7 +417,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 
@@ -430,7 +430,7 @@ public sealed class BTreeMutatorDeleteTests
     {
         var source = CreateDatabaseWithEmptyTable();
         var shadow = new ShadowPageSource(source);
-        var mutator = new BTreeMutator(shadow, UsableSize);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
 
         uint root = InsertManyRows(mutator, 2, 200);
 

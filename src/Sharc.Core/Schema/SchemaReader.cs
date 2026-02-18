@@ -26,7 +26,25 @@ internal sealed class SchemaReader
     /// <returns>The parsed database schema.</returns>
     public SharcSchema ReadSchema()
     {
-        var tables = new List<TableInfo>();
+        var tables = new List<TableInfo>
+        {
+            new TableInfo
+            {
+                Name = "sqlite_master",
+                RootPage = 1,
+                Sql = "CREATE TABLE sqlite_master(type TEXT, name TEXT, tbl_name TEXT, rootpage INTEGER, sql TEXT)",
+                Columns = new List<ColumnInfo>
+                {
+                    new() { Name = "type", DeclaredType = "TEXT", Ordinal = 0, IsPrimaryKey = false, IsNotNull = false },
+                    new() { Name = "name", DeclaredType = "TEXT", Ordinal = 1, IsPrimaryKey = false, IsNotNull = false },
+                    new() { Name = "tbl_name", DeclaredType = "TEXT", Ordinal = 2, IsPrimaryKey = false, IsNotNull = false },
+                    new() { Name = "rootpage", DeclaredType = "INTEGER", Ordinal = 3, IsPrimaryKey = false, IsNotNull = false },
+                    new() { Name = "sql", DeclaredType = "TEXT", Ordinal = 4, IsPrimaryKey = false, IsNotNull = false }
+                },
+                IsWithoutRowId = false,
+                PhysicalColumnCount = 5
+            }
+        };
         var indexes = new List<IndexInfo>();
         var views = new List<ViewInfo>();
 

@@ -16,13 +16,13 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class TraversalTypesTests
 {
-    [TestMethod]
+    [Fact]
     public void TraversalNode_StoresData()
     {
         var id = RecordId.Parse("t:i");
@@ -31,13 +31,13 @@ public class TraversalTypesTests
         
         var node = new TraversalNode(record, 2, path);
         
-        Assert.AreEqual(record, node.Record);
-        Assert.AreEqual(2, node.Depth);
-        Assert.HasCount(3, node.Path!);
-        Assert.AreEqual(new NodeKey(1), node.Path![0]);
+        Assert.Equal(record, node.Record);
+        Assert.Equal(2, node.Depth);
+        Assert.Equal(3, node.Path!.Count);
+        Assert.Equal(new NodeKey(1), node.Path![0]);
     }
 
-    [TestMethod]
+    [Fact]
     public void GraphResult_StoresNodes()
     {
         var id = RecordId.Parse("t:i");
@@ -47,22 +47,22 @@ public class TraversalTypesTests
         
         var result = new GraphResult(list);
         
-        Assert.HasCount(1, result.Nodes);
-        Assert.AreEqual(node, result.Nodes[0]);
+        Assert.Single(result.Nodes);
+        Assert.Equal(node, result.Nodes[0]);
     }
 
-    [TestMethod]
+    [Fact]
     public void TraversalPolicy_Defaults()
     {
         var options = new TraversalPolicy();
         
-        Assert.IsNull(options.MaxFanOut);
-        Assert.IsNull(options.TargetTypeFilter);
-        Assert.AreEqual(0L, options.StopAtKey.Value);
-        Assert.AreEqual(TraversalDirection.Outgoing, options.Direction);
+        Assert.Null(options.MaxFanOut);
+        Assert.Null(options.TargetTypeFilter);
+        Assert.Equal(0L, options.StopAtKey.Value);
+        Assert.Equal(TraversalDirection.Outgoing, options.Direction);
     }
 
-    [TestMethod]
+    [Fact]
     public void TraversalPolicy_InitProps()
     {
         var options = new TraversalPolicy
@@ -73,32 +73,32 @@ public class TraversalTypesTests
             Direction = TraversalDirection.Incoming
         };
         
-        Assert.AreEqual(50, options.MaxFanOut);
-        Assert.AreEqual(3, options.TargetTypeFilter);
-        Assert.AreEqual(999L, options.StopAtKey.Value);
-        Assert.AreEqual(TraversalDirection.Incoming, options.Direction);
+        Assert.Equal(50, options.MaxFanOut);
+        Assert.Equal(3, options.TargetTypeFilter);
+        Assert.Equal(999L, options.StopAtKey.Value);
+        Assert.Equal(TraversalDirection.Incoming, options.Direction);
     }
     
-    [TestMethod]
+    [Fact]
     public void ContextSummary_StoresData()
     {
         var guid = Guid.NewGuid();
         var records = new List<GraphRecord>();
         var summary = new ContextSummary(guid, "Hello", 100, records);
         
-        Assert.AreEqual(guid, summary.RootId);
-        Assert.AreEqual("Hello", summary.SummaryText);
-        Assert.AreEqual(100, summary.TokenCount);
-        Assert.AreSame(records, summary.IncludedRecords);
+        Assert.Equal(guid, summary.RootId);
+        Assert.Equal("Hello", summary.SummaryText);
+        Assert.Equal(100, summary.TokenCount);
+        Assert.Same(records, summary.IncludedRecords);
     }
     
-    [TestMethod]
+    [Fact]
     public void PathResult_StoresData()
     {
         var records = new List<GraphRecord>();
         var path = new PathResult(records, 1.5f);
         
-        Assert.AreSame(records, path.Path);
-        Assert.AreEqual(1.5f, path.Weight);
+        Assert.Same(records, path.Path);
+        Assert.Equal(1.5f, path.Weight);
     }
 }

@@ -457,7 +457,7 @@ public sealed class SharcDataReader : IDisposable
             // Evaluate filters against raw serial types/bytes before allocating managed objects.
             // Pushdown to RecordDecoder for zero-allocation check
             if (_filters != null && _filters.Length > 0 &&
-                !_recordDecoder!.Matches(_cursor!.Payload, _filters))
+                !_recordDecoder!.Matches(_cursor!.Payload, _filters, _cursor.RowId, _rowidAliasOrdinal))
             {
                 continue; // Skip row without decoding
             }

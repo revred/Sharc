@@ -198,7 +198,7 @@ Sharc.Scene is **optional** — trust playground for visualizing agent interacti
 | `SharcDatabase` | `IPageSource`, `SchemaReader`, page cache | Until `Dispose()` |
 | `SharcDataReader` | `IBTreeCursor`, current record buffer | Until `Dispose()` |
 | `IBTreeCursor` | Page stack, overflow assembly buffer | Until `Dispose()` |
-| `CachedPageSource` | Page cache (byte arrays from pool) | Until `Dispose()` |
+| `CachedPageSource` | Page cache (demand-driven byte arrays from pool) | Until `Dispose()` |
 | `SharcKeyHandle` | Pinned key memory | Until `Dispose()` |
 
 ### Allocation Budget
@@ -299,9 +299,4 @@ new SharcOpenOptions
 
 ### Current Test Status
 
-**1,064 tests passing** across 5 projects:
-- Unit tests: 832 (core + crypto + filter + WITHOUT ROWID + SeekFirst + write engine + trust)
-- Integration tests: 146
-- Graph unit tests: 50
-- Index tests: 22
-- Context tests: 14
+**2,038 tests passing** across 6 projects (unit + integration + query + graph + index + context).

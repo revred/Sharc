@@ -4,17 +4,17 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-1%2C898_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-2%2C022_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
 | **Speed** | **Size** | **Trust** |
 | :--- | :--- | :--- |
-| **61x faster** B-tree seeks | **~250 KB** engine footprint | **ECDSA** agent attestation |
-| **13.5x faster** graph traversal | **Zero** native dependencies | **AES-256-GCM** encryption |
-| **5.4x faster** UNION ALL queries | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
-| **~0 B** per-row allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
+| **61x faster** B-tree seeks | **~52 KB** engine footprint | **ECDSA** agent attestation |
+| **39x faster** single UPDATE | **Zero** native dependencies | **AES-256-GCM** encryption |
+| **13.5x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
+| **~0 B** per-row read allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
 
 ---
 
@@ -124,6 +124,10 @@ writer.Insert("entities",
 | | Node Seek | **1,475 ns** | 21,349 ns | **14.5x** |
 | **Memory** | GC Pressure (sustained) | **648 B** | 688 B | Parity |
 | | Primitives | **0 B** | N/A | Zero-alloc |
+| **Write** | Single DELETE | **1.72 ms** | 12.02 ms | **7x** |
+| | Single UPDATE | **3.03 ms** | 117.79 ms | **39x** |
+| | Batch 100 DELETEs | **2.82 ms** | 25.53 ms | **9.1x** |
+| | Transaction 100 INSERTs | **4.23 ms** | 5.20 ms | **1.2x** |
 | **GUID** | Merged Int64 encode (per op) | **0 B** | N/A | Zero-alloc |
 | | BLOB(16) encode (per op) | 40 B | N/A | 1 alloc |
 | | Batch 1K GUIDs (merged) | **0 B** | N/A | Zero-alloc |
@@ -196,7 +200,7 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 1,898 tests
+dotnet test                                             # Run all 2,022 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -212,10 +216,10 @@ src/
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
-  Sharc.Tests/              1,103 unit tests
-  Sharc.IntegrationTests/   281 end-to-end tests
+  Sharc.Tests/              1,207 unit tests
+  Sharc.IntegrationTests/   293 end-to-end tests
   Sharc.Query.Tests/        425 query pipeline tests
-  Sharc.Graph.Tests.Unit/   53 graph tests
+  Sharc.Graph.Tests.Unit/   55 graph tests
   Sharc.Index.Tests/        22 index CLI tests
   Sharc.Context.Tests/      14 MCP context tests
 bench/
@@ -231,7 +235,7 @@ PRC/                        Architecture decisions, specs, execution plans
 ## Current Limitations
 
 - **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
-- **Write support** -- INSERT, UPDATE, DELETE with B-tree splits and ACID transactions
+- **Write support** -- INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE with B-tree splits, ACID transactions, freelist recycling, and vacuum
 - **No JOIN support** -- single-table queries only; use UNION/Cote for multi-table workflows
 - **No virtual tables** -- FTS5, R-Tree not supported
 

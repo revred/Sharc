@@ -16,13 +16,13 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class GraphRecordTests
 {
-    [TestMethod]
+    [Fact]
     public void Constructor_SetsAllProperties()
     {
         var id = RecordId.Parse("t:i");
@@ -37,21 +37,21 @@ public class GraphRecordTests
             SyncStatus = 1
         };
 
-        Assert.AreEqual(id, record.Id);
-        Assert.AreEqual(key, record.Key);
-        Assert.AreEqual(10, record.TypeId);
-        Assert.AreEqual("{}", record.JsonData);
-        Assert.AreEqual(now, record.CreatedAt);
-        Assert.AreEqual(1, record.CVN);
-        Assert.AreEqual(2, record.LVN);
-        Assert.AreEqual(1, record.SyncStatus);
+        Assert.Equal(id, record.Id);
+        Assert.Equal(key, record.Key);
+        Assert.Equal(10, record.TypeId);
+        Assert.Equal("{}", record.JsonData);
+        Assert.Equal(now, record.CreatedAt);
+        Assert.Equal(1, record.CVN);
+        Assert.Equal(2, record.LVN);
+        Assert.Equal(1, record.SyncStatus);
     }
 
-    [TestMethod]
+    [Fact]
     public void CVN_LVN_DefaultToZero()
     {
         var record = new GraphRecord(RecordId.Parse("t:i"), new NodeKey(1), 0, "{}");
-        Assert.AreEqual(0, record.CVN);
-        Assert.AreEqual(0, record.LVN);
+        Assert.Equal(0, record.CVN);
+        Assert.Equal(0, record.LVN);
     }
 }

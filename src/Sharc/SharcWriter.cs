@@ -1,5 +1,9 @@
+using System.Buffers.Binary;
+using System.Text;
 using Sharc.Core;
 using Sharc.Core.BTree;
+using Sharc.Core.Format;
+using Sharc.Core.IO;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Core.Trust;
@@ -14,14 +18,22 @@ public sealed class SharcWriter : IDisposable
 {
     private readonly SharcDatabase _db;
     private readonly bool _ownsDb;
+    private readonly Dictionary<string, uint> _tableRootCache = new(StringComparer.OrdinalIgnoreCase);
+    private ShadowPageSource? _cachedShadow;
     private bool _disposed;
+
+    /// <summary>Number of cached table root pages. Exposed for test observability.</summary>
+    internal int TableRootCacheCount => _tableRootCache.Count;
 
     /// <summary>
     /// Opens a database for reading and writing.
     /// </summary>
     public static SharcWriter Open(string path)
     {
-        var db = SharcDatabase.Open(path, new SharcOpenOptions { Writable = true });
+        // Write-appropriate cache: BTreeMutator._pageCache handles intra-transaction pages;
+        // LRU only serves cross-transaction reads for schema + root pages.
+        // 16 pages × 4096 = 64 KB maximum, demand-grown from 0.
+        var db = SharcDatabase.Open(path, new SharcOpenOptions { Writable = true, PageCacheSize = 16 });
         return new SharcWriter(db, ownsDb: true);
     }
 
@@ -41,6 +53,27 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Begins an auto-commit transaction using a pooled ShadowPageSource.
+    /// The shadow is created on first use, then Reset and reused across transactions.
+    /// A fresh BTreeMutator is always created per-transaction to avoid stale freelist state.
+    /// </summary>
+    private Transaction BeginAutoCommitTransaction()
+    {
+        if (_cachedShadow == null)
+            return _db.BeginTransaction();
+
+        return _db.BeginPooledTransaction(_cachedShadow);
+    }
+
+    /// <summary>
+    /// Captures the ShadowPageSource from a completed auto-commit transaction for reuse.
+    /// </summary>
+    private void CapturePooledShadow(Transaction tx)
+    {
+        _cachedShadow ??= tx.GetShadowSource();
+    }
+
+    /// <summary>
     /// Gets the underlying database for read operations.
     /// </summary>
     public SharcDatabase Database => _db;
@@ -53,8 +86,9 @@ public sealed class SharcWriter : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        using var tx = _db.BeginTransaction();
-        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName));
+        using var tx = BeginAutoCommitTransaction();
+        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName), _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return rowId;
     }
@@ -68,8 +102,9 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
-        using var tx = _db.BeginTransaction();
-        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName));
+        using var tx = BeginAutoCommitTransaction();
+        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName), _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return rowId;
     }
@@ -83,12 +118,13 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var tableInfo = TryGetTableInfo(tableName);
-        var rowIds = new List<long>();
-        using var tx = _db.BeginTransaction();
+        var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
+        using var tx = BeginAutoCommitTransaction();
         foreach (var values in records)
         {
-            rowIds.Add(InsertCore(tx, tableName, values, tableInfo));
+            rowIds.Add(InsertCore(tx, tableName, values, tableInfo, _tableRootCache));
         }
+        CapturePooledShadow(tx);
         tx.Commit();
         return rowIds.ToArray();
     }
@@ -103,12 +139,13 @@ public sealed class SharcWriter : IDisposable
         Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
         var tableInfo = TryGetTableInfo(tableName);
-        var rowIds = new List<long>();
-        using var tx = _db.BeginTransaction();
+        var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
+        using var tx = BeginAutoCommitTransaction();
         foreach (var values in records)
         {
-            rowIds.Add(InsertCore(tx, tableName, values, tableInfo));
+            rowIds.Add(InsertCore(tx, tableName, values, tableInfo, _tableRootCache));
         }
+        CapturePooledShadow(tx);
         tx.Commit();
         return rowIds.ToArray();
     }
@@ -121,8 +158,9 @@ public sealed class SharcWriter : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        using var tx = _db.BeginTransaction();
-        bool found = DeleteCore(tx, tableName, rowId);
+        using var tx = BeginAutoCommitTransaction();
+        bool found = DeleteCore(tx, tableName, rowId, _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return found;
     }
@@ -136,8 +174,9 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
-        using var tx = _db.BeginTransaction();
-        bool found = DeleteCore(tx, tableName, rowId);
+        using var tx = BeginAutoCommitTransaction();
+        bool found = DeleteCore(tx, tableName, rowId, _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return found;
     }
@@ -150,8 +189,9 @@ public sealed class SharcWriter : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        using var tx = _db.BeginTransaction();
-        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName));
+        using var tx = BeginAutoCommitTransaction();
+        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName), _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return found;
     }
@@ -165,8 +205,9 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
 
-        using var tx = _db.BeginTransaction();
-        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName));
+        using var tx = BeginAutoCommitTransaction();
+        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName), _tableRootCache);
+        CapturePooledShadow(tx);
         tx.Commit();
         return found;
     }
@@ -178,14 +219,14 @@ public sealed class SharcWriter : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var tx = _db.BeginTransaction();
-        return new SharcWriteTransaction(_db, tx);
+        return new SharcWriteTransaction(_db, tx, _tableRootCache);
     }
 
     /// <summary>
     /// Core insert: encode record → insert into B-tree via the transaction's shadow source.
     /// </summary>
     internal static long InsertCore(Transaction tx, string tableName, ColumnValue[] values,
-        TableInfo? tableInfo = null)
+        TableInfo? tableInfo = null, Dictionary<string, uint>? rootCache = null)
     {
         var shadow = tx.GetShadowSource();
         int pageSize = shadow.PageSize;
@@ -195,13 +236,11 @@ public sealed class SharcWriter : IDisposable
         if (tableInfo != null)
             values = ExpandMergedColumns(values, tableInfo);
 
-        // Find table root page from schema (read from the base source's schema)
-        // For now, we traverse sqlite_master manually from page 1
-        uint rootPage = FindTableRootPage(shadow, tableName, usableSize);
+        uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         long rowId = mutator.GetMaxRowId(rootPage) + 1;
 
         // Encode the record
@@ -212,11 +251,9 @@ public sealed class SharcWriter : IDisposable
         // Insert into B-tree
         uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
 
-        // If the root page changed (due to root split), we need to update sqlite_master.
-        // For Phase 1, we only support tables where the root doesn't change,
-        // or we handle root change by updating the schema page.
         if (newRoot != rootPage)
         {
+            if (rootCache != null) rootCache[tableName] = newRoot;
             UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
         }
 
@@ -226,20 +263,24 @@ public sealed class SharcWriter : IDisposable
     /// <summary>
     /// Core delete: find table root → mutator.Delete → update root if changed.
     /// </summary>
-    internal static bool DeleteCore(Transaction tx, string tableName, long rowId)
+    internal static bool DeleteCore(Transaction tx, string tableName, long rowId,
+        Dictionary<string, uint>? rootCache = null)
     {
         var shadow = tx.GetShadowSource();
         int usableSize = shadow.PageSize;
 
-        uint rootPage = FindTableRootPage(shadow, tableName, usableSize);
+        uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Delete(rootPage, rowId);
 
         if (found && newRoot != rootPage)
+        {
+            if (rootCache != null) rootCache[tableName] = newRoot;
             UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
+        }
 
         return found;
     }
@@ -248,7 +289,7 @@ public sealed class SharcWriter : IDisposable
     /// Core update: find table root → encode record → mutator.Update → update root if changed.
     /// </summary>
     internal static bool UpdateCore(Transaction tx, string tableName, long rowId, ColumnValue[] values,
-        TableInfo? tableInfo = null)
+        TableInfo? tableInfo = null, Dictionary<string, uint>? rootCache = null)
     {
         var shadow = tx.GetShadowSource();
         int usableSize = shadow.PageSize;
@@ -257,7 +298,7 @@ public sealed class SharcWriter : IDisposable
         if (tableInfo != null)
             values = ExpandMergedColumns(values, tableInfo);
 
-        uint rootPage = FindTableRootPage(shadow, tableName, usableSize);
+        uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
@@ -265,11 +306,14 @@ public sealed class SharcWriter : IDisposable
         Span<byte> recordBuf = encodedSize <= 512 ? stackalloc byte[encodedSize] : new byte[encodedSize];
         RecordEncoder.EncodeRecord(values, recordBuf);
 
-        var mutator = new BTreeMutator(shadow, usableSize);
+        var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Update(rootPage, rowId, recordBuf);
 
         if (found && newRoot != rootPage)
+        {
+            if (rootCache != null) rootCache[tableName] = newRoot;
             UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
+        }
 
         return found;
     }
@@ -287,6 +331,22 @@ public sealed class SharcWriter : IDisposable
                 return tables[i];
         }
         return null;
+    }
+
+    /// <summary>
+    /// Checks the cache first, then falls back to scanning sqlite_master.
+    /// </summary>
+    private static uint FindTableRootPageCached(IPageSource source, string tableName,
+        int usableSize, Dictionary<string, uint>? cache)
+    {
+        if (cache != null && cache.TryGetValue(tableName, out uint cached))
+            return cached;
+
+        uint rootPage = FindTableRootPage(source, tableName, usableSize);
+        if (cache != null && rootPage != 0)
+            cache[tableName] = rootPage;
+
+        return rootPage;
     }
 
     /// <summary>
@@ -376,11 +436,164 @@ public sealed class SharcWriter : IDisposable
         return physical;
     }
 
+    /// <summary>
+    /// Compacts the database by rebuilding all tables, removing fragmentation and clearing the freelist.
+    /// After vacuum, the database file size reflects only the pages actually in use.
+    /// </summary>
+    public void Vacuum()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var schema = _db.Schema;
+        int pageSize = _db.Header.PageSize;
+        int usableSize = _db.UsablePageSize;
+
+        // 1. Read all table data (raw record bytes + count)
+        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>();
+        foreach (var table in schema.Tables)
+        {
+            if (table.Name.Equals("sqlite_master", StringComparison.OrdinalIgnoreCase)) continue;
+            var records = new List<byte[]>();
+            using var cursor = new BTreeCursor(_db.PageSource, (uint)table.RootPage, usableSize);
+            while (cursor.MoveNext())
+            {
+                records.Add(cursor.Payload.ToArray());
+            }
+            tableRows.Add((table, records));
+        }
+
+        // 2. Build fresh database with same schema
+        int schemaPageCount = 1 + tableRows.Count; // page 1 (schema) + one page per table
+        var freshData = new byte[pageSize * schemaPageCount];
+
+        // Build header
+        var oldHeader = _db.Header;
+        var newHeader = new DatabaseHeader(
+            pageSize, oldHeader.WriteVersion, oldHeader.ReadVersion,
+            oldHeader.ReservedBytesPerPage, oldHeader.ChangeCounter + 1,
+            schemaPageCount, 0, 0, // freelist cleared
+            oldHeader.SchemaCookie, oldHeader.SchemaFormat,
+            oldHeader.TextEncoding, oldHeader.UserVersion,
+            oldHeader.ApplicationId, oldHeader.SqliteVersionNumber);
+        DatabaseHeader.Write(freshData, newHeader);
+
+        // Build sqlite_master entries (schema page on page 1)
+        var schemaCells = new List<(int Size, byte[] Cell)>();
+        for (int i = 0; i < tableRows.Count; i++)
+        {
+            var table = tableRows[i].Table;
+            uint rootPage = (uint)(i + 2); // tables start at page 2
+            var sqlBytes = Encoding.UTF8.GetBytes(table.Sql);
+            var nameBytes = Encoding.UTF8.GetBytes(table.Name);
+
+            var schemaCols = new ColumnValue[5];
+            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, Encoding.UTF8.GetBytes("table"));
+            schemaCols[1] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
+            schemaCols[2] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
+            schemaCols[3] = ColumnValue.FromInt64(1, (long)rootPage);
+            schemaCols[4] = ColumnValue.Text(2 * sqlBytes.Length + 13, sqlBytes);
+
+            int recSize = RecordEncoder.ComputeEncodedSize(schemaCols);
+            var recBuf = new byte[recSize];
+            RecordEncoder.EncodeRecord(schemaCols, recBuf);
+
+            long rowId = i + 1;
+            int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, recSize, usableSize);
+            var cellBuf = new byte[cellSize];
+            CellBuilder.BuildTableLeafCell(rowId, recBuf, cellBuf, usableSize);
+            schemaCells.Add((cellSize, cellBuf));
+        }
+
+        // Write schema cells to page 1 (after the 100-byte database header)
+        int hdrOff = SQLiteLayout.DatabaseHeaderSize; // 100
+        ushort cellContentOffset = (ushort)pageSize;
+        for (int i = 0; i < schemaCells.Count; i++)
+        {
+            var (size, cell) = schemaCells[i];
+            cellContentOffset -= (ushort)size;
+            cell.CopyTo(freshData.AsSpan(cellContentOffset));
+            // Write cell pointer
+            int ptrOff = hdrOff + SQLiteLayout.TableLeafHeaderSize + i * SQLiteLayout.CellPointerSize;
+            BinaryPrimitives.WriteUInt16BigEndian(freshData.AsSpan(ptrOff), cellContentOffset);
+        }
+
+        var schemaHdr = new BTreePageHeader(
+            BTreePageType.LeafTable, 0, (ushort)schemaCells.Count, cellContentOffset, 0, 0);
+        BTreePageHeader.Write(freshData.AsSpan(hdrOff), schemaHdr);
+
+        // Write empty table pages
+        for (int i = 0; i < tableRows.Count; i++)
+        {
+            int pageOff = pageSize * (i + 1);
+            var tableHdr = new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0);
+            BTreePageHeader.Write(freshData.AsSpan(pageOff), tableHdr);
+        }
+
+        // 3. Open fresh database and re-insert all rows
+        using var freshDb = SharcDatabase.OpenMemory(freshData);
+        using var freshWriter = SharcWriter.From(freshDb);
+
+        for (int t = 0; t < tableRows.Count; t++)
+        {
+            var (table, records) = tableRows[t];
+            if (records.Count == 0) continue;
+
+            uint rootPage = (uint)(t + 2);
+            using var tx = freshDb.BeginTransaction();
+            var mutator = tx.FetchMutator(usableSize);
+
+            for (int r = 0; r < records.Count; r++)
+            {
+                long rowId = r + 1;
+                rootPage = mutator.Insert(rootPage, rowId, records[r]);
+            }
+
+            // Update root page in schema if it changed
+            if (rootPage != (uint)(t + 2))
+            {
+                UpdateTableRootPage(tx.GetShadowSource(), table.Name, rootPage, usableSize);
+            }
+
+            tx.Commit();
+        }
+
+        // 4. Copy all pages from fresh database back to original source
+        using var vacuumTx = _db.BeginTransaction();
+        var shadow = vacuumTx.GetShadowSource();
+
+        int freshPageCount = freshDb.PageSource.PageCount;
+        Span<byte> pageBuf = stackalloc byte[pageSize];
+
+        for (uint p = 1; p <= (uint)freshPageCount; p++)
+        {
+            freshDb.PageSource.ReadPage(p, pageBuf);
+            shadow.WritePage(p, pageBuf);
+        }
+
+        // Update header on the vacuumed database
+        // Re-read page 1 from shadow, update header with correct page count and cleared freelist
+        shadow.ReadPage(1, pageBuf);
+        var vacuumHeader = DatabaseHeader.Parse(pageBuf);
+        var finalHeader = new DatabaseHeader(
+            vacuumHeader.PageSize, vacuumHeader.WriteVersion, vacuumHeader.ReadVersion,
+            vacuumHeader.ReservedBytesPerPage, vacuumHeader.ChangeCounter,
+            freshPageCount, 0, 0, // freelist cleared
+            vacuumHeader.SchemaCookie, vacuumHeader.SchemaFormat,
+            vacuumHeader.TextEncoding, vacuumHeader.UserVersion,
+            vacuumHeader.ApplicationId, vacuumHeader.SqliteVersionNumber);
+        DatabaseHeader.Write(pageBuf, finalHeader);
+        shadow.WritePage(1, pageBuf);
+
+        vacuumTx.Commit();
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _cachedShadow?.Dispose();
+        _cachedShadow = null;
         if (_ownsDb) _db.Dispose();
     }
 }

@@ -15,9 +15,13 @@ internal readonly struct ScopeDescriptor
     /// <summary>True if the scope grants unrestricted access.</summary>
     internal bool IsUnrestricted { get; }
 
-    private ScopeDescriptor(bool unrestricted, ScopeEntry[]? entries)
+    /// <summary>True if the scope grants schema modification rights.</summary>
+    internal bool IsSchemaAdmin { get; }
+
+    private ScopeDescriptor(bool unrestricted, bool schemaAdmin, ScopeEntry[]? entries)
     {
         IsUnrestricted = unrestricted;
+        IsSchemaAdmin = schemaAdmin;
         _entries = entries;
     }
 
@@ -28,36 +32,52 @@ internal readonly struct ScopeDescriptor
     {
         scope = scope.Trim();
         if (scope.IsEmpty)
-            return new ScopeDescriptor(false, null);
+            return new ScopeDescriptor(false, false, null);
 
-        if (scope is "*")
-            return new ScopeDescriptor(true, null);
+        if (scope.SequenceEqual("*".AsSpan()))
+            return new ScopeDescriptor(true, true, null);
 
+        bool schemaAdmin = false;
         var entries = new List<ScopeEntry>();
-        foreach (var segment in scope.ToString().Split(','))
+        
+        // Manual split loop
+        int start = 0;
+        for (int i = 0; i <= scope.Length; i++)
         {
-            var entry = segment.Trim();
-            if (string.IsNullOrEmpty(entry)) continue;
-
-            int dotIndex = entry.IndexOf('.');
-            if (dotIndex < 0)
+            if (i == scope.Length || scope[i] == ',')
             {
-                // Table-level only (no dot) — treat as table.*
-                entries.Add(new ScopeEntry(entry, null, false));
-                continue;
+                var segment = scope.Slice(start, i - start).Trim();
+                start = i + 1;
+                
+                if (segment.IsEmpty) continue;
+
+                if (segment.Equals(".schema".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    schemaAdmin = true;
+                    continue;
+                }
+
+                int dotIndex = segment.IndexOf('.');
+                if (dotIndex < 0)
+                {
+                    // Table-level only (no dot) — treat as table.*
+                    entries.Add(new ScopeEntry(segment.ToString(), null, false));
+                    continue;
+                }
+
+                var tablePart = segment[..dotIndex];
+                var columnPart = segment[(dotIndex + 1)..];
+
+                bool isWildcardTable = tablePart.EndsWith('*');
+                string tablePrefix = isWildcardTable ? tablePart[..^1].ToString() : tablePart.ToString();
+                bool allColumns = columnPart.SequenceEqual("*".AsSpan());
+
+                string? colName = allColumns ? null : columnPart.ToString();
+                entries.Add(new ScopeEntry(tablePrefix, colName, isWildcardTable));
             }
-
-            string tablePart = entry[..dotIndex];
-            string columnPart = entry[(dotIndex + 1)..];
-
-            bool isWildcardTable = tablePart.EndsWith('*');
-            string tablePrefix = isWildcardTable ? tablePart[..^1] : tablePart;
-            bool allColumns = columnPart == "*";
-
-            entries.Add(new ScopeEntry(tablePrefix, allColumns ? null : columnPart, isWildcardTable));
         }
 
-        return new ScopeDescriptor(false, entries.ToArray());
+        return new ScopeDescriptor(false, schemaAdmin, entries.ToArray());
     }
 
     /// <summary>
