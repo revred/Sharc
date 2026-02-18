@@ -100,10 +100,11 @@ public sealed class SharcWriter : IDisposable
     public long Insert(AgentInfo agent, string tableName, params ColumnValue[] values)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        var tableInfo = TryGetTableInfo(tableName);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, values.Length));
 
         using var tx = BeginAutoCommitTransaction();
-        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName), _tableRootCache);
+        long rowId = InsertCore(tx, tableName, values, tableInfo, _tableRootCache);
         CapturePooledShadow(tx);
         tx.Commit();
         return rowId;
@@ -136,9 +137,12 @@ public sealed class SharcWriter : IDisposable
     public long[] InsertBatch(AgentInfo agent, string tableName, IEnumerable<ColumnValue[]> records)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
-
         var tableInfo = TryGetTableInfo(tableName);
+        
+        // Peek first record to get column count for enforcement
+        int colCount = records is IReadOnlyList<ColumnValue[]> list && list.Count > 0 ? list[0].Length : 0;
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, colCount));
+
         var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
         using var tx = BeginAutoCommitTransaction();
         foreach (var values in records)
@@ -172,7 +176,7 @@ public sealed class SharcWriter : IDisposable
     public bool Delete(AgentInfo agent, string tableName, long rowId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null); // Delete usually requires all-columns or just table write
 
         using var tx = BeginAutoCommitTransaction();
         bool found = DeleteCore(tx, tableName, rowId, _tableRootCache);
@@ -203,10 +207,11 @@ public sealed class SharcWriter : IDisposable
     public bool Update(AgentInfo agent, string tableName, long rowId, params ColumnValue[] values)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        var tableInfo = TryGetTableInfo(tableName);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, values.Length));
 
         using var tx = BeginAutoCommitTransaction();
-        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName), _tableRootCache);
+        bool found = UpdateCore(tx, tableName, rowId, values, tableInfo, _tableRootCache);
         CapturePooledShadow(tx);
         tx.Commit();
         return found;
@@ -220,6 +225,16 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var tx = _db.BeginTransaction();
         return new SharcWriteTransaction(_db, tx, _tableRootCache);
+    }
+
+    /// <summary>
+    /// Begins an explicit write transaction bound to an agent for entitlement enforcement.
+    /// </summary>
+    public SharcWriteTransaction BeginTransaction(AgentInfo agent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var tx = _db.BeginTransaction();
+        return new SharcWriteTransaction(_db, tx, _tableRootCache, agent);
     }
 
     /// <summary>
@@ -331,6 +346,15 @@ public sealed class SharcWriter : IDisposable
                 return tables[i];
         }
         return null;
+    }
+
+    private static string[]? GetColumnNames(TableInfo? table, int valueCount)
+    {
+        if (table == null || valueCount == 0) return null;
+        var cols = new string[Math.Min(valueCount, table.Columns.Count)];
+        for (int i = 0; i < cols.Length; i++)
+            cols[i] = table.Columns[i].Name;
+        return cols;
     }
 
     /// <summary>

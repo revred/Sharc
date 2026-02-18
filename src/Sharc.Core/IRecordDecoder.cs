@@ -225,6 +225,22 @@ public readonly struct ColumnValue
         var (hi, lo) = Primitives.GuidCodec.ToInt64Pair(value);
         return (FromInt64(6, hi), FromInt64(6, lo));
     }
+
+    /// <summary>Implicitly converts a long to a ColumnValue (serial type 6).</summary>
+    public static implicit operator ColumnValue(long value) => FromInt64(6, value);
+
+    /// <summary>Implicitly converts an int to a ColumnValue (serial type 4).</summary>
+    public static implicit operator ColumnValue(int value) => FromInt64(4, value);
+
+    /// <summary>Implicitly converts a double to a ColumnValue (serial type 7).</summary>
+    public static implicit operator ColumnValue(double value) => FromDouble(value);
+
+    /// <summary>Implicitly converts a string to a ColumnValue (serial type 13+2N).</summary>
+    public static implicit operator ColumnValue(string value)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        return Text(13 + 2 * bytes.Length, bytes);
+    }
 }
 
 /// <summary>

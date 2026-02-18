@@ -330,28 +330,10 @@ public sealed class SharcDatabase : IDisposable
         // Enforce entitlements when an agent is specified
         if (agent is not null)
         {
-            // Now that view references are expanded into Cotes, checking the plan
-            // will collect all physical tables involved (including those inside view queries).
-            // We use global::Sharc.Query.TableReferenceCollector which recursively visits Cotes.
-            
-            // Optimization: If it's still a simple single-table query, we can do the simple specific check?
-            // BUT ResolveViews might have turned a Simple view query into a Cote query.
-            // AND a Simple query might have Joins (which we updated Collector to handle).
-            
-            // The cleanest way is to use EnforceAll(Collect(plan)) for everything, 
-            // but we want to retain the optimized path for truly simple queries if possible.
-
-            if (plan.IsCompound || plan.HasCotes || (plan.Simple?.HasJoins ?? false))
-            {
-                var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
-                Trust.EntitlementEnforcer.EnforceAll(agent, tables);
-            }
-            else
-            {
-                var simpleIntent = plan.Simple!;
-                Trust.EntitlementEnforcer.Enforce(agent, simpleIntent.TableName,
-                    simpleIntent.ColumnsArray);
-            }
+            // We use global::Sharc.Query.TableReferenceCollector which recursively visits 
+            // Cotes, Joins, and scans Filters/Ordering for all referenced columns.
+            var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
+            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
         }
 
         // Compound or Cote queries go through the compound executor
