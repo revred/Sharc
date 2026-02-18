@@ -40,20 +40,30 @@ public sealed class QueryPipelineEngine
         var db = _sharcEngine.Database;
         var conn = _sqliteEngine.Connection;
 
-        if (db is null || conn is null)
+        if (db is null || conn is null || conn.State != System.Data.ConnectionState.Open)
         {
             IsLive = false;
             return await LoadFallbackAsync();
         }
 
-        var results = new List<QueryResult>(Queries.Length);
-        foreach (var spec in Queries)
+        try
         {
-            results.Add(RunSingleQuery(db, conn, spec));
-            await Task.Yield(); // Yield to WASM UI thread between queries
+            var results = new List<QueryResult>(Queries.Length);
+            foreach (var spec in Queries)
+            {
+                results.Add(RunSingleQuery(db, conn, spec));
+                await Task.Yield(); // Yield to WASM UI thread between queries
+            }
+            IsLive = true;
+            return results;
         }
-        IsLive = true;
-        return results;
+        catch (ObjectDisposedException)
+        {
+            // Engine was reinitialized mid-run — fall back to reference data
+            Console.WriteLine("[QueryPipeline] Engine disposed during live run, using fallback data");
+            IsLive = false;
+            return await LoadFallbackAsync();
+        }
     }
 
     /// <summary>
