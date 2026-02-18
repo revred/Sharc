@@ -17,7 +17,7 @@ internal static class StreamingUnionExecutor
     /// </summary>
     internal static bool CanStreamUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         if (plan.Operator != CompoundOperator.UnionAll) return false;
         if (plan.FinalOrderBy is { Count: > 0 }) return false;
@@ -56,7 +56,7 @@ internal static class StreamingUnionExecutor
     /// </summary>
     internal static bool CanStreamUnionAllTopN(
         CompoundQueryPlan plan,
-        Dictionary<string, (List<QueryValue[]> rows, string[] columns)>? coteResults)
+        Dictionary<string, MaterializedResultSet>? coteResults)
     {
         if (plan.Operator != CompoundOperator.UnionAll) return false;
         if (plan.FinalOrderBy is not { Count: > 0 }) return false;

@@ -26,11 +26,11 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     
     // Persistent collections for zero-allocation reuse
     private readonly HashSet<NodeKey> _visitedCache = new();
-    private readonly Queue<(NodeKey Key, int Depth, int PathParent)> _traversalQueue = new();
+    private readonly Queue<TraversalQueueItem> _traversalQueue = new();
     private readonly List<TraversalNode> _resultNodesCache = new();
 
     // Parent-pointer path tracking: O(N) instead of O(N*D) list copies
-    private readonly List<(NodeKey Key, int Parent)> _pathNodes = new();
+    private readonly List<PathReconstructionNode> _pathNodes = new();
 
     /// <summary>
     /// Creates a new graph context from an existing b-tree reader.
@@ -157,10 +157,10 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         if (trackPaths)
         {
             startPathIndex = pathNodes.Count;
-            pathNodes.Add((startKey, -1));
+            pathNodes.Add(new PathReconstructionNode(startKey, -1));
         }
 
-        queue.Enqueue((startKey, 0, startPathIndex));
+        queue.Enqueue(new TraversalQueueItem(startKey, 0, startPathIndex));
         visited.Add(startKey);
 
         RelationKind? filterKind = policy.Kind;
@@ -217,10 +217,10 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
                         if (trackPaths)
                         {
                             nextPathIndex = pathNodes.Count;
-                            pathNodes.Add((nextKey, currentPathIndex));
+                            pathNodes.Add(new PathReconstructionNode(nextKey, currentPathIndex));
                         }
 
-                        queue.Enqueue((nextKey, currentDepth + 1, nextPathIndex));
+                        queue.Enqueue(new TraversalQueueItem(nextKey, currentDepth + 1, nextPathIndex));
                         fanOutCount++;
                     }
                 }
@@ -230,7 +230,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return new GraphResult(resultNodes);
     }
 
-    private static List<NodeKey> ReconstructPath(List<(NodeKey Key, int Parent)> pathNodes, int index)
+    private static List<NodeKey> ReconstructPath(List<PathReconstructionNode> pathNodes, int index)
     {
         // Walk parent pointers to count depth, then fill in reverse
         int count = 0;
@@ -238,7 +238,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         while (walk >= 0)
         {
             count++;
-            walk = pathNodes[walk].Parent;
+            walk = pathNodes[walk].ParentIndex;
         }
 
         var path = new List<NodeKey>(count);
@@ -248,7 +248,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         for (int i = count - 1; i >= 0; i--)
         {
             path[i] = pathNodes[walk].Key;
-            walk = pathNodes[walk].Parent;
+            walk = pathNodes[walk].ParentIndex;
         }
 
         return path;

@@ -16,7 +16,7 @@ internal static class StreamingSetOpProcessor
     /// Streaming UNION: reads both sides from cursors, deduplicates via HashSet,
     /// outputs unique rows. Avoids materializing either side into an intermediate list.
     /// </summary>
-    internal static (List<QueryValue[]> rows, string[] columns) StreamingUnion(
+    internal static MaterializedResultSet StreamingUnion(
         SharcDataReader leftReader,
         SharcDataReader rightReader)
     {
@@ -30,14 +30,14 @@ internal static class StreamingSetOpProcessor
         StreamInto(leftReader, fieldCount, seen, result, ref spare);
         StreamInto(rightReader, fieldCount, seen, result, ref spare);
 
-        return (result, columnNames);
+        return new MaterializedResultSet(result, columnNames);
     }
 
     /// <summary>
     /// Streaming INTERSECT: materializes the right side into a HashSet,
     /// then streams the left side — only rows present in both sides survive.
     /// </summary>
-    internal static (List<QueryValue[]> rows, string[] columns) StreamingIntersect(
+    internal static MaterializedResultSet StreamingIntersect(
         SharcDataReader leftReader,
         SharcDataReader rightReader)
     {
@@ -65,14 +65,14 @@ internal static class StreamingSetOpProcessor
                 spare = row; // recycle — this array is not referenced
         }
 
-        return (result, columnNames);
+        return new MaterializedResultSet(result, columnNames);
     }
 
     /// <summary>
     /// Streaming EXCEPT: materializes the right side into a HashSet,
     /// then streams the left side — only rows NOT present in the right side survive.
     /// </summary>
-    internal static (List<QueryValue[]> rows, string[] columns) StreamingExcept(
+    internal static MaterializedResultSet StreamingExcept(
         SharcDataReader leftReader,
         SharcDataReader rightReader)
     {
@@ -100,7 +100,7 @@ internal static class StreamingSetOpProcessor
                 spare = row;
         }
 
-        return (result, columnNames);
+        return new MaterializedResultSet(result, columnNames);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────
