@@ -5,7 +5,10 @@
 namespace Sharc.Arena.Wasm.Services;
 
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using Sharc.Arena.Wasm.Models;
+using Sharc.Crypto;
 using Sharc.Graph;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
@@ -21,6 +24,11 @@ public sealed class SharcEngine : IDisposable
 {
     private SharcDatabase? _db;
     private byte[]? _dbBytes;
+    private string? _encryptedDbPath;
+    private const string EncPassword = "sharc-arena-live-demo";
+
+    /// <summary>Exposes the live database for query pipeline execution.</summary>
+    internal SharcDatabase? Database => _db;
 
     // Direct graph store access for O(log N + M) traversal via shared BTreeReader
     private SharcContextGraph? _graph;
@@ -579,14 +587,85 @@ public sealed class SharcEngine : IDisposable
 
     public EngineBaseResult RunEncryption()
     {
-        // Encryption requires an encrypted database file, which we don't generate here.
-        // Return the reference value with a note.
+        if (_dbBytes is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+
+        EnsureEncryptedDb();
+        if (_encryptedDbPath is null) return new EngineBaseResult { Value = null, Note = "Encryption setup failed" };
+
+        var encOptions = new SharcOpenOptions
+        {
+            Encryption = new SharcEncryptionOptions { Password = EncPassword }
+        };
+
+        // Warm-up (JIT + key derivation cache)
+        using (var warmup = SharcDatabase.Open(_encryptedDbPath, encOptions))
+        {
+            using var r = warmup.CreateReader("users", "id");
+            while (r.Read()) _ = r.GetInt64(0);
+        }
+
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        var sw = Stopwatch.StartNew();
+
+        long rowCount = 0;
+        using (var encDb = SharcDatabase.Open(_encryptedDbPath, encOptions))
+        {
+            using var reader = encDb.CreateReader("users", "id");
+            while (reader.Read())
+            {
+                _ = reader.GetInt64(0);
+                rowCount++;
+            }
+        }
+
+        sw.Stop();
+        var allocAfter = GC.GetAllocatedBytesForCurrentThread();
+
         return new EngineBaseResult
         {
-            Value = 340,
-            Allocation = "48 KB",
-            Note = "AES-256-GCM + Argon2id (reference)",
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
+            Allocation = FormatAlloc(allocAfter - allocBefore),
+            Note = $"AES-256-GCM + Argon2id, {rowCount} rows (live)",
         };
+    }
+
+    private void EnsureEncryptedDb()
+    {
+        if (_encryptedDbPath is not null || _dbBytes is null) return;
+
+        int pageSize = (_dbBytes[16] << 8) | _dbBytes[17];
+        if (pageSize == 1) pageSize = 65536;
+        int pageCount = _dbBytes.Length / pageSize;
+
+        var salt = new byte[32];
+        RandomNumberGenerator.Fill(salt);
+        var passwordBytes = Encoding.UTF8.GetBytes(EncPassword);
+
+        using var keyHandle = SharcKeyHandle.DeriveKey(passwordBytes, salt,
+            timeCost: 1, memoryCostKiB: 64, parallelism: 1);
+        var verificationHash = keyHandle.ComputeHmac(salt);
+
+        using var transform = new AesGcmPageTransform(keyHandle);
+        int encPageSize = transform.TransformedPageSize(pageSize);
+
+        var encryptedFile = new byte[EncryptionHeader.HeaderSize + (encPageSize * pageCount)];
+        EncryptionHeader.Write(encryptedFile,
+            kdfAlgorithm: 1, cipherAlgorithm: 1,
+            timeCost: 1, memoryCostKiB: 64, parallelism: 1,
+            salt: salt, verificationHash: verificationHash,
+            pageSize: pageSize, pageCount: pageCount);
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            uint pageNum = (uint)(i + 1);
+            var plainPage = _dbBytes.AsSpan(i * pageSize, pageSize);
+            var encDest = encryptedFile.AsSpan(
+                EncryptionHeader.HeaderSize + (i * encPageSize), encPageSize);
+            transform.TransformWrite(plainPage, encDest, pageNum);
+        }
+
+        _encryptedDbPath = Path.Combine(Path.GetTempPath(), $"sharc_arena_{Guid.NewGuid():N}.sharc");
+        File.WriteAllBytes(_encryptedDbPath, encryptedFile);
     }
 
     public EngineBaseResult RunMemoryFootprint()
@@ -708,6 +787,12 @@ public sealed class SharcEngine : IDisposable
         _db = null;
 
         _dbBytes = null;
+
+        if (_encryptedDbPath is not null)
+        {
+            try { File.Delete(_encryptedDbPath); } catch { /* best-effort cleanup */ }
+            _encryptedDbPath = null;
+        }
     }
 
     private static string FormatAlloc(long bytes)

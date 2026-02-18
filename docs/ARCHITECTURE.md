@@ -79,7 +79,7 @@ src/Sharc.Query/              Sharq Parser & JIT Compiler
 src/Sharc.Graph/              Graph Logic & Stores
 src/Sharc.Graph.Surface/      Graph Interfaces
 src/Sharc.Crypto/             Encryption
-tests/                        1,000+ Unit & Integration Tests
+tests/                        2,000+ Unit & Integration Tests
 bench/                        BenchmarkDotNet Suite
 tools/                        CLI & Context Tools
 ```

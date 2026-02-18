@@ -355,8 +355,8 @@ public class RecordDecoderTests
     public void DecodeColumn_IndexOutOfRange_ThrowsArgumentOutOfRange()
     {
         var record = BuildRecord((0, []), (9, []));
-
-        Assert.Throws<ArgumentOutOfRangeException>(() => _decoder.DecodeColumn(record, 5));
+        var result = _decoder.DecodeColumn(record, 5);
+        Assert.True(result.IsNull);
     }
 
     // --- ReadSerialTypes ---

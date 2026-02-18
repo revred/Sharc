@@ -105,14 +105,39 @@ CachedPageSource
 
 ### 4.2 Cache Sizing
 
-Default: 2000 pages × 4 KiB = ~8 MiB. Configurable via `SharcOpenOptions.PageCacheSize`.
+Default: 2000 pages (read path). Configurable via `SharcOpenOptions.PageCacheSize`.
 
-| Workload | Recommended Cache |
-|----------|------------------|
-| Small DB (<10 MiB) | 0 (use MemoryPageSource) |
-| Medium DB scan | 200–500 pages |
-| Large DB, single table | 2000 pages (default) |
-| Multiple concurrent readers | 5000+ pages |
+Cache is **demand-driven**: capacity is a maximum, not a reservation. Buffers are rented from `ArrayPool<byte>.Shared` on first access, not at construction. A cache sized 2000 that only touches 10 pages allocates 10 buffers.
+
+| Workload | Recommended Cache | Rationale |
+|----------|:-----------------:|-----------|
+| Small DB (<10 MiB) | 0 | Use MemoryPageSource directly |
+| **Write (any DB size)** | **16** | BTreeMutator handles intra-txn; LRU for schema + root pages only |
+| Medium DB scan | 200–500 pages | Sequential scan working set |
+| Large DB, single table | 2000 pages (default) | Full scan with LRU eviction |
+| Multiple concurrent readers | 5000+ pages | Shared hot pages across readers |
+
+See [docs/WriteMemPageAlloc.md](../docs/WriteMemPageAlloc.md) for the full design rationale (ADR-015).
+
+### 4.2 Write Path — Arena + Pooling (ADR-016, refined by ADR-017)
+
+The write path uses four strategies to minimize per-operation allocation:
+
+1. **Table Root Cache**: `SharcWriter` caches table name → root page number. Eliminates sqlite_master re-scan per operation.
+
+2. **ShadowPageSource Pooling with Reset()**: `ShadowPageSource.Reset()` clears data but preserves `Dictionary`/`List` internal capacity. Auto-commit operations reuse the cached shadow instance across calls. `BTreeMutator` is **not** pooled — a fresh instance is created per transaction to avoid stale `FreelistManager` delegate closures (see ADR-017).
+
+3. **Stack-Based Path Tracking**: `BTreeMutator.Insert()` uses `stackalloc (uint, int)[20]` for the B-tree navigation path. Cell ref arrays use a pooled instance-level `CellRef[]` that grows via `EnsureCellRefCapacity()`.
+
+4. **Page Buffer Arena**: `PageArena` rents a single contiguous `byte[]` from `ArrayPool` and sub-allocates page-sized slots via bump pointer. `ShadowPageSource` stores `Dictionary<uint, int>` (slot indices) instead of per-page `byte[]` references. One Rent/Return per transaction instead of N.
+
+```text
+Auto-commit path (warm writer):
+  SharcWriter._cachedShadow  ──────────────► ShadowPageSource (Reset, reuse)
+  Transaction creates fresh   ──────────────► BTreeMutator (new per txn, avoids stale delegates)
+  SharcWriter._tableRootCache ─────────────► Dictionary<string, uint> (persists)
+  ShadowPageSource._arena    ──────────────► PageArena (Reset bump pointer, keep buffer)
+```
 
 ### 4.3 Memory-Backed Databases
 

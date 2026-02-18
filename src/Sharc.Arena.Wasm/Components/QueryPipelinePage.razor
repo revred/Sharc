@@ -5,7 +5,7 @@
     <div class="query-badge">QUERY PIPELINE</div>
     <h2 class="query-title">13 Queries. Head to Head.</h2>
     <p class="query-subtitle">
-        Sharc's query engine vs SQLite's VDBE &mdash; real performance data from BenchmarkDotNet.
+        Sharc's query engine vs SQLite's VDBE &mdash; @(_isLive ? "live measurement on this device" : "reference data from BenchmarkDotNet").
     </p>
 
     <div class="query-summary">
@@ -34,7 +34,7 @@
     </div>
 
     <div class="query-note">
-        Click any row for allocation details. All measurements from BenchmarkDotNet v0.15.8, .NET 10.0.2, 5K row dataset.
+        Click any row for allocation details. @(_isLive ? "Live measurement — Sharc.Query() vs SqliteCommand, executed on this device." : "Reference data from BenchmarkDotNet v0.15.8, .NET 10.0.2, 5K row dataset.")
     </div>
 </div>
 
@@ -42,10 +42,12 @@
     private IReadOnlyList<QueryResult> _results = [];
     private int _sharcWins;
     private int _sqliteWins;
+    private bool _isLive;
 
     protected override async Task OnInitializedAsync()
     {
-        _results = await QueryEngine.LoadResultsAsync();
+        _results = await QueryEngine.RunLiveAsync();
+        _isLive = QueryEngine.IsLive;
         _sharcWins = _results.Count(r => r.Winner == "sharc");
         _sqliteWins = _results.Count(r => r.Winner == "sqlite");
     }

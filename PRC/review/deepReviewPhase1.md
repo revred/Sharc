@@ -400,8 +400,9 @@ deliberate scope boundaries, not missing features:
 - **No WAL mode** — Throws `UnsupportedFeatureException` if WAL is detected at open time.
 - **No virtual tables** — FTS5, R-Tree, and other extensions are not supported.
 - **No WITHOUT ROWID** — Tables using `WITHOUT ROWID` are not readable.
-- **Higher baseline memory** — Schema parsing allocates ~40 KB at open time. For
-  sustained scans, Sharc uses more memory than SQLite (trades memory for speed).
+- **Higher baseline memory** — Schema parsing allocates ~40 KB at open time. Page cache
+  is now demand-driven (ADR-015) — no upfront allocation. For sustained scans, memory
+  is proportional to pages accessed.
 
 For workloads that need any of the above, use Microsoft.Data.Sqlite alongside Sharc.
 The two complement each other.
@@ -425,7 +426,7 @@ For balance — these are things I'd highlight as exemplary if reviewing this in
 
 3. **`FilePageSource` using `File.OpenHandle` + `RandomAccess`** — Most C# code uses `FileStream`. Using the raw handle with `RandomAccess.Read` eliminates Stream buffering overhead and async state machine cost. The stackalloc for the 100-byte header read is a nice touch.
 
-4. **`CachedPageSource` LRU with `ArrayPool`** — Clean LRU implementation that rents from the shared pool and returns on eviction. Thread-safe via lock. No custom linked list — uses BCL `LinkedList<T>`.
+4. **`CachedPageSource` LRU with `ArrayPool`** — Clean LRU implementation that rents from the shared pool on demand and returns on eviction. Thread-safe via lock. Now uses demand-driven allocation (ADR-015): capacity is a maximum, not a reservation — buffers are rented on first access, not at construction.
 
 5. **`MemoryMappedPageSource` safety boundary** — The single `unsafe` block is correctly confined to pointer acquisition, wrapped in `UnmanagedMemoryManager`, and everything downstream is safe spans. Good separation of concerns.
 

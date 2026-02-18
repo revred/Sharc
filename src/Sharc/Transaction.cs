@@ -1,4 +1,6 @@
 using Sharc.Core;
+using Sharc.Core.BTree;
+using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Sharc.Exceptions;
 
@@ -6,7 +8,7 @@ namespace Sharc;
 
 /// <summary>
 /// Represents an ACID transaction in Sharc.
-/// All writes performed during the transaction are buffered in memory and 
+/// All writes performed during the transaction are buffered in memory and
 /// only persisted to the underlying storage upon <see cref="Commit"/>.
 /// </summary>
 public sealed class Transaction : IDisposable
@@ -14,6 +16,9 @@ public sealed class Transaction : IDisposable
     private readonly SharcDatabase _db;
     private readonly IWritablePageSource _baseSource;
     private readonly ShadowPageSource _shadowSource;
+    private readonly bool _ownsShadow; // false when shadow is pooled by SharcWriter
+    private BTreeMutator? _mutator;
+    private FreelistManager? _freelistManager;
     private bool _isCompleted;
     private bool _disposed;
 
@@ -24,15 +29,53 @@ public sealed class Transaction : IDisposable
     public IPageSource PageSource => _shadowSource;
 
     /// <summary>
-    /// Returns the shadow page source for advanced write operations.
+    /// Returns the shadow page source for pooling by SharcWriter.
     /// </summary>
     internal ShadowPageSource GetShadowSource() => _shadowSource;
+
+    /// <summary>
+    /// Returns a cached <see cref="BTreeMutator"/> for this transaction, creating one on first call.
+    /// The mutator's page cache is shared across all operations within the transaction.
+    /// A fresh mutator and FreelistManager are always created per-transaction to avoid stale freelist state.
+    /// </summary>
+    internal BTreeMutator FetchMutator(int usablePageSize)
+    {
+        if (_mutator != null)
+            return _mutator;
+
+        // Initialize freelist from the database header
+        var header = _db.Header;
+        _freelistManager = new FreelistManager(_shadowSource, _shadowSource.PageSize);
+        _freelistManager.Initialize(header.FirstFreelistPage, header.FreelistPageCount);
+
+        Func<uint>? freePageAllocator = _freelistManager.HasFreePages ? _freelistManager.PopFreePage : null;
+
+        _mutator = new BTreeMutator(_shadowSource, usablePageSize,
+            freePageAllocator, _freelistManager.PushFreePage);
+        return _mutator;
+    }
 
     internal Transaction(SharcDatabase db, IWritablePageSource baseSource)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _baseSource = baseSource ?? throw new ArgumentNullException(nameof(baseSource));
         _shadowSource = new ShadowPageSource(baseSource);
+        _ownsShadow = true;
+    }
+
+    /// <summary>
+    /// Creates a transaction that reuses a pooled ShadowPageSource.
+    /// The shadow must have been Reset() before this call.
+    /// Caller owns the shadow lifecycle — this transaction will not dispose it.
+    /// The mutator is always created fresh per-transaction.
+    /// </summary>
+    internal Transaction(SharcDatabase db, IWritablePageSource baseSource,
+        ShadowPageSource cachedShadow)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _baseSource = baseSource ?? throw new ArgumentNullException(nameof(baseSource));
+        _shadowSource = cachedShadow;
+        _ownsShadow = false;
     }
 
     /// <summary>
@@ -47,25 +90,33 @@ public sealed class Transaction : IDisposable
 
         try
         {
-            var dirtyPages = _shadowSource.GetDirtyPages();
-            if (dirtyPages.Count == 0)
+            // Track whether B-tree operations occurred (mutator was used)
+            bool hadMutator = _mutator != null;
+
+            // Release mutator page buffers before flushing dirty pages.
+            _mutator?.Dispose();
+            _mutator = null;
+
+            if (_shadowSource.DirtyPageCount == 0)
             {
                 _isCompleted = true;
                 _db.EndTransaction(this);
                 return;
             }
 
+            // Update page 1 header only when B-tree operations modified the database.
+            // Raw page writes (without mutator) skip header update — the caller manages the header.
+            if (hadMutator)
+                UpdateDatabaseHeader();
+
             string? journalPath = null;
             if (_db.FilePath != null)
             {
                 journalPath = _db.FilePath + ".journal";
-                RollbackJournal.CreateJournal(journalPath, _baseSource, dirtyPages.Keys);
+                RollbackJournal.CreateJournal(journalPath, _baseSource, _shadowSource.GetDirtyPageNumbers());
             }
 
-            foreach (var (pageNumber, data) in dirtyPages)
-            {
-                _baseSource.WritePage(pageNumber, data);
-            }
+            _shadowSource.WriteDirtyPagesTo(_baseSource);
             _baseSource.Flush();
 
             if (journalPath != null && File.Exists(journalPath))
@@ -88,6 +139,8 @@ public sealed class Transaction : IDisposable
     public void Rollback()
     {
         if (_disposed || _isCompleted) return;
+        _mutator?.Dispose();
+        _mutator = null;
         _shadowSource.ClearShadow();
         _isCompleted = true;
         _db.EndTransaction(this);
@@ -103,6 +156,84 @@ public sealed class Transaction : IDisposable
         _shadowSource.WritePage(pageNumber, source);
     }
 
+    private uint? _newSchemaCookie;
+
+    /// <summary>
+    /// Allocates a new root page for a table.
+    /// </summary>
+    internal uint AllocateTableRoot(int usablePageSize)
+    {
+        var mutator = FetchMutator(usablePageSize);
+        return mutator.AllocateNewPage();
+    }
+
+    /// <summary>
+    /// Sets the new schema cookie value to be written to the database header on commit.
+    /// </summary>
+    internal void SetSchemaCookie(uint cookie)
+    {
+        _newSchemaCookie = cookie;
+    }
+
+    /// <summary>
+    /// Executes a DDL statement (CREATE TABLE, ALTER TABLE, etc) within this transaction.
+    /// </summary>
+    public void Execute(string sql, Core.Trust.AgentInfo? agent = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_isCompleted) throw new InvalidOperationException("Transaction already completed.");
+
+        SharcSchemaWriter.Execute(_db, this, sql, agent);
+    }
+
+    /// <summary>
+    /// Updates the database header on page 1 with current metadata.
+    /// Called during commit to persist PageCount, ChangeCounter, and freelist pointers.
+    /// </summary>
+    private void UpdateDatabaseHeader()
+    {
+        int pageSize = _shadowSource.PageSize;
+
+        // Read page 1 (may already be in shadow if modified during this transaction)
+        Span<byte> page1 = stackalloc byte[pageSize];
+        _shadowSource.ReadPage(1, page1);
+
+        // Parse existing header
+        var oldHeader = DatabaseHeader.Parse(page1);
+
+        // Compute new values
+        int newPageCount = _shadowSource.PageCount;
+        uint newChangeCounter = oldHeader.ChangeCounter + 1;
+
+        // Read freelist state from manager (if active), otherwise preserve existing values
+        uint freelistFirstPage = _freelistManager?.FirstTrunkPage ?? oldHeader.FirstFreelistPage;
+        int freelistCount = _freelistManager?.FreelistPageCount ?? oldHeader.FreelistPageCount;
+
+        uint schemaCookie = _newSchemaCookie ?? oldHeader.SchemaCookie;
+
+        // Build updated header preserving all fields except PageCount, ChangeCounter, and freelist
+        var newHeader = new DatabaseHeader(
+            pageSize: oldHeader.PageSize,
+            writeVersion: oldHeader.WriteVersion,
+            readVersion: oldHeader.ReadVersion,
+            reservedBytesPerPage: oldHeader.ReservedBytesPerPage,
+            changeCounter: newChangeCounter,
+            pageCount: newPageCount,
+            firstFreelistPage: freelistFirstPage,
+            freelistPageCount: freelistCount,
+            schemaCookie: schemaCookie,
+            schemaFormat: oldHeader.SchemaFormat,
+            textEncoding: oldHeader.TextEncoding,
+            userVersion: oldHeader.UserVersion,
+            applicationId: oldHeader.ApplicationId,
+            sqliteVersionNumber: oldHeader.SqliteVersionNumber
+        );
+
+        // Write updated header back to page 1
+        DatabaseHeader.Write(page1, newHeader);
+        _shadowSource.WritePage(1, page1);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -111,7 +242,10 @@ public sealed class Transaction : IDisposable
         {
             Rollback();
         }
-        _shadowSource.Dispose();
+        _mutator?.Dispose();
+        _mutator = null;
+        if (_ownsShadow)
+            _shadowSource.Dispose();
         _disposed = true;
     }
 }

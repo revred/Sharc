@@ -50,6 +50,9 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <summary>Number of cache misses since creation.</summary>
     public int CacheMissCount { get; private set; }
 
+    /// <summary>Number of slots that have had a buffer rented (demand-driven). For test observability.</summary>
+    internal int AllocatedSlotCount { get; private set; }
+
     /// <inheritdoc />
     public int PageSize => _inner.PageSize;
 
@@ -89,9 +92,11 @@ public sealed class CachedPageSource : IWritablePageSource
             _lookup = new Dictionary<uint, int>(capacity);
             _freeSlots = new Stack<int>(capacity);
             
+            // Demand-driven: only slot metadata is pre-allocated.
+            // Capacity is a maximum, not a reservation.
+            // Page buffers (byte[]) are rented on first use in AllocateSlot().
             for (int i = 0; i < capacity; i++)
             {
-                _slots[i].Data = ArrayPool<byte>.Shared.Rent(inner.PageSize);
                 _freeSlots.Push(i);
             }
             
@@ -261,10 +266,18 @@ public sealed class CachedPageSource : IWritablePageSource
         {
             int slot = _freeSlots.Pop();
             _count++;
+            // Demand-driven: rent buffer on first use.
+            // Capacity is a maximum, not a reservation.
+            if (_slots[slot].Data is null)
+            {
+                _slots[slot].Data = ArrayPool<byte>.Shared.Rent(_inner.PageSize);
+                AllocatedSlotCount++;
+            }
             return slot;
         }
         else
         {
+            // Eviction: reuse the existing buffer from the LRU tail (already rented).
             int slot = _tail;
             var victimPage = _slots[slot].PageNumber;
             _lookup.Remove(victimPage);

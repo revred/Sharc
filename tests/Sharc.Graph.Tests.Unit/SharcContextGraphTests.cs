@@ -5,13 +5,13 @@ using Sharc.Core.Primitives;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Core.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit;
 
-[TestClass]
 public class SharcContextGraphTests
 {
-    [TestMethod]
+    [Fact]
     public void Traverse_Bidirectional_FindsBothUpstreamAndDownstream()
     {
         // Setup: A -> B -> C
@@ -64,14 +64,14 @@ public class SharcContextGraphTests
         var result = graph.Traverse(new NodeKey(200), policy);
 
         // Should find B (start), A (incoming), C (outgoing)
-        Assert.HasCount(3, result.Nodes);
+        Assert.Equal(3, result.Nodes.Count);
         
-        Assert.IsTrue(result.Nodes.Any(n => n.Record.Key.Value == 200));
-        Assert.IsTrue(result.Nodes.Any(n => n.Record.Key.Value == 100)); // Found via incoming
-        Assert.IsTrue(result.Nodes.Any(n => n.Record.Key.Value == 300)); // Found via outgoing
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 200);
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 100); // Found via incoming
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 300); // Found via outgoing
     }
 
-    [TestMethod]
+    [Fact]
     public void Traverse_Incoming_only_FindsUpstream()
     {
         // A -> B -> C
@@ -101,8 +101,8 @@ public class SharcContextGraphTests
 
         var result = graph.Traverse(new NodeKey(300), policy);
 
-        Assert.HasCount(3, result.Nodes); // C, B, A
-        Assert.IsTrue(result.Nodes.Any(n => n.Record.Key.Value == 100));
+        Assert.Equal(3, result.Nodes.Count); // C, B, A
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 100);
     }
 
 

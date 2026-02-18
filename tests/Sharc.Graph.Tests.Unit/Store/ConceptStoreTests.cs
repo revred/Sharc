@@ -6,10 +6,10 @@ using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Graph.Store;
 using Sharc.Core.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Store;
 
-[TestClass]
 public class ConceptStoreTests
 {
     /// <summary>
@@ -18,7 +18,7 @@ public class ConceptStoreTests
     /// This test creates rows where rowid and BarID differ, and verifies Get() finds the
     /// correct row by scanning the BarID column.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public void Get_BarIdDifferentFromRowid_ReturnsCorrectRecord()
     {
         // Schema: id TEXT(0), key INTEGER(1), kind INTEGER(2), data TEXT(3)
@@ -40,12 +40,12 @@ public class ConceptStoreTests
 
         var result = store.Get(new NodeKey(200));
 
-        Assert.IsNotNull(result);
-        Assert.AreEqual(200, result.Value.Key.Value);
-        Assert.AreEqual("{\"name\":\"B\"}", result.Value.JsonData);
+        Assert.NotNull(result);
+        Assert.Equal(200, result.Value.Key.Value);
+        Assert.Equal("{\"name\":\"B\"}", result.Value.JsonData);
     }
 
-    [TestMethod]
+    [Fact]
     public void Get_WithTokens_ReturnsCorrectTokens()
     {
         var schema = CreateTestSchemaWithTokens();
@@ -61,11 +61,11 @@ public class ConceptStoreTests
 
         var result = store.Get(new NodeKey(100));
 
-        Assert.IsNotNull(result);
-        Assert.AreEqual(500, result.Value.Tokens);
+        Assert.NotNull(result);
+        Assert.Equal(500, result.Value.Tokens);
     }
 
-    [TestMethod]
+    [Fact]
     public void Get_NonexistentKey_ReturnsNull()
     {
         var schema = CreateTestSchema();
@@ -81,10 +81,10 @@ public class ConceptStoreTests
 
         var result = store.Get(new NodeKey(999));
 
-        Assert.IsNull(result);
+        Assert.Null(result);
     }
 
-    [TestMethod]
+    [Fact]
     public void Get_FirstRowMatch_ReturnsImmediately()
     {
         var schema = CreateTestSchema();
@@ -101,8 +101,8 @@ public class ConceptStoreTests
 
         var result = store.Get(new NodeKey(50));
 
-        Assert.IsNotNull(result);
-        Assert.AreEqual("{\"first\":true}", result.Value.JsonData);
+        Assert.NotNull(result);
+        Assert.Equal("{\"first\":true}", result.Value.JsonData);
     }
 
     #region Test Helpers

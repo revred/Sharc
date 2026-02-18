@@ -1,11 +1,18 @@
 @* Page 5: Trust Layer Demo — Register → Append → Verify → Tamper & Detect *@
+@* All operations run LIVE against the in-memory SharcDatabase. *@
+
+@using System.Diagnostics
+@using System.Security.Cryptography
+@using Sharc.Trust
+@using Sharc.Core.Trust
+@inject SharcEngine SharcEngine
 
 <div class="trust-page">
     <div class="trust-badge">CRYPTOGRAPHIC TRUST</div>
     <h2 class="trust-title">Every Memory Has a Proof</h2>
     <p class="trust-subtitle">
         Sharc's trust layer gives AI agents cryptographic guarantees.
-        ECDSA identity, hash-chain ledger, tamper detection &mdash; built in.
+        ECDSA identity, hash-chain ledger, tamper detection &mdash; running live on this device.
     </p>
 
     <div class="trust-steps">
@@ -18,8 +25,9 @@
                 @if (Step >= 1)
                 {
                     <div class="trust-step-result">
-                        <code>agent-id: agent-0</code>
-                        <code>public-key: 04a8c2...9f3b (65 bytes)</code>
+                        <code>agent-id: @_agentId</code>
+                        <code>public-key: @_publicKeyHex (@_publicKeyLen bytes)</code>
+                        <code>registered in @FormatTime(_registerUs)</code>
                     </div>
                 }
             </div>
@@ -34,7 +42,7 @@
                 @if (Step >= 2)
                 {
                     <div class="trust-step-result">
-                        <code>entries: 50 appended</code>
+                        <code>entries: @_appendCount appended in @FormatTime(_appendUs)</code>
                         <code>chain: prev_hash &#x2192; SHA256(payload + prev) &#x2192; next_hash</code>
                     </div>
                 }
@@ -50,8 +58,8 @@
                 @if (Step >= 3)
                 {
                     <div class="trust-step-result success">
-                        <code>&#x2713; All 50 entries verified in 850 &#x00B5;s</code>
-                        <code>&#x2713; Chain integrity: INTACT</code>
+                        <code>&#x2713; All @_totalEntries entries verified in @FormatTime(_verifyUs)</code>
+                        <code>&#x2713; Chain integrity: @(_chainValid ? "INTACT" : "BROKEN")</code>
                     </div>
                 }
             </div>
@@ -62,12 +70,12 @@
             <div class="trust-step-num">4</div>
             <div class="trust-step-content">
                 <h3 class="trust-step-title">Tamper &amp; Detect</h3>
-                <p class="trust-step-desc">Modify entry #25, re-verify chain</p>
+                <p class="trust-step-desc">Verify with a forged key &mdash; signature mismatch detected</p>
                 @if (Step >= 4)
                 {
                     <div class="trust-step-result error">
-                        <code>&#x2717; TAMPER DETECTED at entry #25</code>
-                        <code>&#x2717; Expected: 7a3f...b2c1 Got: e4d8...a91f</code>
+                        <code>&#x2717; @_tamperDetail</code>
+                        <code>&#x2717; Detected in @FormatTime(_tamperUs)</code>
                     </div>
                 }
             </div>
@@ -75,7 +83,11 @@
     </div>
 
     <div class="trust-controls">
-        @if (Step < 4)
+        @if (_dbMissing)
+        {
+            <span class="trust-note">Waiting for engine initialization&hellip;</span>
+        }
+        else if (Step < 4)
         {
             <button class="btn-primary trust-btn" @onclick="@NextStep">
                 @StepButtonText
@@ -83,20 +95,42 @@
         }
         else
         {
-            <button class="btn-secondary trust-btn" @onclick="@Reset">
+            <button class="btn-secondary trust-btn" @onclick="@ResetDemo">
                 &#x21BB; Reset Demo
             </button>
         }
     </div>
 
     <div class="trust-note">
-        This demo illustrates the trust layer concept. In production, Sharc uses real ECDSA P-256 keys
-        and HMAC-SHA256 hash chains stored alongside your data.
+        All operations execute live against the in-memory SharcDatabase on this device.
+        HMAC-SHA256 hash chains, real key generation, real signature verification.
     </div>
 </div>
 
 @code {
-    private int Step { get; set; }
+    private int Step;
+    private bool _dbMissing;
+
+    // Step 1: Register
+    private string _agentId = "";
+    private string _publicKeyHex = "";
+    private int _publicKeyLen;
+    private double _registerUs;
+
+    // Step 2: Append
+    private int _appendCount;
+    private double _appendUs;
+
+    // Step 3: Verify
+    private long _totalEntries;
+    private bool _chainValid;
+    private double _verifyUs;
+
+    // Step 4: Tamper
+    private string _tamperDetail = "";
+    private double _tamperUs;
+
+    private SharcSigner? _signer;
 
     private string StepButtonText => Step switch
     {
@@ -107,6 +141,124 @@
         _ => "Next"
     };
 
-    private void NextStep() => Step = Math.Min(Step + 1, 4);
-    private void Reset() => Step = 0;
+    protected override void OnInitialized()
+    {
+        _dbMissing = SharcEngine.Database is null;
+    }
+
+    private void NextStep()
+    {
+        Step = Math.Min(Step + 1, 4);
+        var db = SharcEngine.Database;
+        if (db is null) { _dbMissing = true; return; }
+
+        switch (Step)
+        {
+            case 1: RunRegister(db); break;
+            case 2: RunAppend(db); break;
+            case 3: RunVerify(db); break;
+            case 4: RunTamperDetect(db); break;
+        }
+    }
+
+    private void RunRegister(SharcDatabase db)
+    {
+        _agentId = $"arena-{Guid.NewGuid().ToString("N")[..8]}";
+        _signer = new SharcSigner(_agentId);
+        var pubKey = _signer.GetPublicKey();
+        _publicKeyHex = Convert.ToHexString(pubKey)[..8] + "..." + Convert.ToHexString(pubKey)[^6..];
+        _publicKeyLen = pubKey.Length;
+
+        var sw = Stopwatch.StartNew();
+
+        var tempAgent = new AgentInfo(
+            _agentId, AgentClass.Root, pubKey,
+            1_000_000, "rw", "r", 0, 0, "", false,
+            Array.Empty<byte>());
+
+        var buffer = AgentRegistry.GetVerificationBuffer(tempAgent);
+        var signature = _signer.Sign(buffer);
+        var agentInfo = tempAgent with { Signature = signature };
+
+        var registry = new AgentRegistry(db);
+        registry.RegisterAgent(agentInfo);
+
+        sw.Stop();
+        _registerUs = sw.Elapsed.TotalMicroseconds();
+    }
+
+    private void RunAppend(SharcDatabase db)
+    {
+        if (_signer is null) return;
+
+        var sw = Stopwatch.StartNew();
+
+        var ledger = new LedgerManager(db);
+        for (int i = 0; i < 50; i++)
+        {
+            ledger.Append($"Context update {i}: agent={_agentId} ts={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}", _signer);
+        }
+
+        sw.Stop();
+        _appendCount = 50;
+        _appendUs = sw.Elapsed.TotalMicroseconds();
+    }
+
+    private void RunVerify(SharcDatabase db)
+    {
+        _totalEntries = db.GetRowCount("_sharc_ledger");
+
+        var ledger = new LedgerManager(db);
+
+        var sw = Stopwatch.StartNew();
+        _chainValid = ledger.VerifyIntegrity();
+        sw.Stop();
+
+        _verifyUs = sw.Elapsed.TotalMicroseconds();
+    }
+
+    private void RunTamperDetect(SharcDatabase db)
+    {
+        // Verify with a forged public key — simulates what happens when
+        // an attacker replaces an agent's key or modifies signed entries.
+        var forgedKey = new byte[32];
+        RandomNumberGenerator.Fill(forgedKey);
+        var fakeSigners = new Dictionary<string, byte[]> { [_agentId] = forgedKey };
+
+        string? detail = null;
+        var ledger = new LedgerManager(db);
+        ledger.SecurityAudit += (_, e) =>
+        {
+            detail ??= $"TAMPER DETECTED: {e.Details}";
+        };
+
+        var sw = Stopwatch.StartNew();
+        var valid = ledger.VerifyIntegrity(activeSigners: fakeSigners);
+        sw.Stop();
+
+        _tamperUs = sw.Elapsed.TotalMicroseconds();
+        _tamperDetail = detail ?? (valid ? "No tamper found" : "Integrity violation detected");
+    }
+
+    private void ResetDemo()
+    {
+        Step = 0;
+        _signer = null;
+        _agentId = "";
+        _publicKeyHex = "";
+        _registerUs = 0;
+        _appendCount = 0;
+        _appendUs = 0;
+        _totalEntries = 0;
+        _chainValid = false;
+        _verifyUs = 0;
+        _tamperDetail = "";
+        _tamperUs = 0;
+    }
+
+    private static string FormatTime(double microseconds)
+    {
+        if (microseconds < 1000) return $"{microseconds:F0} \u00B5s";
+        return $"{microseconds / 1000.0:F2} ms";
+    }
 }

@@ -33,8 +33,9 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Single(schema.Tables);
-        var table = schema.Tables[0];
+        var tables = schema.Tables.Where(t => t.Name != "sqlite_master").ToList();
+        Assert.Single(tables);
+        var table = tables[0];
         Assert.Equal("users", table.Name);
         Assert.Equal(2, table.RootPage);
         Assert.Contains("users", table.Sql);
@@ -56,8 +57,9 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Single(schema.Tables);
-        Assert.True(schema.Tables[0].IsWithoutRowId);
+        var tables = schema.Tables.Where(t => t.Name != "sqlite_master").ToList();
+        Assert.Single(tables);
+        Assert.True(tables[0].IsWithoutRowId);
     }
 
     // ── Single index ──
@@ -74,7 +76,7 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Empty(schema.Tables);
+        Assert.Empty(schema.Tables.Where(t => t.Name != "sqlite_master"));
         Assert.Single(schema.Indexes);
         var index = schema.Indexes[0];
         Assert.Equal("idx_name", index.Name);
@@ -115,7 +117,7 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Empty(schema.Tables);
+        Assert.Empty(schema.Tables.Where(t => t.Name != "sqlite_master"));
         Assert.Empty(schema.Indexes);
         Assert.Single(schema.Views);
         Assert.Equal("active_users", schema.Views[0].Name);
@@ -138,7 +140,7 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Equal(2, schema.Tables.Count);
+        Assert.Equal(2, schema.Tables.Count(t => t.Name != "sqlite_master"));
         Assert.Single(schema.Indexes);
         Assert.Single(schema.Views);
     }
@@ -165,8 +167,9 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Single(schema.Tables);
-        Assert.Equal("good", schema.Tables[0].Name);
+        var tables = schema.Tables.Where(t => t.Name != "sqlite_master").ToList();
+        Assert.Single(tables);
+        Assert.Equal("good", tables[0].Name);
     }
 
     // ── NULL sql for table is skipped ──
@@ -190,7 +193,7 @@ public class SchemaReaderTests
         var schema = reader.ReadSchema();
 
         // Table with null SQL is skipped
-        Assert.Empty(schema.Tables);
+        Assert.Empty(schema.Tables.Where(t => t.Name != "sqlite_master"));
     }
 
     // ── Index with null sql still creates IndexInfo ──
@@ -232,7 +235,8 @@ public class SchemaReaderTests
         var reader = CreateSchemaReader(rows);
         var schema = reader.ReadSchema();
 
-        Assert.Single(schema.Tables);
+        var tables = schema.Tables.Where(t => t.Name != "sqlite_master").ToList();
+        Assert.Single(tables);
         Assert.Empty(schema.Indexes);
         Assert.Empty(schema.Views);
     }
@@ -327,7 +331,7 @@ public class SchemaReaderTests
     /// </summary>
     private sealed class PassThroughRecordDecoder : IRecordDecoder
     {
-        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters) => true;
+        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters, long rowId, int rowidAliasOrdinal) => true;
         private readonly ColumnValue[][] _rows;
         public PassThroughRecordDecoder(ColumnValue[][] rows) => _rows = rows;
 

@@ -127,7 +127,7 @@ public sealed class WithoutRowIdCursorAdapterTests
 
     private sealed class StubRecordDecoder : IRecordDecoder
     {
-        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters) => true;
+        public bool Matches(ReadOnlySpan<byte> payload, ResolvedFilter[] filters, long rowId, int rowidAliasOrdinal) => true;
         private readonly ColumnValue[] _columnValues;
         private int _decodeIndex = -1;
 
