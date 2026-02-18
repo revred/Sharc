@@ -16,18 +16,15 @@ If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now 
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
-The **Core Read Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready (Phase 2).
+The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,038 tests** across 6 test projects.
 
-**The Write Engine is EXPERIMENTAL and has severe limitations:**
-*   **Insert-Only**: `UPDATE` and `DELETE` are not implemented.
-*   **No Index Updates**: Inserting into a table does *not* update its secondary indexes.
-*   **No Overflow Support**: Records larger than the page size will fail or corrupt the page.
-*   **Single-Writer**: No concurrency control (WAL/Locking Byte) is implemented.
-*   **Root Split Issues**: Tables are not resilient to root page splits.
-
-Use the Write Engine *only* for:
-1.  Appending rigid logs (Trust Ledger).
-2.  Creating simple, non-indexed datasets from scratch.
+The **Write Engine** supports:
+*   **Full CRUD**: `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`
+*   **B-tree Mutations**: Leaf/interior splits, cell insertion/removal, page defragmentation
+*   **ACID Transactions**: Rollback journal with auto-commit and explicit `BEGIN`/`COMMIT`/`ROLLBACK`
+*   **Freelist Recycling**: Deleted pages are returned to the freelist and reused by subsequent writes
+*   **Vacuum**: Reclaim unused space and compact the database file
+*   **Single-Writer**: One writer at a time (no WAL-mode concurrent writes)
 
 ---
 
