@@ -33,6 +33,7 @@ public sealed class QueryPipelineEngine
     /// <summary>
     /// Runs all 13 queries live against both engines.
     /// Returns fallback JSON results if engines are not initialized.
+    /// Yields between queries to keep WASM UI responsive.
     /// </summary>
     public async Task<IReadOnlyList<QueryResult>> RunLiveAsync()
     {
@@ -49,6 +50,7 @@ public sealed class QueryPipelineEngine
         foreach (var spec in Queries)
         {
             results.Add(RunSingleQuery(db, conn, spec));
+            await Task.Yield(); // Yield to WASM UI thread between queries
         }
         IsLive = true;
         return results;
@@ -76,9 +78,10 @@ public sealed class QueryPipelineEngine
         }
 
         // --- Measure: 5 iterations of each, interleaved to level GC pressure ---
-        Span<double> sharcTimes = stackalloc double[MeasuredIterations];
-        Span<double> sqliteTimes = stackalloc double[MeasuredIterations];
-        var sw = new Stopwatch();
+        // Use heap arrays (not stackalloc) — WASM interpreter can mishandle stackalloc + Span.Sort.
+        var sharcTimes = new double[MeasuredIterations];
+        var sqliteTimes = new double[MeasuredIterations];
+        var sw = Stopwatch.StartNew();
 
         long sharcAllocBefore = 0, sharcAllocAfter = 0;
         long sqliteAllocBefore = 0, sqliteAllocAfter = 0;
@@ -103,8 +106,8 @@ public sealed class QueryPipelineEngine
         }
 
         // Take median of measured iterations (robust against GC spikes)
-        sharcTimes.Sort();
-        sqliteTimes.Sort();
+        Array.Sort(sharcTimes);
+        Array.Sort(sqliteTimes);
         double sharcUs = sharcTimes[MeasuredIterations / 2];
         double sqliteUs = sqliteTimes[MeasuredIterations / 2];
 
