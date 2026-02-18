@@ -70,7 +70,7 @@ internal sealed class BTreeMutator : IDisposable
 
         // Navigate from root to the correct leaf, collecting the ancestor path.
         // Max B-tree depth for SQLite is ~20 (4096-byte pages, min 2 keys per interior page).
-        Span<(uint PageNum, int CellIndex)> path = stackalloc (uint, int)[20];
+        Span<InsertPathEntry> path = stackalloc InsertPathEntry[20];
         int pathCount = 0;
         uint currentPage = rootPage;
 
@@ -84,13 +84,13 @@ internal sealed class BTreeMutator : IDisposable
             {
                 // Binary search for insertion point
                 int insertIdx = FindLeafInsertionPoint(page, hdrOff, hdr, rowId);
-                path[pathCount++] = (currentPage, insertIdx);
+                path[pathCount++] = new InsertPathEntry(currentPage, insertIdx);
                 break;
             }
 
             // Interior page — binary search for child
             int childIdx = FindInteriorChild(page, hdrOff, hdr, rowId, out uint childPage);
-            path[pathCount++] = (currentPage, childIdx);
+            path[pathCount++] = new InsertPathEntry(currentPage, childIdx);
             currentPage = childPage;
         }
 
@@ -103,7 +103,7 @@ internal sealed class BTreeMutator : IDisposable
     /// Returns whether the row was found and the (unchanged) root page number.
     /// Interior page keys are NOT modified — they remain as valid routing hints per SQLite spec.
     /// </summary>
-    public (bool Found, uint RootPage) Delete(uint rootPage, long rowId)
+    public MutationResult Delete(uint rootPage, long rowId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -119,11 +119,11 @@ internal sealed class BTreeMutator : IDisposable
             {
                 var (cellIdx, found) = FindLeafCellByRowId(page, hdrOff, hdr, rowId);
                 if (!found)
-                    return (false, rootPage);
+                    return new MutationResult(false, rootPage);
 
                 RemoveCellFromPage(page, hdrOff, hdr, cellIdx);
                 WritePageBuffer(currentPage, page);
-                return (true, rootPage);
+                return new MutationResult(true, rootPage);
             }
 
             // Interior page — descend to child
@@ -136,14 +136,14 @@ internal sealed class BTreeMutator : IDisposable
     /// Updates a record in the table B-tree by deleting the old record and inserting a new one
     /// with the same rowid. Returns whether the row was found and the (possibly new) root page.
     /// </summary>
-    public (bool Found, uint RootPage) Update(uint rootPage, long rowId, ReadOnlySpan<byte> newRecordPayload)
+    public MutationResult Update(uint rootPage, long rowId, ReadOnlySpan<byte> newRecordPayload)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var (found, root) = Delete(rootPage, rowId);
-        if (!found) return (false, root);
+        if (!found) return new MutationResult(false, root);
         root = Insert(root, rowId, newRecordPayload);
-        return (true, root);
+        return new MutationResult(true, root);
     }
 
     /// <summary>
@@ -287,7 +287,7 @@ internal sealed class BTreeMutator : IDisposable
     /// Returns the (possibly new) root page number.
     /// </summary>
     private uint InsertCellAndSplit(
-        Span<(uint PageNum, int CellIndex)> path,
+        Span<InsertPathEntry> path,
         int pathIndex,
         ReadOnlySpan<byte> cellBytes,
         long promotedRowId,
@@ -438,7 +438,7 @@ internal sealed class BTreeMutator : IDisposable
     /// and the new page (via the right reference).
     /// </summary>
     private void UpdateParentAfterSplit(
-        Span<(uint PageNum, int CellIndex)> path,
+        Span<InsertPathEntry> path,
         int parentPathIndex,
         ReadOnlySpan<byte> promotedCell,
         uint newRightChild)

@@ -10,31 +10,31 @@ namespace Sharc.Query;
 /// </summary>
 internal static class TableReferenceCollector
 {
-    internal static List<(string table, string[]? columns)> Collect(QueryPlan plan)
+    internal static List<TableReference> Collect(QueryPlan plan)
     {
-        var tables = new List<(string, string[]?)>();
+        var tables = new List<TableReference>();
 
         if (plan.HasCotes)
         {
             foreach (var cote in plan.Cotes!)
-                tables.Add((cote.Query.TableName, cote.Query.ColumnsArray));
+                tables.Add(new TableReference(cote.Query.TableName, cote.Query.ColumnsArray));
         }
 
         if (plan.IsCompound)
             CollectFromCompound(plan.Compound!, tables);
         else if (plan.Simple is not null)
-            tables.Add((plan.Simple.TableName, plan.Simple.ColumnsArray));
+            tables.Add(new TableReference(plan.Simple.TableName, plan.Simple.ColumnsArray));
 
         return tables;
     }
 
-    private static void CollectFromCompound(CompoundQueryPlan plan, List<(string, string[]?)> tables)
+    private static void CollectFromCompound(CompoundQueryPlan plan, List<TableReference> tables)
     {
-        tables.Add((plan.Left.TableName, plan.Left.ColumnsArray));
+        tables.Add(new TableReference(plan.Left.TableName, plan.Left.ColumnsArray));
 
         if (plan.RightCompound != null)
             CollectFromCompound(plan.RightCompound, tables);
         else if (plan.RightSimple != null)
-            tables.Add((plan.RightSimple.TableName, plan.RightSimple.ColumnsArray));
+            tables.Add(new TableReference(plan.RightSimple.TableName, plan.RightSimple.ColumnsArray));
     }
 }

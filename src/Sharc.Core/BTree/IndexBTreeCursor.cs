@@ -325,16 +325,15 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
     {
         while (_stack.Count > 0)
         {
-            var (page, cellIndex, headerOffset, header) = _stack.Pop();
+            var frame = _stack.Pop();
+            int nextCellIndex = frame.CellIndex + 1;
 
-            int nextCellIndex = cellIndex + 1;
-
-            if (nextCellIndex < header.CellCount)
+            if (nextCellIndex < frame.Header.CellCount)
             {
-                _stack.Push(new CursorStackFrame(page, nextCellIndex, headerOffset, header));
+                _stack.Push(new CursorStackFrame(frame.PageId, nextCellIndex, frame.HeaderOffset, frame.Header));
 
-                var interiorPage = _pageSource.GetPage(page);
-                ushort cellPtr = header.GetCellPointer(interiorPage[headerOffset..], nextCellIndex);
+                var interiorPage = _pageSource.GetPage(frame.PageId);
+                ushort cellPtr = frame.Header.GetCellPointer(interiorPage[frame.HeaderOffset..], nextCellIndex);
                 uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(interiorPage[cellPtr..]);
 
                 DescendToLeftmostLeaf(leftChild);
@@ -342,9 +341,9 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
             }
 
             // All cells exhausted — descend to right child
-            if (header.RightChildPage != 0)
+            if (frame.Header.RightChildPage != 0)
             {
-                DescendToLeftmostLeaf(header.RightChildPage);
+                DescendToLeftmostLeaf(frame.Header.RightChildPage);
                 return true;
             }
         }
