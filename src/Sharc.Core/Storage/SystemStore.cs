@@ -1,3 +1,4 @@
+using System.Buffers;
 using Sharc.Core.BTree;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
@@ -21,12 +22,32 @@ public static class SystemStore
         long rowId,
         ColumnValue[] columns)
     {
-        int recordSize = RecordEncoder.ComputeEncodedSize(columns);
-        byte[] buffer = new byte[recordSize];
-        RecordEncoder.EncodeRecord(columns, buffer);
+        InsertRecord(pageSource, pageSize, rootPage, rowId, columns.AsSpan());
+    }
 
-        var mutator = new BTreeMutator(pageSource, pageSize);
-        mutator.Insert(rootPage, rowId, buffer);
+    /// <summary>
+    /// Inserts a record into a system table with a long RowId key.
+    /// Uses ArrayPool to avoid allocation for the encoded record buffer.
+    /// </summary>
+    public static void InsertRecord(
+        IWritablePageSource pageSource,
+        int pageSize,
+        uint rootPage,
+        long rowId,
+        ReadOnlySpan<ColumnValue> columns)
+    {
+        int recordSize = RecordEncoder.ComputeEncodedSize(columns);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(recordSize);
+        try
+        {
+            int written = RecordEncoder.EncodeRecord(columns, buffer);
+            using var mutator = new BTreeMutator(pageSource, pageSize);
+            mutator.Insert(rootPage, rowId, buffer.AsSpan(0, written));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>

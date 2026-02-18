@@ -33,6 +33,21 @@ public sealed class SharcSchema
         }
         throw new KeyNotFoundException($"Table '{name}' not found in schema.");
     }
+
+    /// <summary>
+    /// Gets a view by name (case-insensitive).
+    /// </summary>
+    /// <returns>Null if not found.</returns>
+    public ViewInfo? GetView(string name)
+    {
+        var count = Views.Count;
+        for (int i = 0; i < count; i++)
+        {
+            if (Views[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return Views[i];
+        }
+        return null;
+    }
 }
 
 /// <summary>

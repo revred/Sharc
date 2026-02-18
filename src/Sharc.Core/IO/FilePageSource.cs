@@ -107,6 +107,12 @@ public sealed class FilePageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber)
+    {
+        // No cache to invalidate
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

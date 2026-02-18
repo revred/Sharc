@@ -8,7 +8,7 @@ namespace Sharc.Core.IO;
 public sealed class ShadowPageSource : IWritablePageSource
 {
     private readonly IPageSource _baseSource;
-    private readonly Dictionary<uint, int> _dirtySlots = new();
+    private readonly Dictionary<uint, int> _dirtySlots = new(8);
     private PageArena? _arena;
     private uint _maxDirtyPage;
     private bool _disposed;
@@ -55,6 +55,13 @@ public sealed class ShadowPageSource : IWritablePageSource
             return PageSize;
         }
         return _baseSource.ReadPage(pageNumber, destination);
+    }
+
+    /// <inheritdoc />
+    public void Invalidate(uint pageNumber)
+    {
+        _dirtySlots.Remove(pageNumber);
+        _baseSource.Invalidate(pageNumber);
     }
 
     /// <inheritdoc />

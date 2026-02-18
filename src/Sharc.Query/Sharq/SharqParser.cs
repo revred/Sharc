@@ -83,6 +83,7 @@ internal ref struct SharqParser
                 OrderBy = stmt.OrderBy,
                 Limit = stmt.Limit,
                 Offset = stmt.Offset,
+                Joins = stmt.Joins,
                 Cotes = cotes,
                 CompoundOp = stmt.CompoundOp,
                 CompoundRight = stmt.CompoundRight
@@ -150,6 +151,7 @@ internal ref struct SharqParser
             OrderBy = left.OrderBy,
             Limit = left.Limit,
             Offset = left.Offset,
+            Joins = left.Joins,
             CompoundOp = compoundOp,
             CompoundRight = right
         };
@@ -165,6 +167,9 @@ internal ref struct SharqParser
 
         Expect(SharqTokenKind.From);
         var from = ParseTableRef();
+
+        var joins = ParseJoinList();
+
 
         SharqStar? where = null;
         if (Match(SharqTokenKind.Where))
@@ -202,6 +207,7 @@ internal ref struct SharqParser
             IsDistinct = isDistinct,
             Columns = columns,
             From = from,
+            Joins = joins,
             Where = where,
             GroupBy = groupBy,
             Having = having,
@@ -244,8 +250,49 @@ internal ref struct SharqParser
         string? alias = null;
         if (Match(SharqTokenKind.As))
             alias = ExpectIdentifierText();
+        else if (_current.Kind == SharqTokenKind.Identifier)
+            alias = ExpectIdentifierText();
 
         return new TableRef { Name = name, Alias = alias, RecordId = recordId };
+    }
+
+    private List<JoinClause> ParseJoinList()
+    {
+        var joins = new List<JoinClause>();
+        while (true)
+        {
+            JoinKind? kind = null;
+            if (Match(SharqTokenKind.Inner)) { Expect(SharqTokenKind.Join); kind = JoinKind.Inner; }
+            else if (Match(SharqTokenKind.Left)) { MatchIdentifier("OUTER"); Expect(SharqTokenKind.Join); kind = JoinKind.Left; }
+            else if (Match(SharqTokenKind.Right)) { MatchIdentifier("OUTER"); Expect(SharqTokenKind.Join); kind = JoinKind.Right; }
+            else if (Match(SharqTokenKind.Cross)) { Expect(SharqTokenKind.Join); kind = JoinKind.Cross; }
+            else if (Match(SharqTokenKind.Join)) { kind = JoinKind.Inner; }
+
+            if (kind == null) break;
+
+            var table = ParseTableRef();
+            SharqStar? onExpr = null;
+
+            if (kind != JoinKind.Cross)
+            {
+                Expect(SharqTokenKind.On);
+                onExpr = ParseExpr();
+            }
+
+            joins.Add(new JoinClause { Kind = kind.Value, Table = table, OnCondition = onExpr });
+        }
+        return joins;
+    }
+
+    private bool MatchIdentifier(string text)
+    {
+        if (_current.Kind == SharqTokenKind.Identifier && 
+            GetTokenIdentifierText().Equals(text, StringComparison.OrdinalIgnoreCase))
+        {
+            Advance();
+            return true;
+        }
+        return false;
     }
 
     private List<SharqStar> ParseExprList()

@@ -36,4 +36,9 @@ public interface IPageSource : IDisposable
     /// <param name="pageNumber">1-based page number.</param>
     /// <returns>Read-only span of page bytes.</returns>
     ReadOnlySpan<byte> GetPage(uint pageNumber);
+
+    /// <summary>
+    /// Evicts the specified page from any internal cache, forcing a re-read from the backing store.
+    /// </summary>
+    void Invalidate(uint pageNumber);
 }

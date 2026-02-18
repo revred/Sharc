@@ -18,7 +18,7 @@ internal static class RollbackJournal
     /// </summary>
     public static void CreateJournal(string journalPath, IPageSource baseSource, IEnumerable<uint> dirtyPageNumbers)
     {
-        using var fs = new FileStream(journalPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        using var fs = new FileStream(journalPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1);
         
         // Header
         Span<byte> header = stackalloc byte[HeaderSize];

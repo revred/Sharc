@@ -40,7 +40,8 @@ public sealed class SharcDatabase : IDisposable
 {
     private readonly ProxyPageSource _proxySource;
     private readonly IPageSource _rawSource;
-    private readonly DatabaseHeader _header;
+    private DatabaseHeader _header;
+    private uint _lastValidatedCookie;
     private Transaction? _activeTransaction;
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
@@ -151,6 +152,7 @@ public sealed class SharcDatabase : IDisposable
         _proxySource = proxySource;
         _rawSource = rawSource;
         _header = header;
+        _lastValidatedCookie = header.SchemaCookie;
         _bTreeReader = bTreeReader;
         _recordDecoder = recordDecoder;
         _info = info;
@@ -172,7 +174,32 @@ public sealed class SharcDatabase : IDisposable
     private SharcSchema GetSchema() =>
         _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
         
-    internal void InvalidateSchema() => _schema = null;
+    internal void InvalidateSchema()
+    {
+        _schema = null;
+        _queryCache?.Clear();
+        _readerInfoCache?.Clear();
+        _paramFilterCache?.Clear();
+    }
+
+    private void EnsureSchemaUpToDate()
+    {
+        // 1. Force the page source to re-read Page 1 by invalidating any cache
+        _rawSource.Invalidate(1);
+
+        // 2. Read the 100-byte header from page 1 (use GetPage to avoid size mismatch)
+        var page1 = _rawSource.GetPage(1);
+        var headerBuf = page1[..SQLiteLayout.DatabaseHeaderSize];
+
+        // 3. Parse and check cookie
+        var currentHeader = DatabaseHeader.Parse(headerBuf);
+        if (currentHeader.SchemaCookie != _lastValidatedCookie)
+        {
+            _header = currentHeader;
+            _lastValidatedCookie = currentHeader.SchemaCookie;
+            InvalidateSchema();
+        }
+    }
 
     /// <summary>
     /// Creates a new, empty Sharc database valid for both engine and trust usage.
@@ -232,10 +259,24 @@ public sealed class SharcDatabase : IDisposable
         if (filter != null)
         {
             var node = FilterTreeCompiler.CompileBaked(filter, table.Columns, FindIntegerPrimaryKeyOrdinal(table.Columns));
-            return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection, _bTreeReader, table.Indexes, null, node);
+            return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+            {
+                Columns = table.Columns,
+                Projection = projection,
+                BTreeReader = _bTreeReader,
+                TableIndexes = table.Indexes,
+                FilterNode = node
+            });
         }
 
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection, _bTreeReader, table.Indexes, ResolveFilters(table, filters));
+        return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        {
+            Columns = table.Columns,
+            Projection = projection,
+            BTreeReader = _bTreeReader,
+            TableIndexes = table.Indexes,
+            Filters = ResolveFilters(table, filters)
+        });
     }
 
     /// <summary>Creates a reader with column projection.</summary>
@@ -306,24 +347,30 @@ public sealed class SharcDatabase : IDisposable
         Core.Trust.AgentInfo? agent)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureSchemaUpToDate();
 
         var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
+        // Resolve views (recursively rewrites view tables as Cotes)
+        if (plan.ResolvedViewPlan != null)
+        {
+            plan = plan.ResolvedViewPlan;
+        }
+        else
+        {
+            var resolved = ResolveViews(plan);
+            plan.ResolvedViewPlan = resolved;
+            plan = resolved;
+        }
+
         // Enforce entitlements when an agent is specified
         if (agent is not null)
         {
-            if (plan.IsCompound || plan.HasCotes)
-            {
-                var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
-                Trust.EntitlementEnforcer.EnforceAll(agent, tables);
-            }
-            else
-            {
-                var simpleIntent = plan.Simple!;
-                Trust.EntitlementEnforcer.Enforce(agent, simpleIntent.TableName,
-                    simpleIntent.ColumnsArray);
-            }
+            // We use global::Sharc.Query.TableReferenceCollector which recursively visits 
+            // Cotes, Joins, and scans Filters/Ordering for all referenced columns.
+            var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
+            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
         }
 
         // Compound or Cote queries go through the compound executor
@@ -332,14 +379,122 @@ public sealed class SharcDatabase : IDisposable
 
         // Simple query — direct execution with compiled-query cache
         var intent = plan.Simple!;
+
+        if (intent.HasJoins)
+            return global::Sharc.Query.Execution.JoinExecutor.Execute(this, intent, parameters);
+
         var reader = CreateReaderFromIntent(intent, parameters);
         return global::Sharc.Query.QueryPostProcessor.Apply(reader, intent);
     }
 
+    private global::Sharc.Query.Intent.QueryPlan ResolveViews(global::Sharc.Query.Intent.QueryPlan plan)
+    {
+        var resolvedViews = new Dictionary<string, global::Sharc.Query.Intent.QueryPlan>(StringComparer.OrdinalIgnoreCase);
+        
+        if (plan.Cotes != null)
+        {
+            foreach (var c in plan.Cotes)
+                resolvedViews[c.Name] = c.Query;
+        }
+
+        bool changed = true;
+        int iterations = 0;
+        while (changed && iterations++ < 10)
+        {
+            changed = false;
+            var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectTableRefs(plan, references);
+            foreach (var viewPlan in resolvedViews.Values)
+                CollectTableRefs(viewPlan, references);
+            
+            foreach (var table in references)
+            {
+                if (resolvedViews.ContainsKey(table)) continue;
+                
+                var view = GetSchema().GetView(table);
+                if (view != null)
+                {
+                    string viewSql = global::Sharc.Query.Sharq.ViewSqlScanner.ExtractQuery(view.Sql);
+                    var viewPlan = global::Sharc.Query.Intent.IntentCompiler.CompilePlan(viewSql);
+                    
+                    resolvedViews[table] = viewPlan;
+                    changed = true;
+                }
+            }
+        }
+        
+        if (iterations >= 10 && changed)
+            throw new InvalidOperationException("Recursive view definition depth exceeded limit (10).");
+
+        if (resolvedViews.Count > (plan.Cotes?.Count ?? 0))
+        {
+            // Topological sort of views/cotes to ensure dependencies are returned first.
+            var sortedCotes = new List<global::Sharc.Query.Intent.CoteIntent>();
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void Visit(string name, global::Sharc.Query.Intent.QueryPlan p)
+            {
+                if (visited.Contains(name)) return;
+                if (processing.Contains(name)) 
+                    throw new InvalidOperationException($"Cyclic view dependency detected: {name}");
+
+                processing.Add(name);
+
+                var deps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                CollectTableRefs(p, deps);
+
+                foreach (var dep in deps)
+                {
+                    if (resolvedViews.TryGetValue(dep, out var depPlan))
+                    {
+                        Visit(dep, depPlan);
+                    }
+                }
+
+                processing.Remove(name);
+                visited.Add(name);
+                sortedCotes.Add(new global::Sharc.Query.Intent.CoteIntent { Name = name, Query = p });
+            }
+
+            // Ensure we visit all resolved views
+            foreach (var kvp in resolvedViews)
+            {
+                Visit(kvp.Key, kvp.Value);
+            }
+
+            return new global::Sharc.Query.Intent.QueryPlan 
+            {
+                 Simple = plan.Simple,
+                 Compound = plan.Compound,
+                 Cotes = sortedCotes
+            };
+        }
+        return plan;
+    }
+
+    private static void CollectTableRefs(global::Sharc.Query.Intent.QueryPlan plan, HashSet<string> references)
+    {
+        if (plan.Simple != null)
+        {
+            references.Add(plan.Simple.TableName);
+            if (plan.Simple.Joins != null)
+                foreach (var j in plan.Simple.Joins) references.Add(j.TableName);
+        }
+        if (plan.Compound != null)
+        {
+            CollectTableRefs(plan.Compound, references);
+        }
+    }
+
+    private static void CollectTableRefs(global::Sharc.Query.Intent.CompoundQueryPlan compound, HashSet<string> references)
+    {
+        if (compound.Left != null) references.Add(compound.Left.TableName);
+        if (compound.RightSimple != null) references.Add(compound.RightSimple.TableName);
+        if (compound.RightCompound != null) CollectTableRefs(compound.RightCompound, references);
+    }
+
     /// <summary>
-    /// Creates a reader from a compiled <see cref="global::Sharc.Query.Intent.QueryIntent"/>
-    /// using cached filter nodes, projections, and table metadata.
-    /// Eliminates per-invocation Expression.Lambda().Compile() overhead.
     /// </summary>
     internal SharcDataReader CreateReaderFromIntent(
         global::Sharc.Query.Intent.QueryIntent intent,
@@ -366,9 +521,19 @@ public sealed class SharcDatabase : IDisposable
                 projection = new int[columns.Length];
                 for (int i = 0; i < columns.Length; i++)
                 {
-                    int ordinal = table.GetColumnOrdinal(columns[i]);
+                    string colName = columns[i];
+                    int ordinal = table.GetColumnOrdinal(colName);
+                    
+                    if (ordinal < 0 && !string.IsNullOrEmpty(intent.TableAlias) && 
+                        colName.StartsWith(intent.TableAlias + ".", StringComparison.OrdinalIgnoreCase))
+                    {
+                         // Strip alias and try again
+                         var stripped = colName.Substring(intent.TableAlias.Length + 1);
+                         ordinal = table.GetColumnOrdinal(stripped);
+                    }
+
                     projection[i] = ordinal >= 0 ? ordinal
-                        : throw new ArgumentException($"Column '{columns[i]}' not found.");
+                        : throw new ArgumentException($"Column '{colName}' not found in table '{table.Name}'.");
                 }
             }
 
@@ -379,7 +544,7 @@ public sealed class SharcDatabase : IDisposable
             if (intent.Filter.HasValue && !HasParameterNodes(intent.Filter.Value))
             {
                 var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
-                    intent.Filter.Value, null);
+                    intent.Filter.Value, null, intent.TableAlias);
                 filterNode = FilterTreeCompiler.CompileBaked(filterStar, table.Columns, rowidAlias);
             }
 
@@ -404,15 +569,21 @@ public sealed class SharcDatabase : IDisposable
             node = paramCache.GetOrAdd(paramKey, _ =>
             {
                 var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
-                    intent.Filter.Value, parameters);
+                    intent.Filter.Value, parameters, intent.TableAlias);
                 return FilterTreeCompiler.CompileBaked(
                     filterStar, info.Table.Columns, info.RowidAliasOrdinal);
             });
         }
 
         var cursor = CreateTableCursor(info.Table);
-        return new SharcDataReader(cursor, _recordDecoder, info.Table.Columns,
-            info.Projection, _bTreeReader, info.Table.Indexes, null, node);
+        return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        {
+            Columns = info.Table.Columns,
+            Projection = info.Projection,
+            BTreeReader = _bTreeReader,
+            TableIndexes = info.Table.Indexes,
+            FilterNode = node
+        });
     }
 
     private static bool HasParameterNodes(global::Sharc.Query.Intent.PredicateIntent predicate)
@@ -466,8 +637,14 @@ public sealed class SharcDatabase : IDisposable
         }
 
         var tableIndexes = GetTableIndexes(schema, tableName);
-        return new SharcDataReader(cursor, _recordDecoder, table.Columns, projection,
-            _bTreeReader, tableIndexes, filters: null, filterNode: filterNode);
+        return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        {
+            Columns = table.Columns,
+            Projection = projection,
+            BTreeReader = _bTreeReader,
+            TableIndexes = tableIndexes,
+            FilterNode = filterNode
+        });
     }
 
     /// <summary>

@@ -29,14 +29,26 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     /// <inheritdoc />
     public byte[] Sign(ReadOnlySpan<byte> data)
     {
-        return _hmac.ComputeHash(data.ToArray());
+        byte[] result = new byte[SignatureSize];
+        _hmac.TryComputeHash(data, result, out _);
+        return result;
+    }
+
+    /// <inheritdoc />
+    public int SignatureSize => 32; // HMACSHA256 size
+
+    /// <inheritdoc />
+    public bool TrySign(ReadOnlySpan<byte> data, Span<byte> destination, out int bytesWritten)
+    {
+        return _hmac.TryComputeHash(data, destination, out bytesWritten);
     }
 
     /// <inheritdoc />
     public bool Verify(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
-        var hash = _hmac.ComputeHash(data.ToArray());
-        return hash.AsSpan().SequenceEqual(signature);
+        Span<byte> hash = stackalloc byte[SignatureSize];
+        _hmac.TryComputeHash(data, hash, out int written);
+        return hash.Slice(0, written).SequenceEqual(signature);
     }
 
     /// <inheritdoc />
@@ -51,9 +63,9 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     /// </summary>
     public static bool Verify(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
     {
-        using var hmac = new HMACSHA256(publicKey.ToArray());
-        var hash = hmac.ComputeHash(data.ToArray());
-        return hash.AsSpan().SequenceEqual(signature);
+        Span<byte> hash = stackalloc byte[32]; // HMACSHA256 output is always 32 bytes
+        HMACSHA256.HashData(publicKey, data, hash);
+        return hash.SequenceEqual(signature);
     }
 
     /// <inheritdoc />

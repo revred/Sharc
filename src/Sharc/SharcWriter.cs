@@ -100,10 +100,11 @@ public sealed class SharcWriter : IDisposable
     public long Insert(AgentInfo agent, string tableName, params ColumnValue[] values)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        var tableInfo = TryGetTableInfo(tableName);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, values.Length));
 
         using var tx = BeginAutoCommitTransaction();
-        long rowId = InsertCore(tx, tableName, values, TryGetTableInfo(tableName), _tableRootCache);
+        long rowId = InsertCore(tx, tableName, values, tableInfo, _tableRootCache);
         CapturePooledShadow(tx);
         tx.Commit();
         return rowId;
@@ -136,9 +137,12 @@ public sealed class SharcWriter : IDisposable
     public long[] InsertBatch(AgentInfo agent, string tableName, IEnumerable<ColumnValue[]> records)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
-
         var tableInfo = TryGetTableInfo(tableName);
+        
+        // Peek first record to get column count for enforcement
+        int colCount = records is IReadOnlyList<ColumnValue[]> list && list.Count > 0 ? list[0].Length : 0;
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, colCount));
+
         var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
         using var tx = BeginAutoCommitTransaction();
         foreach (var values in records)
@@ -172,7 +176,7 @@ public sealed class SharcWriter : IDisposable
     public bool Delete(AgentInfo agent, string tableName, long rowId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null); // Delete usually requires all-columns or just table write
 
         using var tx = BeginAutoCommitTransaction();
         bool found = DeleteCore(tx, tableName, rowId, _tableRootCache);
@@ -203,10 +207,11 @@ public sealed class SharcWriter : IDisposable
     public bool Update(AgentInfo agent, string tableName, long rowId, params ColumnValue[] values)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, null);
+        var tableInfo = TryGetTableInfo(tableName);
+        Trust.EntitlementEnforcer.EnforceWrite(agent, tableName, GetColumnNames(tableInfo, values.Length));
 
         using var tx = BeginAutoCommitTransaction();
-        bool found = UpdateCore(tx, tableName, rowId, values, TryGetTableInfo(tableName), _tableRootCache);
+        bool found = UpdateCore(tx, tableName, rowId, values, tableInfo, _tableRootCache);
         CapturePooledShadow(tx);
         tx.Commit();
         return found;
@@ -220,6 +225,16 @@ public sealed class SharcWriter : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var tx = _db.BeginTransaction();
         return new SharcWriteTransaction(_db, tx, _tableRootCache);
+    }
+
+    /// <summary>
+    /// Begins an explicit write transaction bound to an agent for entitlement enforcement.
+    /// </summary>
+    public SharcWriteTransaction BeginTransaction(AgentInfo agent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var tx = _db.BeginTransaction();
+        return new SharcWriteTransaction(_db, tx, _tableRootCache, agent);
     }
 
     /// <summary>
@@ -333,6 +348,15 @@ public sealed class SharcWriter : IDisposable
         return null;
     }
 
+    private static string[]? GetColumnNames(TableInfo? table, int valueCount)
+    {
+        if (table == null || valueCount == 0) return null;
+        var cols = new string[Math.Min(valueCount, table.Columns.Count)];
+        for (int i = 0; i < cols.Length; i++)
+            cols[i] = table.Columns[i].Name;
+        return cols;
+    }
+
     /// <summary>
     /// Checks the cache first, then falls back to scanning sqlite_master.
     /// </summary>
@@ -349,14 +373,19 @@ public sealed class SharcWriter : IDisposable
         return rootPage;
     }
 
+    // Reusable scratch buffer and decoder for FindTableRootPage — avoids per-call allocations.
+    // ThreadStatic ensures thread safety without locking.
+    [ThreadStatic] private static ColumnValue[]? t_schemaColumnBuffer;
+    [ThreadStatic] private static RecordDecoder? t_schemaDecoder;
+
     /// <summary>
     /// Finds the root page of a table by scanning sqlite_master (page 1).
     /// </summary>
     private static uint FindTableRootPage(IPageSource source, string tableName, int usableSize)
     {
         using var cursor = new BTreeCursor(source, 1, usableSize);
-        var columnBuffer = new ColumnValue[5];
-        var decoder = new RecordDecoder();
+        var columnBuffer = t_schemaColumnBuffer ??= new ColumnValue[5];
+        var decoder = t_schemaDecoder ??= new RecordDecoder();
 
         while (cursor.MoveNext())
         {
@@ -449,7 +478,8 @@ public sealed class SharcWriter : IDisposable
         int usableSize = _db.UsablePageSize;
 
         // 1. Read all table data (raw record bytes + count)
-        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>();
+        int userTableCount = Math.Max(schema.Tables.Count - 1, 0);
+        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>(userTableCount);
         foreach (var table in schema.Tables)
         {
             if (table.Name.Equals("sqlite_master", StringComparison.OrdinalIgnoreCase)) continue;
@@ -478,7 +508,9 @@ public sealed class SharcWriter : IDisposable
         DatabaseHeader.Write(freshData, newHeader);
 
         // Build sqlite_master entries (schema page on page 1)
-        var schemaCells = new List<(int Size, byte[] Cell)>();
+        var schemaCells = new List<(int Size, byte[] Cell)>(tableRows.Count);
+        var tableTypeBytes = "table"u8.ToArray(); // cached — same for every entry
+        var schemaCols = new ColumnValue[5]; // reuse across iterations
         for (int i = 0; i < tableRows.Count; i++)
         {
             var table = tableRows[i].Table;
@@ -486,8 +518,7 @@ public sealed class SharcWriter : IDisposable
             var sqlBytes = Encoding.UTF8.GetBytes(table.Sql);
             var nameBytes = Encoding.UTF8.GetBytes(table.Name);
 
-            var schemaCols = new ColumnValue[5];
-            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, Encoding.UTF8.GetBytes("table"));
+            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, tableTypeBytes);
             schemaCols[1] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
             schemaCols[2] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
             schemaCols[3] = ColumnValue.FromInt64(1, (long)rootPage);

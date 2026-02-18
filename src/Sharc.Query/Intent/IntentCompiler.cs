@@ -134,7 +134,9 @@ public static class IntentCompiler
         return new QueryIntent
         {
             TableName = statement.From.Name,
+            TableAlias = statement.From.Alias,
             TableRecordId = statement.From.RecordId,
+            Joins = statement.Joins != null ? CompileJoins(statement.Joins) : null,
             Columns = columns,
             Filter = filter,
             OrderBy = orderBy,
@@ -348,7 +350,7 @@ public static class IntentCompiler
 
     private static string ExtractColumnName(SharqStar expr) => expr switch
     {
-        ColumnRefStar col => col.Name,
+        ColumnRefStar col => FormatColumnRef(col),
         FunctionCallStar func when IsAggregateFunction(func.Name) => FormatAggregateName(func),
         _ => throw new NotSupportedException($"Expected column reference, got {expr.GetType().Name}"),
     };
@@ -407,7 +409,7 @@ public static class IntentCompiler
 
     private static string ExtractColumnNameFromExpr(SharqStar expr) => expr switch
     {
-        ColumnRefStar col => col.Name,
+        ColumnRefStar col => FormatColumnRef(col),
         _ => throw new NotSupportedException($"Expected column reference in aggregate, got {expr.GetType().Name}"),
     };
 
@@ -491,7 +493,9 @@ public static class IntentCompiler
         return new QueryIntent
         {
             TableName = statement.From.Name,
+            TableAlias = statement.From.Alias,
             TableRecordId = statement.From.RecordId,
+            Joins = statement.Joins != null ? CompileJoins(statement.Joins) : null,
             Columns = columns,
             Filter = filter,
             OrderBy = orderBy,
@@ -527,11 +531,60 @@ public static class IntentCompiler
             result[i] = new CoteIntent
             {
                 Name = cotes[i].Name,
-                Query = CompileSimple(cotes[i].Query),
+                Query = CompilePlan(cotes[i].Query),
             };
         }
         return result;
     }
+
+    private static JoinIntent[] CompileJoins(IReadOnlyList<JoinClause> joins)
+    {
+        var result = new JoinIntent[joins.Count];
+        for (int i = 0; i < joins.Count; i++)
+        {
+            var clause = joins[i];
+            string? leftCol = null;
+            string? rightCol = null;
+
+            if (clause.Kind != JoinKind.Cross)
+            {
+                if (clause.OnCondition is BinaryStar { Op: BinaryOp.Equal } binary &&
+                    binary.Left is ColumnRefStar l &&
+                    binary.Right is ColumnRefStar r)
+                {
+                    // For now, naive extraction. The execution layer will validate aliases.
+                    leftCol = FormatColumnRef(l);
+                    rightCol = FormatColumnRef(r);
+                }
+                else
+                {
+                    throw new NotSupportedException($"JOIN ON must be an equality check between two columns (ON a.id = b.id). Got: {clause.OnCondition?.GetType().Name}");
+                }
+            }
+
+            result[i] = new JoinIntent
+            {
+                Kind = MapJoinKind(clause.Kind),
+                TableName = clause.Table.Name,
+                TableAlias = clause.Table.Alias,
+                LeftColumn = leftCol,
+                RightColumn = rightCol
+            };
+        }
+        return result;
+    }
+
+    private static JoinType MapJoinKind(JoinKind kind) => kind switch
+    {
+        JoinKind.Inner => JoinType.Inner,
+        JoinKind.Left => JoinType.Left,
+        JoinKind.Right => JoinType.Right,
+        JoinKind.Cross => JoinType.Cross,
+        _ => throw new NotSupportedException($"Unsupported join kind: {kind}")
+    };
+
+    private static string FormatColumnRef(ColumnRefStar col) =>
+        string.IsNullOrEmpty(col.TableAlias) ? col.Name : $"{col.TableAlias}.{col.Name}";
 
     private static CompoundQueryPlan CompileCompound(SelectStatement statement)
     {

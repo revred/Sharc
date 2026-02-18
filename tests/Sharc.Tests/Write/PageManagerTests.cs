@@ -189,6 +189,7 @@ public class PageManagerTests
             return _pages[pageNumber - 1];
         }
 
+        public void Invalidate(uint pageNumber) { }
         public void Dispose() { }
     }
 }

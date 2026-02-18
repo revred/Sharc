@@ -519,7 +519,7 @@ public class IntentCompilerTests
         Assert.True(plan.HasCotes);
         Assert.Single(plan.Cotes!);
         Assert.Equal("cte", plan.Cotes![0].Name);
-        Assert.Equal("users", plan.Cotes![0].Query.TableName);
+        Assert.Equal("users", plan.Cotes![0].Query.Simple!.TableName);
 
         Assert.False(plan.IsCompound);
         Assert.NotNull(plan.Simple);
@@ -534,9 +534,9 @@ public class IntentCompilerTests
         Assert.True(plan.HasCotes);
         Assert.Equal(2, plan.Cotes!.Count);
         Assert.Equal("a", plan.Cotes[0].Name);
-        Assert.Equal("t1", plan.Cotes[0].Query.TableName);
+        Assert.Equal("t1", plan.Cotes[0].Query.Simple!.TableName);
         Assert.Equal("b", plan.Cotes[1].Name);
-        Assert.Equal("t2", plan.Cotes[1].Query.TableName);
+        Assert.Equal("t2", plan.Cotes[1].Query.Simple!.TableName);
     }
 
     // ─── Negative path tests (P0 Item 20) ───────────────────────

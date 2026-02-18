@@ -322,6 +322,7 @@ public sealed class WriteEngineRegressionTests
             return _pages[pageNumber - 1].AsSpan(0, PageSize);
         }
 
+        public void Invalidate(uint pageNumber) { }
         public void Dispose() { }
     }
 }

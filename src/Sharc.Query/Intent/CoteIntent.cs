@@ -12,6 +12,6 @@ public sealed class CoteIntent
     /// <summary>Cote name (used as a virtual table reference).</summary>
     public required string Name { get; init; }
 
-    /// <summary>The sub-query that produces the Cote's rows.</summary>
-    public required QueryIntent Query { get; init; }
+    /// <summary>The sub-query (simple or compound) that produces the Cote's rows.</summary>
+    public required QueryPlan Query { get; init; }
 }
