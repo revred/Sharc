@@ -110,7 +110,16 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     public ColdStartResult TimeColdStart(int userCount = 500, int nodeCount = 100)
     {
         var sw = Stopwatch.StartNew();
-        var dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
+        byte[] dbBytes;
+        try
+        {
+            dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Runner] Data generation failed: {ex}");
+            return new ColdStartResult(0, 0, 0, 0, 0);
+        }
         var generateMs = sw.Elapsed.TotalMilliseconds;
 
         _sharcEngine.Reset();
@@ -135,19 +144,38 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         if (userCount != _lastUserCount || nodeCount != _lastNodeCount)
         {
             // Single generation - deterministic seed=42, identical for all engines
-            _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
-
-            _sharcEngine.Reset();
-            _sharcEngine.EnsureInitialized(_dbBytes);
-
-            try
+            try 
             {
-                _sqliteEngine.Reset();
-                _sqliteEngine.EnsureInitialized(_dbBytes);
+                _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Runner] SQLite init failed: {ex.Message}");
+                Console.WriteLine($"[Runner] Data generation failed: {ex}");
+                return; // Stop here if data gen fails
+            }
+
+            // Initialize Sharc (Tier 1)
+            try
+            {
+                _sharcEngine.Reset();
+                var (sharcMs, sharcAlloc) = _sharcEngine.EnsureInitialized(_dbBytes);
+                // Console.WriteLine($"[Runner] Sharc init: {sharcMs:F1}ms, {sharcAlloc / 1024}KB");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Runner] Sharc init failed: {ex}");
+            }
+
+            // Initialize SQLite (Tier 1)
+            try
+            {
+                _sqliteEngine.Reset();
+                var (sqliteMs, sqliteAlloc) = _sqliteEngine.EnsureInitialized(_dbBytes);
+                // Console.WriteLine($"[Runner] SQLite init: {sqliteMs:F1}ms, {sqliteAlloc / 1024}KB");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Runner] SQLite init failed: {ex}");
             }
 
             _lastUserCount = userCount;

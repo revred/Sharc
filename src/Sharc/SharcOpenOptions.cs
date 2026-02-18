@@ -18,7 +18,7 @@ public sealed class SharcOpenOptions
     /// Maximum number of pages to cache in memory. Default is 2000.
     /// Set to 0 to disable caching (useful for memory-backed databases).
     /// </summary>
-    public int PageCacheSize { get; set; } = 2000;
+    public int PageCacheSize { get; set; } = 200;
 
     /// <summary>
     /// If true, the database file is read entirely into memory on open.
