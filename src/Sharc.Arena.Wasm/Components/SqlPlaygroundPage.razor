@@ -1,0 +1,139 @@
+@* Page 5: Interactive SQL Playground — try SQL, compare Sharc vs SQLite live *@
+@inject SqlPlaygroundEngine PlaygroundEngine
+
+<div class="playground-page">
+    <div class="query-badge">PLAYGROUND</div>
+    <h2 class="query-title">Try SQL. Compare Engines.</h2>
+    <p class="query-subtitle">
+        Type any SQL query &mdash; see Sharc vs SQLite performance side by side.
+    </p>
+
+    @* ── Workload size toggle ── *@
+    <div class="playground-controls">
+        <div class="playground-workload">
+            <span class="playground-workload-label">Workload:</span>
+            <button class="playground-workload-btn @(_workloadSize == 500 ? "active" : "")"
+                    @onclick="@(() => SetWorkload(500, 100))">500 rows</button>
+            <button class="playground-workload-btn @(_workloadSize == 2500 ? "active" : "")"
+                    @onclick="@(() => SetWorkload(2500, 500))">2,500 rows</button>
+            <button class="playground-workload-btn @(_workloadSize == 10000 ? "active" : "")"
+                    @onclick="@(() => SetWorkload(10000, 2000))">10,000 rows</button>
+        </div>
+    </div>
+
+    @* ── SQL editor ── *@
+    <div class="playground-editor-wrap">
+        <textarea class="playground-editor"
+                  @bind="_sql"
+                  @bind:event="oninput"
+                  rows="4"
+                  placeholder="SELECT name, age FROM users WHERE age > 30"
+                  spellcheck="false"></textarea>
+    </div>
+
+    <div class="playground-actions">
+        <button class="playground-run-btn" @onclick="RunQuery" disabled="@_isRunning">
+            @if (_isRunning)
+            {
+                <span>Running...</span>
+            }
+            else
+            {
+                <span>&#x25B6; Run Query</span>
+            }
+        </button>
+        <button class="playground-clear-btn" @onclick="Clear" disabled="@_isRunning">Clear</button>
+        <span class="playground-schema-hint">
+            Tables: users, events, _concepts, _relations
+        </span>
+    </div>
+
+    @* ── Error display ── *@
+    @if (_globalError is not null)
+    {
+        <div class="playground-error">@_globalError</div>
+    }
+
+    @* ── Performance comparison ── *@
+    @if (_result is not null)
+    {
+        <PerfPanel Result="@_result" />
+        <ResultGrid Columns="@_result.ColumnNames" Rows="@_result.Rows" TotalRowCount="@Math.Max(_result.SharcRowCount, _result.SqliteRowCount)" />
+    }
+
+    @* ── Sample queries ── *@
+    <div class="playground-samples">
+        <span class="playground-samples-label">Try:</span>
+        @foreach (var sample in _samples)
+        {
+            <button class="playground-chip" @onclick="@(() => LoadSample(sample.Sql))">@sample.Label</button>
+        }
+    </div>
+</div>
+
+@code {
+    private string _sql = "SELECT name, age FROM users WHERE age > 30";
+    private PlaygroundResult? _result;
+    private bool _isRunning;
+    private string? _globalError;
+    private int _workloadSize = 2500;
+
+    private static readonly (string Label, string Sql)[] _samples =
+    [
+        ("SELECT *", "SELECT * FROM users LIMIT 10"),
+        ("WHERE filter", "SELECT name, age FROM users WHERE age > 30"),
+        ("GROUP BY", "SELECT dept, COUNT(*), AVG(age) FROM users GROUP BY dept"),
+        ("ORDER BY", "SELECT name, score FROM users ORDER BY score DESC LIMIT 5"),
+        ("UNION", "SELECT name FROM users WHERE age < 25 UNION SELECT name FROM users WHERE score > 80"),
+        ("Cote (WITH)", "WITH seniors AS (SELECT name, age FROM users WHERE age > 50) SELECT * FROM seniors ORDER BY age"),
+        ("Healthcare", "SELECT name, age FROM users WHERE age > 65 ORDER BY age DESC"),
+        ("Financial", "SELECT dept, SUM(score), COUNT(*) FROM users GROUP BY dept ORDER BY SUM(score) DESC"),
+        ("Graph", "SELECT kind, COUNT(*) FROM _relations GROUP BY kind"),
+    ];
+
+    private async Task RunQuery()
+    {
+        if (string.IsNullOrWhiteSpace(_sql)) return;
+
+        _isRunning = true;
+        _globalError = null;
+        _result = null;
+        StateHasChanged();
+
+        // Yield to let UI update before blocking on query execution
+        await Task.Yield();
+
+        try
+        {
+            _result = PlaygroundEngine.ExecuteQuery(_sql.Trim());
+        }
+        catch (Exception ex)
+        {
+            _globalError = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            _isRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private void LoadSample(string sql)
+    {
+        _sql = sql;
+    }
+
+    private void Clear()
+    {
+        _sql = "";
+        _result = null;
+        _globalError = null;
+    }
+
+    private void SetWorkload(int rowCount, int nodeCount)
+    {
+        _workloadSize = rowCount;
+        PlaygroundEngine.SetWorkloadSize(rowCount, nodeCount);
+        _result = null;
+    }
+}

@@ -47,5 +47,11 @@ public partial class Program
 
         // Query pipeline: reference data for 13-query comparison
         builder.Services.AddScoped<QueryPipelineEngine>();
+
+        // Shared data generator (used by BenchmarkRunner and SqlPlaygroundEngine)
+        builder.Services.AddSingleton<DataGenerator>();
+
+        // SQL Playground: live Sharc vs SQLite query comparison
+        builder.Services.AddScoped<SqlPlaygroundEngine>();
     }
 }

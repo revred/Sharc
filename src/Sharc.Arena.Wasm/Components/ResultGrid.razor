@@ -1,0 +1,54 @@
+@* Airtable-like scrollable data grid for SQL Playground results *@
+
+@if (Columns.Count > 0)
+{
+    <div class="playground-grid">
+        @if (TotalRowCount > Rows.Count)
+        {
+            <div class="playground-grid-info">
+                Showing first @Rows.Count of @TotalRowCount rows
+            </div>
+        }
+        else
+        {
+            <div class="playground-grid-info">@TotalRowCount rows</div>
+        }
+
+        <div class="playground-grid-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        @foreach (var col in Columns)
+                        {
+                            <th>@col</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Rows)
+                    {
+                        <tr>
+                            @foreach (var cell in row)
+                            {
+                                @if (cell is null)
+                                {
+                                    <td class="null-cell">null</td>
+                                }
+                                else
+                                {
+                                    <td>@cell</td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<string> Columns { get; set; } = [];
+    [Parameter] public List<List<object?>> Rows { get; set; } = [];
+    [Parameter] public long TotalRowCount { get; set; }
+}
