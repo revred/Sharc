@@ -92,6 +92,38 @@ dotnet_diagnostic.CA2007.severity = suggestion    # ConfigureAwait
 dotnet_diagnostic.IDE0005.severity = suggestion    # Remove unnecessary using directives
 dotnet_diagnostic.IDE0090.severity = suggestion   # Simplify new expression (target-typed new)
 
+# --- LLM-friendly readability + complexity profile (non-breaking) ---
+# Keep severity at suggestion to preserve existing build stability under TreatWarningsAsErrors.
+max_line_length = 140
+
+# Readability / maintainability
+dotnet_diagnostic.CA1502.severity = suggestion    # Avoid excessive cyclomatic complexity
+dotnet_diagnostic.CA1505.severity = suggestion    # Avoid unmaintainable code
+dotnet_diagnostic.CA1506.severity = suggestion    # Avoid excessive class coupling
+dotnet_diagnostic.CA1510.severity = suggestion    # Use throw helper methods
+dotnet_diagnostic.CA1511.severity = suggestion    # Use argument exception throw helper methods
+dotnet_diagnostic.CA1512.severity = suggestion    # Use argument out of range throw helper methods
+dotnet_diagnostic.CA1513.severity = suggestion    # Use object disposed exception throw helper methods
+dotnet_diagnostic.CA1851.severity = suggestion    # Prefer avoiding multiple enumeration
+
+# Potential runtime improvements with clearer intent
+dotnet_diagnostic.CA1827.severity = suggestion    # Do not use Count/LongCount when Any can be used
+dotnet_diagnostic.CA1828.severity = suggestion    # Do not use CountAsync/LongCountAsync when AnyAsync can be used
+dotnet_diagnostic.CA1829.severity = suggestion    # Use Length/Count property instead of Count()
+dotnet_diagnostic.CA1836.severity = suggestion    # Prefer IsEmpty over Count
+dotnet_diagnostic.CA1845.severity = suggestion    # Use span-based string.Concat
+dotnet_diagnostic.CA1846.severity = suggestion    # Prefer AsSpan over Substring
+dotnet_diagnostic.CA1854.severity = suggestion    # Prefer IDictionary.TryGetValue
+dotnet_diagnostic.CA1860.severity = suggestion    # Avoid Enumerable.Any extension method
+dotnet_diagnostic.CA1862.severity = suggestion    # Use StringComparison overloads
+dotnet_diagnostic.CA1864.severity = suggestion    # Prefer TryAdd over ContainsKey + Add
+
+# C# style rules that improve scanability in smaller context windows
+dotnet_style_prefer_collection_expression = true:suggestion
+dotnet_style_prefer_null_check_over_type_check = true:suggestion
+csharp_style_prefer_method_group_conversion = true:suggestion
+csharp_style_prefer_top_level_statements = false:silent
+
 # ── Razor files ──────────────────────────────────────────────────
 [*.razor]
 indent_style = space

@@ -36,9 +36,9 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         int headerEnd = (int)headerSize;
 
         // Single pass: read serial types from header and decode body simultaneously.
-        // Use stackalloc to avoid List<long> allocation for up to 64 columns.
+        // Use stackalloc to avoid List<long> allocation for up to 128 columns (1 KB on stack).
         int colCount = 0;
-        Span<long> serialTypes = stackalloc long[64];
+        Span<long> serialTypes = stackalloc long[128];
         int pos = offset;
         while (pos < headerEnd)
         {
@@ -48,8 +48,8 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             colCount++;
         }
 
-        // For tables with >64 columns (rare), fall back to heap allocation
-        if (colCount > 64)
+        // For tables with >128 columns (rare), fall back to heap allocation
+        if (colCount > 128)
         {
             serialTypes = new long[colCount];
             pos = offset;

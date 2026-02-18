@@ -36,4 +36,10 @@ public sealed class QueryPlan
     /// Set on first execution so streaming paths reuse cached reader info.
     /// </summary>
     internal CompoundQueryPlan? ResolvedCompound { get; set; }
+
+    /// <summary>
+    /// Cached plan after view expansion. Avoids repeated recursive resolution
+    /// and topological sorts for shared views.
+    /// </summary>
+    internal QueryPlan? ResolvedViewPlan { get; set; }
 }

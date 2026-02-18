@@ -134,4 +134,46 @@ public sealed class ViewTests : IDisposable
         
         Assert.False(reader.Read());
     }
+
+    [Fact]
+    public void ViewCacheInvalidation_OnSchemaChange()
+    {
+        using (var db = SharcDatabase.Open(_dbPath))
+        {
+            // 1. Initial query (populates cache)
+            using (var reader = db.Query("SELECT * FROM v_users_simple"))
+            {
+                Assert.True(reader.Read());
+            }
+
+            // 2. Modify a table the view depends on (Add column)
+            // This happens via a Write transaction which should invalidate plan/reader caches.
+            using (var writer = SharcWriter.Open(_dbPath))
+            using (var tx = writer.BeginTransaction())
+            {
+                tx.Execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT 'none'");
+                tx.Commit();
+            } 
+
+            // 3. Query view again. 
+            // If cache was correctly invalidated, the view expansion should find the new column
+            // if we select * (and its definition was SELECT name, age FROM users, wait...)
+            
+            // Actually, v_users_simple is "SELECT name, age FROM users".
+            // Let's create a view that uses *
+            using (var writer = SharcWriter.Open(_dbPath))
+            using (var tx = writer.BeginTransaction())
+            {
+                tx.Execute("CREATE VIEW v_users_all AS SELECT * FROM users");
+                tx.Commit();
+            }
+
+            using (var reader = db.Query("SELECT * FROM v_users_all"))
+            {
+                // Should have 4 columns now: id, name, age, email
+                Assert.Equal(4, reader.FieldCount);
+                Assert.Equal("email", reader.GetColumnName(3));
+            }
+        }
+    }
 }

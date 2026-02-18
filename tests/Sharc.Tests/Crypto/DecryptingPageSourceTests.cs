@@ -154,6 +154,7 @@ public class DecryptingPageSourceTests
             return PageSize;
         }
 
+        public void Invalidate(uint pageNumber) { }
         public void Dispose() => IsDisposed = true;
     }
 

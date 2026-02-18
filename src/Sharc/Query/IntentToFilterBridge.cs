@@ -53,10 +53,12 @@ internal static class IntentToFilterBridge
         IReadOnlyDictionary<string, object>? parameters, string? tableAlias)
     {
         var colName = node.ColumnName!;
-        if (!string.IsNullOrEmpty(tableAlias) && 
-            colName.StartsWith(tableAlias + ".", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrEmpty(tableAlias) &&
+            colName.Length > tableAlias.Length + 1 &&
+            colName[tableAlias.Length] == '.' &&
+            colName.AsSpan(0, tableAlias.Length).Equals(tableAlias.AsSpan(), StringComparison.OrdinalIgnoreCase))
         {
-            colName = colName.Substring(tableAlias.Length + 1);
+            colName = colName[(tableAlias.Length + 1)..];
         }
 
         var col = FilterStar.Column(colName);

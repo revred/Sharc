@@ -30,6 +30,10 @@ internal static class SharcSchemaWriter
         {
             ExecuteCreateTable(db, tx, span, sql);
         }
+        else if (span.StartsWith("CREATE VIEW", StringComparison.OrdinalIgnoreCase))
+        {
+            ExecuteCreateView(db, tx, span, sql);
+        }
         else if (span.StartsWith("ALTER TABLE", StringComparison.OrdinalIgnoreCase))
         {
             ExecuteAlterTable(db, tx, span, sql);
@@ -38,6 +42,32 @@ internal static class SharcSchemaWriter
         {
             throw new NotSupportedException($"Unsupported DDL statement: {sql}");
         }
+    }
+
+    private static void ExecuteCreateView(SharcDatabase db, Transaction tx, ReadOnlySpan<char> span, string originalSql)
+    {
+        // CREATE VIEW Name AS SELECT ...
+        int pos = 11; // Length of "CREATE VIEW"
+        SkipWhitespace(span, ref pos);
+        string viewName = ReadIdentifier(span, ref pos);
+        
+        if (db.Schema.Tables.Any(t => t.Name.Equals(viewName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"Object '{viewName}' already exists.");
+
+        // Insert into sqlite_master
+        var mutator = tx.FetchMutator(db.UsablePageSize);
+        long rowId = mutator.GetMaxRowId((uint)SqliteMasterRootPage) + 1;
+
+        var record = new ColumnValue[]
+        {
+            CreateTextValue("view"),
+            CreateTextValue(viewName),
+            CreateTextValue(viewName),
+            CreateIntValue(0), // Views have rootpage 0
+            CreateTextValue(originalSql)
+        };
+
+        WriteMasterRecord(db, tx, record, rowId, isInsert: true);
     }
 
     private static void ExecuteCreateTable(SharcDatabase db, Transaction tx, ReadOnlySpan<char> span, string originalSql)
@@ -82,8 +112,7 @@ internal static class SharcSchemaWriter
         uint rootPage = tx.AllocateTableRoot(db.UsablePageSize);
 
         // Insert into sqlite_master
-        var mutator = tx.FetchMutator(db.UsablePageSize);
-        long rowId = mutator.GetMaxRowId((uint)SqliteMasterRootPage) + 1;
+        long rowId = tx.FetchMutator(db.UsablePageSize).GetMaxRowId((uint)SqliteMasterRootPage) + 1;
 
         var record = new ColumnValue[]
         {
@@ -94,24 +123,7 @@ internal static class SharcSchemaWriter
             CreateTextValue(originalSql)
         };
 
-        // Compute encoded size first to alloc buffer
-        int size = RecordEncoder.ComputeEncodedSize(record);
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(size);
-        try
-        {
-            RecordEncoder.EncodeRecord(record, buffer);
-            mutator.Insert((uint)SqliteMasterRootPage, rowId, buffer.AsSpan(0, size));
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        // Increment Schema Cookie
-        tx.SetSchemaCookie(db.Header.SchemaCookie + 1);
-
-        // Invalidate in-memory schema
-        db.InvalidateSchema();
+        WriteMasterRecord(db, tx, record, rowId, isInsert: true);
     }
 
     private static void ExecuteAlterTable(SharcDatabase db, Transaction tx, ReadOnlySpan<char> span, string originalSql)
@@ -234,7 +246,7 @@ internal static class SharcSchemaWriter
         masterRecord[2] = CreateTextValue(newName);
         masterRecord[4] = CreateTextValue(newSql);
 
-        WriteMasterRecord(db, tx, masterRecord, masterRowId);
+        WriteMasterRecord(db, tx, masterRecord, masterRowId, isInsert: false);
     }
 
     // --- Helpers ---
@@ -270,7 +282,7 @@ internal static class SharcSchemaWriter
     private static void UpdateMasterRecord(SharcDatabase db, Transaction tx, long rowId, ColumnValue[] record, int colIndex, string newValue)
     {
         record[colIndex] = CreateTextValue(newValue);
-        WriteMasterRecord(db, tx, record, rowId);
+        WriteMasterRecord(db, tx, record, rowId, isInsert: false);
     }
 
     private static ColumnValue CreateTextValue(string value)
@@ -288,7 +300,7 @@ internal static class SharcSchemaWriter
         return ColumnValue.FromInt64(6, value);
     }
 
-    private static void WriteMasterRecord(SharcDatabase db, Transaction tx, ColumnValue[] record, long rowId)
+    private static void WriteMasterRecord(SharcDatabase db, Transaction tx, ColumnValue[] record, long rowId, bool isInsert)
     {
         var mutator = tx.FetchMutator(db.UsablePageSize);
         int size = RecordEncoder.ComputeEncodedSize(record);
@@ -296,7 +308,10 @@ internal static class SharcSchemaWriter
         try
         {
             RecordEncoder.EncodeRecord(record, buffer);
-            mutator.Update((uint)SqliteMasterRootPage, rowId, buffer.AsSpan(0, size));
+            if (isInsert)
+                mutator.Insert((uint)SqliteMasterRootPage, rowId, buffer.AsSpan(0, size));
+            else
+                mutator.Update((uint)SqliteMasterRootPage, rowId, buffer.AsSpan(0, size));
         }
         finally
         {

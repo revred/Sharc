@@ -14,161 +14,222 @@ namespace Sharc.Query.Execution;
 /// </summary>
 internal static class JoinExecutor
 {
+    private sealed class TableExecutionNode
+    {
+        public required string TableName { get; init; }
+        public required string Alias { get; init; }
+        public HashSet<string> RequiredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<Sharc.Query.Intent.PredicateNode> PushdownNodes { get; } = new();
+        public int PushdownRootIndex { get; set; } = -1;
+
+        // Cached to avoid repeated ToArray() allocations
+        private PredicateIntent? _cachedPushdownFilter;
+        private int _cachedPushdownCount = -1;
+
+        public PredicateIntent? PushdownFilter
+        {
+            get
+            {
+                if (PushdownNodes.Count == 0) return null;
+                if (_cachedPushdownCount == PushdownNodes.Count) return _cachedPushdownFilter;
+                _cachedPushdownFilter = new PredicateIntent(PushdownNodes.ToArray(), PushdownRootIndex);
+                _cachedPushdownCount = PushdownNodes.Count;
+                return _cachedPushdownFilter;
+            }
+        }
+    }
+
+    private sealed class JoinExecutionPlan
+    {
+        public Dictionary<string, TableExecutionNode> Nodes { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<Sharc.Query.Intent.PredicateNode> ResidualNodes { get; } = new();
+        public int ResidualRootIndex { get; set; } = -1;
+
+        // Cached to avoid repeated ToArray() allocations
+        private PredicateIntent? _cachedResidualFilter;
+        private int _cachedResidualCount = -1;
+
+        public PredicateIntent? ResidualFilter
+        {
+            get
+            {
+                if (ResidualNodes.Count == 0) return null;
+                if (_cachedResidualCount == ResidualNodes.Count) return _cachedResidualFilter;
+                _cachedResidualFilter = new PredicateIntent(ResidualNodes.ToArray(), ResidualRootIndex);
+                _cachedResidualCount = ResidualNodes.Count;
+                return _cachedResidualFilter;
+            }
+        }
+    }
+
     public static SharcDataReader Execute(SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters)
     {
-        // 1. Materialize the primary (left-most) table
-        // We must strip joins from the intent to get the base table scan
-        var baseIntent = CloneForBaseTable(intent);
-        var (leftRows, leftSchema) = Materialize(db, baseIntent, parameters, intent.TableAlias ?? intent.TableName);
+        // 1. Plan the execution: identify required columns and pushable filters
+        var plan = BuildPlan(intent);
 
-        // 2. Execute joins sequentially
+        // 2. Start with the primary (left-most) table as the probe stream
+        var primaryAlias = intent.TableAlias ?? intent.TableName;
+        var primaryNode = plan.Nodes[primaryAlias];
+        var baseIntent = CloneWithPushdown(intent, primaryNode);
+        
+        // We use MaterializeRows to get an IEnumerable for the primary table
+        var (leftRows, leftSchema) = MaterializeRows(db, baseIntent, parameters, primaryAlias);
+        IEnumerable<QueryValue[]> probeStream = leftRows;
+
+        // 3. Chain joins sequentially
         if (intent.Joins != null)
         {
             foreach (var join in intent.Joins)
             {
-                // Materialize right table
-                // Create a synthetic intent for the joined table
-                var rightIntent = new QueryIntent 
-                { 
-                    TableName = join.TableName, 
-                    TableAlias = join.TableAlias 
-                };
+                var joinAlias = join.TableAlias ?? join.TableName;
+                var joinNode = plan.Nodes[joinAlias];
+                var rightIntent = CloneWithPushdown(new QueryIntent { TableName = join.TableName, TableAlias = join.TableAlias }, joinNode);
                 
-                var (rightRows, rightSchema) = Materialize(db, rightIntent, parameters, join.TableAlias ?? join.TableName);
+                var (rightRows, rightSchema) = MaterializeRows(db, rightIntent, parameters, joinAlias);
 
-                // Perform the join
-                (leftRows, leftSchema) = HashJoin(leftRows, leftSchema, rightRows, rightSchema, join);
+                // Merge schemas (always [left, right])
+                var mergedSchema = new Dictionary<string, int>(leftSchema);
+                int offset = leftSchema.Count;
+                foreach (var kv in rightSchema)
+                {
+                    if (!mergedSchema.ContainsKey(kv.Key))
+                    {
+                        mergedSchema[kv.Key] = offset + kv.Value;
+                    }
+                }
+
+                //perform the streaming join
+                probeStream = HashJoin(probeStream, leftSchema, rightRows, rightSchema, join);
+                leftSchema = mergedSchema;
             }
         }
 
-        // 3. Apply Filter (WHERE) on the fully joined set
-        if (intent.Filter.HasValue)
+        // 4. Apply residual Filter (WHERE) on the joined stream
+        var residualFilter = plan.ResidualFilter;
+        if (residualFilter.HasValue)
         {
-            leftRows = FilterRows(leftRows, leftSchema, intent.Filter.Value);
+            probeStream = FilterRows(probeStream, leftSchema, residualFilter.Value);
         }
 
-        // 4. Apply Aggregates / Group By / Order By / Limit / Projection
-        // Re-use logic from CompoundQueryExecutor/QueryPostProcessor where possible.
-        // For "Minimum Effort", we rely on MaterializedResultSet or manual processing.
-        // Since we have specific columns in intent, we must project them.
+        // 5. Materialize if OrderBy is needed, otherwise keep streaming
+        var columns = BuildColumnNames(leftSchema);
         
-        var columns = leftSchema.OrderBy(kv => kv.Value).Select(kv => kv.Key).ToArray();
-        
-        // If we have aggregates, we need to process them.
-        if (intent.HasAggregates || (intent.GroupBy is { Count: > 0 }))
-        {
-             // Use AggregateProcessor? It expects List<QueryValue[]> and column names.
-             // We need to map intent.Columns (aliases/exprs) to the joined schema.
-             // This part is tricky because AggregateProcessor expects input columns to match logic.
-             // For now, let's assume simple projection if no aggregates.
-        }
-
-        // Apply OrderBy
         if (intent.OrderBy is { Count: > 0 })
         {
-             QueryPostProcessor.ApplyOrderBy(leftRows, intent.OrderBy, columns);
+             var finalRows = probeStream.ToList();
+             QueryPostProcessor.ApplyOrderBy(finalRows, intent.OrderBy, columns);
+             
+             if (intent.Limit.HasValue || intent.Offset.HasValue)
+             {
+                 finalRows = QueryPostProcessor.ApplyLimitOffset(finalRows, intent.Limit, intent.Offset);
+             }
+
+             if (intent.Columns != null)
+             {
+                 var projectedRows = ProjectRows(finalRows, leftSchema, intent.Columns);
+                 return new SharcDataReader(projectedRows, intent.ColumnsArray!);
+             }
+             return new SharcDataReader(finalRows, columns);
         }
 
-        // Apply Limit/Offset
+        // 6. Streaming Limit/Offset if no OrderBy
         if (intent.Limit.HasValue || intent.Offset.HasValue)
         {
-            leftRows = QueryPostProcessor.ApplyLimitOffset(leftRows, intent.Limit, intent.Offset);
+            // We need a streaming ApplyLimitOffset or just materialize a bit.
+            // For now, let's just materialize the limited set.
+            var finalRows = QueryPostProcessor.ApplyLimitOffset(probeStream.ToList(), intent.Limit, intent.Offset);
+            if (intent.Columns != null)
+            {
+                 var projectedRows = ProjectRows(finalRows, leftSchema, intent.Columns);
+                 return new SharcDataReader(projectedRows, intent.ColumnsArray!);
+            }
+            return new SharcDataReader(finalRows, columns);
         }
 
-        // Final Projection (SELECT a, b, c) from the joined set (a, b, c, d, e...)
+        // 7. Full Streaming Projection
         if (intent.Columns != null)
         {
-            var projectedRows = ProjectRows(leftRows, leftSchema, intent.Columns);
-            return new SharcDataReader(projectedRows, intent.ColumnsArray!);
+            var projectedStream = ProjectRows(probeStream, leftSchema, intent.Columns);
+            return new SharcDataReader(projectedStream, intent.ColumnsArray!);
         }
 
-        return new SharcDataReader(leftRows, columns);
+        return new SharcDataReader(probeStream, columns);
     }
 
-    private static (List<QueryValue[]> Rows, Dictionary<string, int> Schema) HashJoin(
-        List<QueryValue[]> leftRows, Dictionary<string, int> leftSchema,
-        List<QueryValue[]> rightRows, Dictionary<string, int> rightSchema,
+    private static IEnumerable<QueryValue[]> HashJoin(
+        IEnumerable<QueryValue[]> leftRows, Dictionary<string, int> leftSchema,
+        IEnumerable<QueryValue[]> rightRows, Dictionary<string, int> rightSchema,
         JoinIntent join)
     {
-        // Merge schemas
-        var mergedSchema = new Dictionary<string, int>(leftSchema);
-        int offset = leftSchema.Count;
-        foreach (var kv in rightSchema)
-        {
-            // Simple conflict resolution: if key exists, keep left (or throw?)
-            // Prefixed keys should be unique usually.
-            if (!mergedSchema.ContainsKey(kv.Key))
-            {
-                mergedSchema[kv.Key] = offset + kv.Value;
-            }
-        }
         int rightColumnCount = rightSchema.Count;
-        int totalColumns = offset + rightColumnCount;
 
-        // Build Hash Table on Right
-        // Group rows by the join key
-        var hashTable = new Dictionary<QueryValue, List<QueryValue[]>>();
-        
+        // For now, always build on Right side to support streaming Left.
+        // In the future, a cost-based optimizer could swap these if Kind == Inner.
+        var buildRows = (rightRows as List<QueryValue[]>) ?? rightRows.ToList();
+        var buildSchema = rightSchema;
+        var buildCol = join.RightColumn;
+        var probeCol = join.LeftColumn;
+
+        // Build Hash Table
+        var hashTable = new Dictionary<QueryValue, List<QueryValue[]>>(buildRows.Count);
         if (join.Kind != JoinType.Cross)
         {
-            if (!rightSchema.TryGetValue(join.RightColumn!, out int rightColIdx))
-                throw new InvalidOperationException($"Right join column '{join.RightColumn}' not found in schema.");
+            if (!buildSchema.TryGetValue(buildCol!, out int buildColIdx))
+                throw new InvalidOperationException($"Build join column '{buildCol}' not found in schema.");
 
-            foreach (var row in rightRows)
+            foreach (var row in buildRows)
             {
-                var key = row[rightColIdx];
-                if (key.IsNull) continue; // NULLs don't match in standard SQL equality
-                
+                var key = row[buildColIdx];
+                if (key.IsNull) continue;
+
                 if (!hashTable.TryGetValue(key, out var list))
                 {
-                    list = new List<QueryValue[]>();
+                    list = new List<QueryValue[]>(4); // Most buckets are small
                     hashTable[key] = list;
                 }
                 list.Add(row);
             }
         }
 
-        // Probe Left
-        var resultRows = new List<QueryValue[]>();
-        int leftColIdx = -1;
+        // Probe
+        Dictionary<string, int> probeSchema = leftSchema;
+        int probeColIdx = -1;
         if (join.Kind != JoinType.Cross)
         {
-            if (!leftSchema.TryGetValue(join.LeftColumn!, out leftColIdx))
-                throw new InvalidOperationException($"Left join column '{join.LeftColumn}' not found in schema.");
+            if (!probeSchema.TryGetValue(probeCol!, out probeColIdx))
+                throw new InvalidOperationException($"Probe join column '{probeCol}' not found in schema.");
         }
 
-        foreach (var leftRow in leftRows)
+        // Pre-build the null row for LEFT JOIN (reused across all unmatched probe rows)
+        QueryValue[]? leftJoinNullRow = null;
+        if (join.Kind == JoinType.Left)
+        {
+            leftJoinNullRow = new QueryValue[rightColumnCount];
+            Array.Fill(leftJoinNullRow, QueryValue.Null);
+        }
+
+        foreach (var probeRow in leftRows)
         {
             if (join.Kind == JoinType.Cross)
             {
-                foreach (var rightRow in rightRows)
-                    resultRows.Add(MergeRows(leftRow, rightRow));
+                foreach (var buildRow in buildRows)
+                    yield return MergeRows(probeRow, buildRow);
                 continue;
             }
 
-            var key = leftRow[leftColIdx];
+            var key = probeRow[probeColIdx];
             if (!key.IsNull && hashTable.TryGetValue(key, out var matches))
             {
-                // Inner / Left match
-                foreach (var rightRow in matches)
+                foreach (var buildRow in matches)
                 {
-                    resultRows.Add(MergeRows(leftRow, rightRow));
+                    yield return MergeRows(probeRow, buildRow);
                 }
             }
             else if (join.Kind == JoinType.Left)
             {
-                // Left Join - emit with NULLs
-                var nullRow = new QueryValue[rightColumnCount];
-                Array.Fill(nullRow, QueryValue.Null);
-                resultRows.Add(MergeRows(leftRow, nullRow));
-            }
-            else if (join.Kind == JoinType.Right)
-            {
-                throw new NotSupportedException("RIGHT JOIN is not currently supported in Sharc. Please use LEFT JOIN with swapped table order.");
+                yield return MergeRows(probeRow, leftJoinNullRow!);
             }
         }
-
-        return (resultRows, mergedSchema);
     }
 
     private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right)
@@ -179,32 +240,36 @@ internal static class JoinExecutor
         return combined;
     }
 
-    private static (List<QueryValue[]> Rows, Dictionary<string, int> Schema) Materialize(
+    private static (IEnumerable<QueryValue[]> Rows, Dictionary<string, int> Schema) MaterializeRows(
         SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters, string prefix)
     {
-        using var reader = db.CreateReaderFromIntent(intent, parameters);
-        var rows = new List<QueryValue[]>();
-        int fieldCount = reader.FieldCount;
+        var reader = db.CreateReaderFromIntent(intent, parameters);
+        var fieldCount = reader.FieldCount;
         
-        while (reader.Read())
-        {
-             var row = new QueryValue[fieldCount];
-             for (int i = 0; i < fieldCount; i++)
-             {
-                 row[i] = ReadValue(reader, i);
-             }
-             rows.Add(row);
-        }
-        
-        var schema = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var schema = new Dictionary<string, int>(fieldCount, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < fieldCount; i++)
         {
             string name = reader.GetColumnName(i);
-            // Prefix: "u.id"
-            schema[$"{prefix}.{name}"] = i;
+            schema[string.Concat(prefix, ".", name)] = i;
         }
-        
-        return (rows, schema);
+
+        IEnumerable<QueryValue[]> Iterator()
+        {
+            using (reader)
+            {
+                while (reader.Read())
+                {
+                    var row = new QueryValue[fieldCount];
+                    for (int i = 0; i < fieldCount; i++)
+                    {
+                        row[i] = ReadValue(reader, i);
+                    }
+                    yield return row;
+                }
+            }
+        }
+
+        return (Iterator(), schema);
     }
 
     private static QueryValue ReadValue(SharcDataReader reader, int ordinal)
@@ -222,31 +287,213 @@ internal static class JoinExecutor
         }
     }
 
-    private static QueryIntent CloneForBaseTable(QueryIntent intent) => new()
+    private static QueryIntent CloneWithPushdown(QueryIntent intent, TableExecutionNode node)
     {
-        TableName = intent.TableName,
-        TableRecordId = intent.TableRecordId,
-        // Fetch all columns (*) to allow filtering/joining on any column
-        Columns = null, 
-        Filter = null, // Filter applied after join
-        OrderBy = null,
-        Limit = null,
-        Offset = null,
-        IsDistinct = false,
-        Aggregates = null,
-        GroupBy = null,
-        HavingFilter = null
-    };
+        var requiredColumns = node.RequiredColumns;
+        var columns = new List<string>(requiredColumns.Count);
+        foreach (var c in requiredColumns)
+            columns.Add(string.Concat(node.Alias, ".", c));
 
-    private static List<QueryValue[]> FilterRows(List<QueryValue[]> rows, Dictionary<string, int> schema, PredicateIntent filter)
+        return new QueryIntent
+        {
+            TableName = intent.TableName,
+            TableRecordId = intent.TableRecordId,
+            TableAlias = node.Alias,
+            Columns = columns,
+            Filter = node.PushdownFilter,
+            OrderBy = null,
+            Limit = null,
+            Offset = null,
+            IsDistinct = false,
+            Aggregates = null,
+            GroupBy = null,
+            HavingFilter = null
+        };
+    }
+
+    private static JoinExecutionPlan BuildPlan(QueryIntent intent)
     {
-        var result = new List<QueryValue[]>();
+        var plan = new JoinExecutionPlan();
+        
+        // Register all tables
+        var primaryAlias = intent.TableAlias ?? intent.TableName;
+        plan.Nodes[primaryAlias] = new TableExecutionNode { TableName = intent.TableName, Alias = primaryAlias };
+        if (intent.Joins != null)
+        {
+            foreach (var j in intent.Joins)
+            {
+                var alias = j.TableAlias ?? j.TableName;
+                plan.Nodes[alias] = new TableExecutionNode { TableName = j.TableName, Alias = alias };
+            }
+        }
+
+        // 1. Collect required columns
+        CollectRequiredColumns(intent, plan);
+
+        // 2. Split Filter (Filter pushdown)
+        if (intent.Filter.HasValue)
+        {
+            SplitFilters(intent.Filter.Value, plan);
+        }
+
+        return plan;
+    }
+
+    private static void CollectRequiredColumns(QueryIntent intent, JoinExecutionPlan plan)
+    {
+        void Record(string? raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return;
+            int dotIdx = raw.IndexOf('.');
+            if (dotIdx > 0)
+            {
+                string alias = raw[..dotIdx];
+                string column = raw[(dotIdx + 1)..];
+                if (plan.Nodes.TryGetValue(alias, out var node))
+                    node.RequiredColumns.Add(column);
+            }
+            else
+            {
+                // Unqualified: assign to primary table if possible
+                var primaryAlias = intent.TableAlias ?? intent.TableName;
+                plan.Nodes[primaryAlias].RequiredColumns.Add(raw);
+            }
+        }
+
+        if (intent.Columns != null)
+            foreach (var col in intent.Columns) Record(col);
+
+        if (intent.Joins != null)
+        {
+            foreach (var j in intent.Joins)
+            {
+                Record(j.LeftColumn);
+                Record(j.RightColumn);
+            }
+        }
+
+        if (intent.OrderBy != null)
+            foreach (var o in intent.OrderBy) Record(o.ColumnName);
+
+        if (intent.GroupBy != null)
+            foreach (var g in intent.GroupBy) Record(g);
+
+        if (intent.Filter.HasValue)
+        {
+            foreach (var node in intent.Filter.Value.Nodes)
+                Record(node.ColumnName);
+        }
+    }
+
+    private static void SplitFilters(PredicateIntent filter, JoinExecutionPlan plan)
+    {
+        var nodes = filter.Nodes;
+        Decompose(filter.RootIndex);
+
+        void Decompose(int index)
+        {
+            var node = nodes[index];
+            if (node.Op == IntentOp.And)
+            {
+                Decompose(node.LeftIndex);
+                Decompose(node.RightIndex);
+                return;
+            }
+
+            // Try to push this sub-tree
+            string? targetAlias = GetSoleTargetAlias(index, nodes);
+            if (targetAlias != null && plan.Nodes.TryGetValue(targetAlias, out var tableNode))
+            {
+                // Rewrite sub-tree into pushdown nodes
+                int newRoot = CopySubtree(index, nodes, tableNode.PushdownNodes);
+                if (tableNode.PushdownRootIndex == -1)
+                {
+                    tableNode.PushdownRootIndex = newRoot;
+                }
+                else
+                {
+                    // Wrap existing root with AND
+                    int oldRoot = tableNode.PushdownRootIndex;
+                    tableNode.PushdownNodes.Add(new Sharc.Query.Intent.PredicateNode 
+                    { 
+                        Op = IntentOp.And, 
+                        LeftIndex = oldRoot, 
+                        RightIndex = newRoot 
+                    });
+                    tableNode.PushdownRootIndex = tableNode.PushdownNodes.Count - 1;
+                }
+            }
+            else
+            {
+                // Remains as residual
+                int newRoot = CopySubtree(index, nodes, plan.ResidualNodes);
+                if (plan.ResidualRootIndex == -1)
+                {
+                    plan.ResidualRootIndex = newRoot;
+                }
+                else
+                {
+                    plan.ResidualNodes.Add(new Sharc.Query.Intent.PredicateNode 
+                    { 
+                        Op = IntentOp.And, 
+                        LeftIndex = plan.ResidualRootIndex, 
+                        RightIndex = newRoot 
+                    });
+                    plan.ResidualRootIndex = plan.ResidualNodes.Count - 1;
+                }
+            }
+        }
+    }
+
+    private static string? GetSoleTargetAlias(int index, Sharc.Query.Intent.PredicateNode[] nodes)
+    {
+        string? soleAlias = null;
+        var stack = new Stack<int>();
+        stack.Push(index);
+        while (stack.Count > 0)
+        {
+            var node = nodes[stack.Pop()];
+            if (node.ColumnName != null)
+            {
+                int dotIdx = node.ColumnName.IndexOf('.');
+                string? alias = dotIdx > 0 ? node.ColumnName[..dotIdx] : null; // Assume null means primary, but better be explicit
+                if (alias == null) return null; // Mixed or unqualified is risky here
+
+                if (soleAlias == null) soleAlias = alias;
+                else if (!string.Equals(soleAlias, alias, StringComparison.OrdinalIgnoreCase)) return null;
+            }
+            if (node.LeftIndex != -1) stack.Push(node.LeftIndex);
+            if (node.RightIndex != -1) stack.Push(node.RightIndex);
+        }
+        return soleAlias;
+    }
+
+    private static int CopySubtree(int index, Sharc.Query.Intent.PredicateNode[] source, List<Sharc.Query.Intent.PredicateNode> target)
+    {
+        var node = source[index];
+        int left = -1, right = -1;
+        if (node.LeftIndex != -1) left = CopySubtree(node.LeftIndex, source, target);
+        if (node.RightIndex != -1) right = CopySubtree(node.RightIndex, source, target);
+
+        target.Add(new Sharc.Query.Intent.PredicateNode
+        {
+            Op = node.Op,
+            ColumnName = node.ColumnName,
+            Value = node.Value,
+            HighValue = node.HighValue,
+            LeftIndex = left,
+            RightIndex = right
+        });
+        return target.Count - 1;
+    }
+
+    private static IEnumerable<QueryValue[]> FilterRows(IEnumerable<QueryValue[]> rows, Dictionary<string, int> schema, PredicateIntent filter)
+    {
         foreach (var row in rows)
         {
             if (Evaluate(filter, row, schema))
-                result.Add(row);
+                yield return row;
         }
-        return result;
     }
 
     private static bool Evaluate(PredicateIntent filter, QueryValue[] row, Dictionary<string, int> schema)
@@ -384,9 +631,19 @@ internal static class JoinExecutor
         return string.Equals(text, pattern, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static List<QueryValue[]> ProjectRows(List<QueryValue[]> rows, Dictionary<string, int> schema, IReadOnlyList<string> columns)
+    /// <summary>
+    /// Builds a column name array ordered by schema ordinal, without LINQ allocation.
+    /// </summary>
+    private static string[] BuildColumnNames(Dictionary<string, int> schema)
     {
-        var result = new List<QueryValue[]>();
+        var columns = new string[schema.Count];
+        foreach (var kv in schema)
+            columns[kv.Value] = kv.Key;
+        return columns;
+    }
+
+    private static IEnumerable<QueryValue[]> ProjectRows(IEnumerable<QueryValue[]> rows, Dictionary<string, int> schema, IReadOnlyList<string> columns)
+    {
         var indices = new int[columns.Count];
         for (int i = 0; i < columns.Count; i++)
         {
@@ -400,8 +657,7 @@ internal static class JoinExecutor
             {
                 newRow[i] = indices[i] >= 0 ? row[indices[i]] : QueryValue.Null;
             }
-            result.Add(newRow);
+            yield return newRow;
         }
-        return result;
     }
 }

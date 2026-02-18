@@ -87,5 +87,7 @@ public static class CoreDataGenerator
         using var vacuumCmd = conn.CreateCommand();
         vacuumCmd.CommandText = "VACUUM;";
         vacuumCmd.ExecuteNonQuery();
+        conn.Close();
+        SqliteConnection.ClearAllPools();
     }
 }

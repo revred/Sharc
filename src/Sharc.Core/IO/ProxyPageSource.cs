@@ -30,6 +30,9 @@ internal sealed class ProxyPageSource : IPageSource
     public int ReadPage(uint pageNumber, Span<byte> destination) => _target.ReadPage(pageNumber, destination);
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber) => _target.Invalidate(pageNumber);
+
+    /// <inheritdoc />
     public void Dispose()
     {
         // We don't dispose the target here as it's managed by the owner of the proxy.

@@ -50,12 +50,19 @@ public class CoreBenchmarks
 
         // Pre-compile the Baked filter for fair comparison (bypass JIT compilation overhead per call)
         _sharcDb = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 100 });
-        var table = _sharcDb.Schema.Tables[0]; 
+        var tables = _sharcDb.Schema.Tables;
         var filter = FilterStar.And(
             FilterStar.Column("age").Gt(30),
             FilterStar.Column("score").Lt(50.0)
         );
-        _cachedFilterNode = FilterTreeCompiler.CompileBaked(filter, table.Columns);
+        for (int i = 0; i < tables.Count; i++)
+        {
+            if (tables[i].Name == "users")
+            {
+                _cachedFilterNode = FilterTreeCompiler.CompileBaked(filter, tables[i].Columns);
+                break;
+            }
+        }
     }
 
     [GlobalCleanup]
