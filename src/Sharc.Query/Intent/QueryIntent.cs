@@ -15,6 +15,15 @@ public sealed class QueryIntent
     /// <summary>Optional record ID for single-row fetch (e.g., person:alice).</summary>
     public string? TableRecordId { get; init; }
 
+    /// <summary>Alias of the primary table, if any.</summary>
+    public string? TableAlias { get; init; }
+
+    /// <summary>JOIN clauses, or null if none.</summary>
+    public IReadOnlyList<JoinIntent>? Joins { get; init; }
+
+    /// <summary>True if the query contains any JOIN operations.</summary>
+    public bool HasJoins => Joins is { Count: > 0 };
+
     /// <summary>Projected column names, or null for all columns (SELECT *).</summary>
     public IReadOnlyList<string>? Columns { get; init; }
 

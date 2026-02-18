@@ -13,7 +13,7 @@ namespace Sharc.Query;
 internal static class CoteExecutor
 {
     /// <summary>
-    /// Materializes all Cotes in order, returning a lookup of Cote name → (rows, columns).
+    /// Materializes all Cotes in order, returning a lookup of Cote name to materialized result set.
     /// </summary>
     internal static Dictionary<string, MaterializedResultSet> MaterializeCotes(
         SharcDatabase db,
@@ -25,13 +25,13 @@ internal static class CoteExecutor
 
         foreach (var cote in cotes)
         {
-            results[cote.Name] = CompoundQueryExecutor.ExecuteAndMaterialize(
+            using var reader = CompoundQueryExecutor.ExecuteWithCotes(
                 db, cote.Query, parameters, results);
+            results[cote.Name] = QueryPostProcessor.Materialize(reader);
         }
 
         return results;
     }
-
     /// <summary>
     /// Executes a simple query that may reference Cote results.
     /// If the query's table name matches a Cote, uses the pre-materialized Cote data.
@@ -79,6 +79,11 @@ internal static class CoteExecutor
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
             return new SharcDataReader(rows, columnNames);
+        }
+
+        if (intent.Joins != null && intent.Joins.Count > 0)
+        {
+            return Execution.JoinExecutor.Execute(db, intent, parameters);
         }
 
         return CompoundQueryExecutor.ExecuteIntent(db, intent, parameters);
