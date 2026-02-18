@@ -10,6 +10,19 @@ namespace Sharc.Core.Schema;
 /// </summary>
 internal sealed class SchemaReader
 {
+    /// <summary>
+    /// Cached sqlite_master column definitions — shared across all SchemaReader instances
+    /// to avoid allocating the same 5 ColumnInfo objects on every schema read.
+    /// </summary>
+    private static readonly IReadOnlyList<ColumnInfo> SqliteMasterColumns =
+    [
+        new() { Name = "type", DeclaredType = "TEXT", Ordinal = 0, IsPrimaryKey = false, IsNotNull = false },
+        new() { Name = "name", DeclaredType = "TEXT", Ordinal = 1, IsPrimaryKey = false, IsNotNull = false },
+        new() { Name = "tbl_name", DeclaredType = "TEXT", Ordinal = 2, IsPrimaryKey = false, IsNotNull = false },
+        new() { Name = "rootpage", DeclaredType = "INTEGER", Ordinal = 3, IsPrimaryKey = false, IsNotNull = false },
+        new() { Name = "sql", DeclaredType = "TEXT", Ordinal = 4, IsPrimaryKey = false, IsNotNull = false }
+    ];
+
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
 
@@ -38,27 +51,22 @@ internal sealed class SchemaReader
 
     private SharcSchema ReadSchemaCore(ColumnValue[] _columnBuffer)
     {
-        var tables = new List<TableInfo>
+        // Pre-size collections based on typical schema sizes to avoid List resizing.
+        // sqlite_master entry is always first; most databases have 5-15 user tables.
+        var tables = new List<TableInfo>(8)
         {
             new TableInfo
             {
                 Name = "sqlite_master",
                 RootPage = 1,
                 Sql = "CREATE TABLE sqlite_master(type TEXT, name TEXT, tbl_name TEXT, rootpage INTEGER, sql TEXT)",
-                Columns = new List<ColumnInfo>
-                {
-                    new() { Name = "type", DeclaredType = "TEXT", Ordinal = 0, IsPrimaryKey = false, IsNotNull = false },
-                    new() { Name = "name", DeclaredType = "TEXT", Ordinal = 1, IsPrimaryKey = false, IsNotNull = false },
-                    new() { Name = "tbl_name", DeclaredType = "TEXT", Ordinal = 2, IsPrimaryKey = false, IsNotNull = false },
-                    new() { Name = "rootpage", DeclaredType = "INTEGER", Ordinal = 3, IsPrimaryKey = false, IsNotNull = false },
-                    new() { Name = "sql", DeclaredType = "TEXT", Ordinal = 4, IsPrimaryKey = false, IsNotNull = false }
-                },
+                Columns = SqliteMasterColumns,
                 IsWithoutRowId = false,
                 PhysicalColumnCount = 5
             }
         };
-        var indexes = new List<IndexInfo>();
-        var views = new List<ViewInfo>();
+        var indexes = new List<IndexInfo>(8);
+        var views = new List<ViewInfo>(2);
 
         // sqlite_schema is always rooted at page 1
         using var cursor = _bTreeReader.CreateCursor(1);

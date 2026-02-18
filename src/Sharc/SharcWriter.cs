@@ -373,14 +373,19 @@ public sealed class SharcWriter : IDisposable
         return rootPage;
     }
 
+    // Reusable scratch buffer and decoder for FindTableRootPage — avoids per-call allocations.
+    // ThreadStatic ensures thread safety without locking.
+    [ThreadStatic] private static ColumnValue[]? t_schemaColumnBuffer;
+    [ThreadStatic] private static RecordDecoder? t_schemaDecoder;
+
     /// <summary>
     /// Finds the root page of a table by scanning sqlite_master (page 1).
     /// </summary>
     private static uint FindTableRootPage(IPageSource source, string tableName, int usableSize)
     {
         using var cursor = new BTreeCursor(source, 1, usableSize);
-        var columnBuffer = new ColumnValue[5];
-        var decoder = new RecordDecoder();
+        var columnBuffer = t_schemaColumnBuffer ??= new ColumnValue[5];
+        var decoder = t_schemaDecoder ??= new RecordDecoder();
 
         while (cursor.MoveNext())
         {
@@ -473,7 +478,8 @@ public sealed class SharcWriter : IDisposable
         int usableSize = _db.UsablePageSize;
 
         // 1. Read all table data (raw record bytes + count)
-        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>();
+        int userTableCount = Math.Max(schema.Tables.Count - 1, 0);
+        var tableRows = new List<(TableInfo Table, List<byte[]> Records)>(userTableCount);
         foreach (var table in schema.Tables)
         {
             if (table.Name.Equals("sqlite_master", StringComparison.OrdinalIgnoreCase)) continue;
@@ -502,7 +508,9 @@ public sealed class SharcWriter : IDisposable
         DatabaseHeader.Write(freshData, newHeader);
 
         // Build sqlite_master entries (schema page on page 1)
-        var schemaCells = new List<(int Size, byte[] Cell)>();
+        var schemaCells = new List<(int Size, byte[] Cell)>(tableRows.Count);
+        var tableTypeBytes = "table"u8.ToArray(); // cached — same for every entry
+        var schemaCols = new ColumnValue[5]; // reuse across iterations
         for (int i = 0; i < tableRows.Count; i++)
         {
             var table = tableRows[i].Table;
@@ -510,8 +518,7 @@ public sealed class SharcWriter : IDisposable
             var sqlBytes = Encoding.UTF8.GetBytes(table.Sql);
             var nameBytes = Encoding.UTF8.GetBytes(table.Name);
 
-            var schemaCols = new ColumnValue[5];
-            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, Encoding.UTF8.GetBytes("table"));
+            schemaCols[0] = ColumnValue.Text(2 * 5 + 13, tableTypeBytes);
             schemaCols[1] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
             schemaCols[2] = ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes);
             schemaCols[3] = ColumnValue.FromInt64(1, (long)rootPage);

@@ -11,7 +11,7 @@ public class EntitlementGapTests
         new("test-agent", AgentClass.User, Array.Empty<byte>(), 0,
             writeScope, readScope, 0, 0, "", false, Array.Empty<byte>());
 
-    private void SetupGapJoinDb(string dbPath)
+    private static void SetupGapJoinDb(string dbPath)
     {
         using var connection = new SqliteConnection($"Data Source={dbPath}");
         connection.Open();
@@ -160,7 +160,7 @@ public class EntitlementGapTests
         EntitlementEnforcer.Enforce(activeAgent, "any", null);
     }
 
-    private void SetupGapViewDb(string dbPath)
+    private static void SetupGapViewDb(string dbPath)
     {
         using var connection = new SqliteConnection($"Data Source={dbPath}");
         connection.Open();
@@ -173,7 +173,7 @@ public class EntitlementGapTests
         cmd.ExecuteNonQuery();
     }
 
-    private void SetupGapViewJoinDb(string dbPath)
+    private static void SetupGapViewJoinDb(string dbPath)
     {
         using var connection = new SqliteConnection($"Data Source={dbPath}");
         connection.Open();

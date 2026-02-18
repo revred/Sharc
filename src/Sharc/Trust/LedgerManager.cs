@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using Sharc.Core;
@@ -58,43 +59,81 @@ public sealed class LedgerManager
         var rootPage = SystemStore.GetRootPage(_db.Schema, LedgerTableName);
         bool ownsTransaction = transaction == null;
         var tx = transaction ?? _db.BeginTransaction();
+        
+        // 1. Payload Serialization (Still allocates, optimization deferred)
         byte[] payloadData = payload.ToBytes();
+
+        // 2. Rent Buffers
+        byte[] payloadHashBuf = ArrayPool<byte>.Shared.Rent(32);
+        byte[] dataToSignBuf = ArrayPool<byte>.Shared.Rent(32 + 32 + 8); // PrevHash + PayloadHash + Seq
+        byte[] signatureBuf = ArrayPool<byte>.Shared.Rent(signer.SignatureSize);
+        int agentIdByteCount = Encoding.UTF8.GetByteCount(signer.AgentId);
+        byte[] agentIdBuf = ArrayPool<byte>.Shared.Rent(agentIdByteCount);
+        int agentIdLen = Encoding.UTF8.GetBytes(signer.AgentId, agentIdBuf);
+        ColumnValue[] columnsBuf = ArrayPool<ColumnValue>.Shared.Rent(7);
         
         try
         {
             var lastEntry = GetLastEntry((int)rootPage);
-            long nextSequence = (lastEntry?.SequenceNumber ?? 0) + 1;
-            byte[] prevHash = lastEntry?.PayloadHash ?? new byte[32];
-            byte[] payloadHash = SharcHash.Compute(payloadData);
+            long nextSequence = (lastEntry?.Sequence ?? 0) + 1;
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000; 
 
+            // 3. Compute Payload Hash
+            if (!SharcHash.TryCompute(payloadData, payloadHashBuf, out int hashLen) || hashLen != 32)
+                throw new InvalidOperationException("Hash computation failed.");
+
+            // 4. Prepare Data to Sign (PrevHash + PayloadHash + Seq)
+            Span<byte> dataToSignSpan = dataToSignBuf.AsSpan(0, 72);
+            
+            // Copy PrevHash (or zero if genesis)
+            if (lastEntry != null)
+                lastEntry.Value.PayloadHash.AsSpan().CopyTo(dataToSignSpan.Slice(0, 32));
+            else
+                dataToSignSpan.Slice(0, 32).Clear();
+
+            // Copy PayloadHash
+            payloadHashBuf.AsSpan(0, 32).CopyTo(dataToSignSpan.Slice(32, 32));
+            
+            // Copy Sequence
+            BinaryPrimitives.WriteInt64BigEndian(dataToSignSpan.Slice(64, 8), nextSequence);
+
+            // 5. Validate Agent
             var agentInfo = _registry.GetAgent(signer.AgentId);
             if (agentInfo != null) ValidateAgent(agentInfo, payload, signer, timestamp);
 
-            byte[] dataToSign = new byte[prevHash.Length + payloadHash.Length + 8];
-            prevHash.CopyTo(dataToSign, 0);
-            payloadHash.CopyTo(dataToSign, prevHash.Length);
-            BinaryPrimitives.WriteInt64BigEndian(dataToSign.AsSpan(prevHash.Length + payloadHash.Length), nextSequence);
-            
-            byte[] signature = signer.Sign(dataToSign);
+            // 6. Sign
+            if (!signer.TrySign(dataToSignSpan, signatureBuf, out int sigLen))
+                 throw new InvalidOperationException("Signing failed.");
 
-            var columns = new[]
-            {
-                ColumnValue.FromInt64(1, nextSequence),
-                ColumnValue.FromInt64(2, timestamp),
-                ColumnValue.Text(3, Encoding.UTF8.GetBytes(signer.AgentId)),
-                ColumnValue.Blob(4, payloadData),
-                ColumnValue.Blob(5, payloadHash),
-                ColumnValue.Blob(6, prevHash),
-                ColumnValue.Blob(7, signature)
-            };
+            // 7. Build Columns
+            columnsBuf[0] = ColumnValue.FromInt64(1, nextSequence);
+            columnsBuf[1] = ColumnValue.FromInt64(2, timestamp);
+            columnsBuf[2] = ColumnValue.Text(13 + 2 * agentIdLen, agentIdBuf.AsMemory(0, agentIdLen));
+            columnsBuf[3] = ColumnValue.Blob(4, payloadData);
+            columnsBuf[4] = ColumnValue.Blob(5, payloadHashBuf.AsMemory(0, 32));
+            columnsBuf[5] = ColumnValue.Blob(6, dataToSignBuf.AsMemory(0, 32)); // PrevHash
+            columnsBuf[6] = ColumnValue.Blob(7, signatureBuf.AsMemory(0, sigLen));
     
-            SystemStore.InsertRecord(tx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, nextSequence, columns);
+            // 8. Insert Record (Zero-Alloc Overload)
+            SystemStore.InsertRecord(
+                tx.GetShadowSource(), 
+                _db.Header.UsablePageSize, 
+                rootPage, 
+                nextSequence, 
+                columnsBuf.AsSpan(0, 7));
+
             if (ownsTransaction) tx.Commit();
             SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendSuccess, signer.AgentId, $"seq={nextSequence}"));
         }
         finally
         {
+            // Return buffers
+            ArrayPool<byte>.Shared.Return(payloadHashBuf);
+            ArrayPool<byte>.Shared.Return(dataToSignBuf);
+            ArrayPool<byte>.Shared.Return(signatureBuf);
+            ArrayPool<byte>.Shared.Return(agentIdBuf);
+            ArrayPool<ColumnValue>.Shared.Return(columnsBuf, clearArray: true);
+
             if (ownsTransaction) tx.Dispose();
         }
     }
@@ -117,16 +156,17 @@ public sealed class LedgerManager
             throw new InvalidOperationException("Co-signature required.");
 
         var baseData = (payload with { CoSignatures = null }).ToBytes();
-        var baseHash = SharcHash.Compute(baseData);
+        Span<byte> baseHash = stackalloc byte[32];
+        SharcHash.TryCompute(baseData, baseHash, out _);
 
+        Span<byte> signedData = stackalloc byte[40]; // hash(32) + timestamp(8)
         foreach (var sig in payload.CoSignatures)
         {
             var coSigner = _registry.GetAgent(sig.SignerId) ?? throw new InvalidOperationException("Unknown co-signer.");
             if (sig.SignerId == primary.AgentId) throw new InvalidOperationException("Cannot self-cosign.");
 
-            byte[] signedData = new byte[baseHash.Length + 8];
-            baseHash.CopyTo(signedData, 0);
-            BinaryPrimitives.WriteInt64BigEndian(signedData.AsSpan(baseHash.Length), sig.Timestamp);
+            baseHash.CopyTo(signedData);
+            BinaryPrimitives.WriteInt64BigEndian(signedData.Slice(32), sig.Timestamp);
 
             if (!SharcSigner.Verify(signedData, sig.Signature, coSigner.PublicKey))
                 throw new InvalidOperationException("Invalid co-signature.");
@@ -142,7 +182,12 @@ public sealed class LedgerManager
     {
         using var cursor = _db.CreateReader(LedgerTableName);
         
-        byte[] expectedPrevHash = new byte[32];
+        // Reusable stack buffers — eliminate per-row heap allocations
+        Span<byte> computedHash = stackalloc byte[32];
+        Span<byte> dataToVerify = stackalloc byte[72]; // prevHash(32) + payloadHash(32) + seq(8)
+        Span<byte> coSigHash = stackalloc byte[32];    // for co-signature verification (cold path)
+        Span<byte> coSigData = stackalloc byte[40];    // hash(32) + timestamp(8)
+        byte[] expectedPrevHash = new byte[32]; // carries across rows
         long expectedSequence = 1;
 
         while (cursor.Read())
@@ -150,54 +195,43 @@ public sealed class LedgerManager
             long seq = cursor.GetInt64(0);
             long ts = cursor.GetInt64(1);
             string agentId = cursor.GetString(2);
-            // Index 3 is Payload, we don't need it for Hash Chain verification (Hash is in 4)
-            // But we might want to verify PayloadHash matches Payload?
-            // F2: Verify Payload Hash Integrity?
-            byte[] payload = cursor.GetBlob(3).ToArray();
-            byte[] payloadHash = cursor.GetBlob(4).ToArray();
-            byte[] prevHash = cursor.GetBlob(5).ToArray();
-            byte[] signature = cursor.GetBlob(6).ToArray();
+
+            // Access blob columns as spans — avoid .ToArray() heap allocations
+            var payloadSpan = cursor.GetBlob(3).AsSpan();
+            var payloadHashSpan = cursor.GetBlob(4).AsSpan();
+            var prevHashSpan = cursor.GetBlob(5).AsSpan();
+            var signatureSpan = cursor.GetBlob(6).AsSpan();
 
             // 0. Verify Payload Hash
-            byte[] computedHash = SharcHash.Compute(payload);
-            if (!computedHash.AsSpan().SequenceEqual(payloadHash)) 
+            if (!SharcHash.TryCompute(payloadSpan, computedHash, out _) ||
+                !computedHash.SequenceEqual(payloadHashSpan))
             {
                 SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, "System", $"Payload hash mismatch at seq {seq}"));
                 return false;
             }
 
-            // 0.1 Verify Co-Signatures (if structured payload)
-            // We attempt to deserialize as TrustPayload. If it fails (e.g. raw blob), we skip.
-            // But we know standard payloads are TrustPayload.
-            // Note: This adds overhead but is required for deep audit.
-            try 
+            // 0.1 Verify Co-Signatures (cold path — allocations acceptable for deserialization)
+            try
             {
-                var trustPayload = TrustPayload.FromBytes(payload);
-                if (trustPayload != null && trustPayload.CoSignatures != null && trustPayload.CoSignatures.Count > 0)
+                var trustPayload = TrustPayload.FromBytes(payloadSpan);
+                if (trustPayload?.CoSignatures is { Count: > 0 })
                 {
-                    // Reconstruct base hash
                     var basePayload = trustPayload with { CoSignatures = null };
-                    var baseHash = SharcHash.Compute(basePayload.ToBytes());
+                    SharcHash.TryCompute(basePayload.ToBytes(), coSigHash, out _);
 
                     foreach (var sig in trustPayload.CoSignatures)
                     {
-                       // We need co-signer public key.
-                       // During integrity check, we might not have access to full history if keys rotated?
-                       // We assume _registry has current keys. Ideally we need historical keys but AgentInfo has ValidityStart/End.
-                       
                        var coSigner = _registry.GetAgent(sig.SignerId);
                        if (coSigner == null)
                        {
                            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, sig.SignerId, $"Unknown co-signer at seq {seq}"));
                            return false;
                        }
-                       
-                       // Verify Signature: BaseHash + Timestamp
-                       byte[] signedData = new byte[baseHash.Length + 8];
-                       baseHash.CopyTo(signedData, 0);
-                       BinaryPrimitives.WriteInt64BigEndian(signedData.AsSpan(baseHash.Length), sig.Timestamp);
 
-                       if (!SharcSigner.Verify(signedData, sig.Signature, coSigner.PublicKey))
+                       coSigHash.CopyTo(coSigData);
+                       BinaryPrimitives.WriteInt64BigEndian(coSigData.Slice(32), sig.Timestamp);
+
+                       if (!SharcSigner.Verify(coSigData, sig.Signature, coSigner.PublicKey))
                        {
                            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, sig.SignerId, $"Invalid co-signature at seq {seq}"));
                            return false;
@@ -205,11 +239,9 @@ public sealed class LedgerManager
                     }
                 }
             }
-            catch 
+            catch
             {
-                // Not a TrustPayload or deserialization failed. 
-                // If it was supposed to be a TrustPayload, this is an issue, but for generic BLOB support allow pass.
-                // However, Sharc.Trust treats everything as TrustPayload typically.
+                // Not a TrustPayload or deserialization failed — allow pass for generic BLOB support.
             }
 
             // 1. Check sequence
@@ -220,21 +252,20 @@ public sealed class LedgerManager
             }
 
             // 2. Check previous hash link
-            if (!prevHash.AsSpan().SequenceEqual(expectedPrevHash)) 
+            if (!prevHashSpan.SequenceEqual(expectedPrevHash))
             {
                 SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, "System", $"Hash chain broken at seq {seq}"));
                 return false;
             }
 
             // 3. Verify signature (Who signed What and When)
-            byte[] dataToVerify = new byte[prevHash.Length + payloadHash.Length + 8];
-            prevHash.CopyTo(dataToVerify, 0);
-            payloadHash.CopyTo(dataToVerify, prevHash.Length);
-            BinaryPrimitives.WriteInt64BigEndian(dataToVerify.AsSpan(prevHash.Length + payloadHash.Length), seq);
+            prevHashSpan.CopyTo(dataToVerify.Slice(0, 32));
+            payloadHashSpan.CopyTo(dataToVerify.Slice(32, 32));
+            BinaryPrimitives.WriteInt64BigEndian(dataToVerify.Slice(64, 8), seq);
 
             if (activeSigners != null && activeSigners.TryGetValue(agentId, out var publicKey))
             {
-                if (!SharcSigner.Verify(dataToVerify, signature, publicKey))
+                if (!SharcSigner.Verify(dataToVerify, signatureSpan, publicKey))
                 {
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Invalid signature at seq {seq}"));
                     return false;
@@ -242,18 +273,13 @@ public sealed class LedgerManager
             }
             else
             {
-                // Fallback to AgentRegistry
                 var agentRecord = _registry.GetAgent(agentId);
                 if (agentRecord == null)
                 {
-                    // Unknown agent — cannot verify signature
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Unknown agent at seq {seq}"));
-                    return false; 
+                    return false;
                 }
-                
-                // F7: Validity Check during Verification?
-                // If we are verifying HISTORY, the key might be expired NOW but was valid THEN.
-                // We should check if ts is within [validStart, validEnd].
+
                 long tsSeconds = ts / 1000000;
                 if (tsSeconds < agentRecord.ValidityStart || (agentRecord.ValidityEnd > 0 && tsSeconds > agentRecord.ValidityEnd))
                 {
@@ -261,14 +287,14 @@ public sealed class LedgerManager
                     return false;
                 }
 
-                if (!SharcSigner.Verify(dataToVerify, signature, agentRecord.PublicKey))
+                if (!SharcSigner.Verify(dataToVerify, signatureSpan, agentRecord.PublicKey))
                 {
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Invalid signature at seq {seq}"));
                     return false;
                 }
             }
-            
-            expectedPrevHash = payloadHash;
+
+            payloadHashSpan.CopyTo(expectedPrevHash);
             expectedSequence++;
         }
 
@@ -329,8 +355,8 @@ public sealed class LedgerManager
                     v[4].AsBytes().ToArray(), v[5].AsBytes().ToArray(), v[6].AsBytes().ToArray()));
 
                 var last = GetLastEntry((int)rootPage);
-                if (last != null && (entry.SequenceNumber != last.SequenceNumber + 1 ||
-                    !entry.PreviousHash.SequenceEqual(last.PayloadHash)))
+                if (last != null && (entry.SequenceNumber != last.Value.Sequence + 1 ||
+                    !entry.PreviousHash.AsSpan().SequenceEqual(last.Value.PayloadHash)))
                     throw new InvalidOperationException("Chain break.");
                 
                 SystemStore.InsertRecord(tx.GetShadowSource(), _db.Header.UsablePageSize, rootPage, entry.SequenceNumber, RecordEncoder.ToColumnValues(delta, _db.RecordDecoder));
@@ -340,43 +366,45 @@ public sealed class LedgerManager
         finally { if (ownsTransaction) tx.Dispose(); }
     }
 
-    private LedgerEntry? GetLastEntry(int rootPage)
+    private (long Sequence, byte[] PayloadHash)? GetLastEntry(int rootPage)
     {
         uint pageNum = (uint)rootPage;
-        
+
         while (true)
         {
-            // Use PageSource from DB (proxied to active transaction if any)
             var page = _db.PageSource.GetPage(pageNum);
             int headerOffset = (pageNum == 1) ? 100 : 0;
             var header = BTreePageHeader.Parse(page.Slice(headerOffset));
-            
+
             if (header.IsLeaf)
             {
                 if (header.CellCount == 0) return null;
-    
+
                 int cellPtrOffset = headerOffset + header.HeaderSize + (header.CellCount - 1) * 2;
                 ushort cellOffset = BinaryPrimitives.ReadUInt16BigEndian(page.Slice(cellPtrOffset));
-                
+
                 int cellHeaderSize = CellParser.ParseTableLeafCell(page.Slice(cellOffset), out int payloadSize, out long rowId);
-                
+
                 var payloadRecord = page.Slice(cellOffset + cellHeaderSize, payloadSize);
-                var decoded = _db.RecordDecoder.DecodeRecord(payloadRecord);
-    
-                return new LedgerEntry(
-                    decoded[0].AsInt64(),
-                    decoded[1].AsInt64(),
-                    decoded[2].AsString(),
-                    decoded[3].AsBytes().ToArray(), // Payload
-                    decoded[4].AsBytes().ToArray(), // Hash
-                    decoded[5].AsBytes().ToArray(), // Prev
-                    decoded[6].AsBytes().ToArray()  // Sig
-                );
+
+                // Targeted decode: only extract columns 0 (seq) and 4 (payloadHash).
+                // Avoids ColumnValue[7] allocation + 5 unused blob/text ToArray() copies.
+                Span<long> serialTypes = stackalloc long[7];
+                _db.RecordDecoder.ReadSerialTypes(payloadRecord, serialTypes, out int bodyOffset);
+
+                // Column 0: sequence number — zero-alloc inline decode
+                long seq = _db.RecordDecoder.DecodeInt64Direct(payloadRecord, 0, serialTypes, bodyOffset);
+
+                // Column 4: payloadHash — compute offset, copy blob directly from page span
+                Span<int> offsets = stackalloc int[5];
+                _db.RecordDecoder.ComputeColumnOffsets(serialTypes, 5, bodyOffset, offsets);
+                int hashSize = (int)((serialTypes[4] - 12) / 2); // blob serial type size formula
+                byte[] hash = payloadRecord.Slice(offsets[4], hashSize).ToArray();
+
+                return (seq, hash);
             }
             else
             {
-                // Interior node: follow the right-most child
-                // The right-most child is stored in the header's RightChildPage field
                 pageNum = header.RightChildPage;
             }
         }
