@@ -44,7 +44,7 @@ public sealed class FreelistPushTests
         return new MemoryPageSource(data);
     }
 
-    private static void WriteTrunkPage(IWritablePageSource source, uint pageNumber,
+    private static void WriteTrunkPage(MemoryPageSource source, uint pageNumber,
         uint nextTrunk, uint[] leafPages)
     {
         var page = new byte[PageSize];
@@ -58,7 +58,7 @@ public sealed class FreelistPushTests
     }
 
     private static (uint nextTrunk, int leafCount, uint[] leaves) ReadTrunkPage(
-        IPageSource source, uint pageNumber)
+        ShadowPageSource source, uint pageNumber)
     {
         var page = source.GetPage(pageNumber);
         uint next = BinaryPrimitives.ReadUInt32BigEndian(page);

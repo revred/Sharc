@@ -66,9 +66,9 @@ public class SharcContextGraphTests
         // Should find B (start), A (incoming), C (outgoing)
         Assert.Equal(3, result.Nodes.Count);
         
-        Assert.True(result.Nodes.Any(n => n.Record.Key.Value == 200));
-        Assert.True(result.Nodes.Any(n => n.Record.Key.Value == 100)); // Found via incoming
-        Assert.True(result.Nodes.Any(n => n.Record.Key.Value == 300)); // Found via outgoing
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 200);
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 100); // Found via incoming
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 300); // Found via outgoing
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class SharcContextGraphTests
         var result = graph.Traverse(new NodeKey(300), policy);
 
         Assert.Equal(3, result.Nodes.Count); // C, B, A
-        Assert.True(result.Nodes.Any(n => n.Record.Key.Value == 100));
+        Assert.Contains(result.Nodes, n => n.Record.Key.Value == 100);
     }
 
 

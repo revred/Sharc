@@ -247,7 +247,7 @@ public class CreateTableParserTests
         Assert.True(logical[1].IsMergedGuidColumn);
         Assert.True(logical[1].IsGuidColumn);
         Assert.Equal("GUID", logical[1].DeclaredType);
-        Assert.Equal(new[] { 1, 2 }, logical[1].MergedPhysicalOrdinals);
+        Assert.Equal((int[])[1, 2], logical[1].MergedPhysicalOrdinals);
     }
 
     [Fact]

@@ -143,7 +143,7 @@ public sealed class BTreeMutatorDeleteTests
         var (found, newRoot) = mutator.Delete(root, 1);
 
         Assert.True(found);
-        Assert.Equal(0, ScanAllRowIds(shadow, newRoot).Count);
+        Assert.Empty(ScanAllRowIds(shadow, newRoot));
         Assert.Equal(0L, mutator.GetMaxRowId(newRoot));
     }
 
@@ -224,7 +224,7 @@ public sealed class BTreeMutatorDeleteTests
             root = newRoot;
         }
 
-        Assert.Equal(0, ScanAllRowIds(shadow, root).Count);
+        Assert.Empty(ScanAllRowIds(shadow, root));
         Assert.Equal(0L, mutator.GetMaxRowId(root));
     }
 
