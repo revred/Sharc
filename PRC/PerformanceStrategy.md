@@ -173,8 +173,10 @@ This is particularly effective for wide tables where most columns are unused.
 
 Implementation:
 1. Parse all serial types in the header (cheap — just varint reads)
-2. Calculate byte offset of each column (cumulative serial type sizes)
-3. Only decode the requested column positions
+2. Precompute all column byte offsets in a single O(K) pass via `ComputeColumnOffsets()` into an `ArrayPool<int>`-rented buffer
+3. Each column access uses the precomputed offset directly — O(1) per column
+
+Prior to the precomputation optimization (ADR-018), each `DecodeColumn`/`DecodeInt64Direct`/`DecodeDoubleDirect`/`DecodeStringDirect` call recomputed the offset by iterating serial types from index 0 — an O(K) loop per column, yielding O(K²) per row. For the Arena's 9-column `users` table, this produced 36 `GetContentSize` calls per row instead of 9. The fix introduced `DecodeColumnAt`/`DecodeInt64At`/`DecodeDoubleAt`/`DecodeStringAt` methods that accept a precomputed offset, and `SharcDataReader.DecodeCurrentRow()` calls `ComputeColumnOffsets()` once per row to populate the shared `_columnOffsets` buffer.
 
 ## 7. Varint Decoder Optimization
 
