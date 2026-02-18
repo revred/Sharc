@@ -17,7 +17,7 @@ internal sealed class BTreeCursor : IBTreeCursor
 {
     private readonly IPageSource _pageSource;
     private readonly int _usablePageSize;
-    private readonly Stack<(uint page, int cellIndex, int headerOffset, BTreePageHeader header)> _stack = new();
+    private readonly Stack<CursorStackFrame> _stack = new();
 
     // Current leaf page state
     private uint _currentLeafPage;
@@ -189,13 +189,13 @@ internal sealed class BTreeCursor : IBTreeCursor
             if (header.CellCount == 0)
             {
                 // Interior page with no cells Ã¢â‚¬â€ go to right child
-                _stack.Push((pageNumber, 0, headerOffset, header));
+                _stack.Push(new CursorStackFrame(pageNumber, 0, headerOffset, header));
                 pageNumber = header.RightChildPage;
                 continue;
             }
 
             // Push this interior page (starting before first cell)
-            _stack.Push((pageNumber, 0, headerOffset, header));
+            _stack.Push(new CursorStackFrame(pageNumber, 0, headerOffset, header));
 
             // Descend to the left child of the first cell
             // Read the single cell pointer on-demand (no array allocation)
@@ -268,7 +268,7 @@ internal sealed class BTreeCursor : IBTreeCursor
 
             if (idx != -1)
             {
-                _stack.Push((pageNumber, idx, headerOffset, header));
+                _stack.Push(new CursorStackFrame(pageNumber, idx, headerOffset, header));
                 int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
                 CellParser.ParseTableInteriorCell(page[cellOffset..], out uint leftChild, out _);
                 pageNumber = leftChild;
@@ -314,8 +314,8 @@ internal sealed class BTreeCursor : IBTreeCursor
 
             if (nextCellIndex < header.CellCount)
             {
-                // More cells in this interior page Ã¢â‚¬â€ push updated state and descend
-                _stack.Push((page, nextCellIndex, headerOffset, header));
+                // More cells in this interior page Ã¢â‚¬â€œ push updated state and descend
+                _stack.Push(new CursorStackFrame(page, nextCellIndex, headerOffset, header));
 
                 // Read the single cell pointer on-demand (no array allocation)
                 var interiorPage = _pageSource.GetPage(page);

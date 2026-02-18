@@ -353,6 +353,10 @@ public sealed class SharcDataReader : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Checks if a single index key column matches the target value.
+    /// Handles type conversions (e.g. integer to long) and string comparisons.
+    /// </summary>
     private static bool IndexKeyMatches(ColumnValue indexValue, object keyValue)
     {
         return keyValue switch
@@ -480,6 +484,10 @@ public sealed class SharcDataReader : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Evaluates all registered filters against the currently decoded row.
+    /// Ensures that lazy-decoded columns are fully available before filter execution.
+    /// </summary>
     private bool EvaluateFilters()
     {
         // Filters require full column values. When in lazy mode (projection),
@@ -501,6 +509,10 @@ public sealed class SharcDataReader : IDisposable
         return FilterEvaluator.MatchesAll(_filters!, _reusableBuffer!);
     }
 
+    /// <summary>
+    /// Prepares the current row for reading by parsing its header and precomputing column offsets.
+    /// Does NOT decode body values immediately (Lazy Decoding).
+    /// </summary>
     private void DecodeCurrentRow()
     {
         // Always lazy decode: parse serial type headers only.
