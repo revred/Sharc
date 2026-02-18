@@ -59,6 +59,7 @@ Sharc eliminates the "General Purpose Tax" of SQLite:
 | **Simd Tokenizer** | `SharqTokenizer` uses .NET 8 `SearchValues<char>` to scan queries at GB/s. |
 | **JIT Filtering** | `FilterStarCompiler` emits dynamic IL delegates for predicates, beating interpreted bytecode. |
 | **Zero Allocation** | `RecordDecoder` uses `ref struct` and `Span<T>` to read directly from page buffers. |
+| **O(1) Column Access** | `ComputeColumnOffsets()` precomputes all column byte offsets once per row in O(K), then each column access is O(1) via precomputed offset — eliminates O(K²) per-row overhead. |
 | **Graph Indexing** | `RelationStore` uses O(log N) B-tree seeks instead of recursive SQL joins (13.5x speedup). |
 
 ## Key Design Decisions

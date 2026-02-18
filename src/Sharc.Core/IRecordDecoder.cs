@@ -99,6 +99,41 @@ public interface IRecordDecoder
     double DecodeDoubleDirect(ReadOnlySpan<byte> payload, int columnIndex, ReadOnlySpan<long> serialTypes, int bodyOffset);
 
     /// <summary>
+    /// Decodes a single column using a precomputed byte offset (O(1) per column).
+    /// Use with <see cref="ComputeColumnOffsets"/> to eliminate the O(K) per-access
+    /// offset scan in <see cref="DecodeColumn(ReadOnlySpan{byte}, int, ReadOnlySpan{long}, int)"/>.
+    /// </summary>
+    /// <param name="payload">The raw record bytes.</param>
+    /// <param name="serialType">The serial type of the target column.</param>
+    /// <param name="columnOffset">The precomputed byte offset within the payload.</param>
+    ColumnValue DecodeColumnAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset);
+
+    /// <summary>
+    /// Decodes an INTEGER column at a precomputed offset (O(1)).
+    /// </summary>
+    long DecodeInt64At(ReadOnlySpan<byte> payload, long serialType, int columnOffset);
+
+    /// <summary>
+    /// Decodes a REAL column at a precomputed offset (O(1)).
+    /// </summary>
+    double DecodeDoubleAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset);
+
+    /// <summary>
+    /// Decodes a TEXT column at a precomputed offset (O(1)).
+    /// </summary>
+    string DecodeStringAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset);
+
+    /// <summary>
+    /// Computes cumulative byte offsets for all columns from pre-parsed serial types.
+    /// Converts O(K) per-access offset calculation into O(1) via a single precomputation pass.
+    /// </summary>
+    /// <param name="serialTypes">Pre-parsed serial types.</param>
+    /// <param name="columnCount">Number of columns to process.</param>
+    /// <param name="bodyOffset">Byte offset where the record body begins.</param>
+    /// <param name="offsets">Destination array for cumulative offsets (one per column).</param>
+    void ComputeColumnOffsets(ReadOnlySpan<long> serialTypes, int columnCount, int bodyOffset, Span<int> offsets);
+
+    /// <summary>
     /// Evaluates filters directly against the raw payload without decoding the full row.
     /// </summary>
     /// <param name="payload">The raw record bytes.</param>
