@@ -15,7 +15,7 @@ internal static class AggregateProcessor
     /// Groups rows by the specified columns and computes aggregate values.
     /// Returns materialized result rows with the output column layout from the query.
     /// </summary>
-    internal static (List<QueryValue[]> rows, string[] columnNames) Apply(
+    internal static MaterializedResultSet Apply(
         List<QueryValue[]> sourceRows,
         string[] sourceColumnNames,
         IReadOnlyList<AggregateIntent> aggregates,
@@ -44,7 +44,7 @@ internal static class AggregateProcessor
         if (groupOrdinals == null)
         {
             var row = ComputeAggregateRow(sourceRows, aggregates, aggSourceOrdinals, outColumns.Length);
-            return ([row], outColumns);
+            return new MaterializedResultSet([row], outColumns);
         }
 
         var groups = GroupRows(sourceRows, groupOrdinals);
@@ -73,7 +73,7 @@ internal static class AggregateProcessor
             result.Add(row);
         }
 
-        return (result, outColumns);
+        return new MaterializedResultSet(result, outColumns);
     }
 
     private static QueryValue[] ComputeAggregateRow(
