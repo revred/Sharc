@@ -73,6 +73,7 @@ internal sealed class SchemaReader
             string type = _columnBuffer[0].AsString();
             string name = _columnBuffer[1].IsNull ? "" : _columnBuffer[1].AsString();
             string tblName = _columnBuffer[2].IsNull ? "" : _columnBuffer[2].AsString();
+
             int rootPage = _columnBuffer[3].IsNull ? 0 : (int)_columnBuffer[3].AsInt64();
             string? sql = _columnBuffer[4].IsNull ? null : _columnBuffer[4].AsString();
 

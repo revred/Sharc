@@ -1,6 +1,6 @@
 # Sharc
 
-**Sharc reads SQLite files 2-66x faster than Microsoft.Data.Sqlite, in pure C#, with zero native dependencies.**
+**Sharc reads SQLite files 2-66x faster than Managed Sqlite, in pure C#, with zero native dependencies.**
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)

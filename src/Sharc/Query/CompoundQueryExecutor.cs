@@ -60,6 +60,15 @@ internal static class CompoundQueryExecutor
         if (plan.HasCotes)
             coteResults = CoteExecutor.MaterializeCotes(db, plan.Cotes!, parameters);
 
+        return ExecuteWithCotes(db, plan, parameters, coteResults);
+    }
+
+    internal static SharcDataReader ExecuteWithCotes(
+        SharcDatabase db,
+        QueryPlan plan,
+        IReadOnlyDictionary<string, object>? parameters,
+        Dictionary<string, MaterializedResultSet>? coteResults)
+    {
         if (plan.IsCompound)
         {
             // Streaming UNION ALL (2-way): zero-materialization concatenation
@@ -89,11 +98,11 @@ internal static class CompoundQueryExecutor
     // ─── Lazy Cote resolution ─────────────────────────────────────
 
     /// <summary>
-    /// Builds a lookup of Cote name → query intent for lazy resolution.
+    /// Builds a lookup of Cote name → query plan for lazy resolution.
     /// </summary>
-    private static Dictionary<string, QueryIntent> BuildCoteIntentMap(IReadOnlyList<CoteIntent> cotes)
+    private static Dictionary<string, QueryPlan> BuildCoteIntentMap(IReadOnlyList<CoteIntent> cotes)
     {
-        var map = new Dictionary<string, QueryIntent>(cotes.Count, StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, QueryPlan>(cotes.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var cote in cotes)
             map[cote.Name] = cote.Query;
         return map;
@@ -103,8 +112,12 @@ internal static class CompoundQueryExecutor
     /// Returns true when a Cote query is a simple filtered table scan that can be inlined.
     /// No aggregates, DISTINCT, ORDER BY, LIMIT, or inter-Cote references.
     /// </summary>
-    private static bool IsCoteSimpleTableScan(QueryIntent coteQuery, Dictionary<string, QueryIntent> coteMap)
+    private static bool IsCoteSimpleTableScan(QueryPlan cotePlan, Dictionary<string, QueryPlan> coteMap)
     {
+        if (cotePlan.IsCompound || cotePlan.HasCotes) return false;
+        var coteQuery = cotePlan.Simple!;
+
+        if (coteQuery.Joins != null && coteQuery.Joins.Count > 0) return false; // Cannot inline joins yet
         if (coteMap.ContainsKey(coteQuery.TableName)) return false; // references another Cote
         if (coteQuery.HasAggregates) return false;
         if (coteQuery.IsDistinct) return false;
@@ -118,10 +131,10 @@ internal static class CompoundQueryExecutor
     /// <summary>
     /// Returns true when a simple Cote query can be resolved to a direct cursor read.
     /// </summary>
-    private static bool CanResolveCoteSimple(QueryIntent outer, Dictionary<string, QueryIntent> coteMap)
+    private static bool CanResolveCoteSimple(QueryIntent outer, Dictionary<string, QueryPlan> coteMap)
     {
-        if (!coteMap.TryGetValue(outer.TableName, out var coteQuery)) return false;
-        return IsCoteSimpleTableScan(coteQuery, coteMap);
+        if (!coteMap.TryGetValue(outer.TableName, out var cotePlan)) return false;
+        return IsCoteSimpleTableScan(cotePlan, coteMap);
     }
 
     /// <summary>
@@ -129,7 +142,7 @@ internal static class CompoundQueryExecutor
     /// Avoids materializing the Cote entirely.
     /// </summary>
     private static SharcDataReader ExecuteResolvedSimple(
-        SharcDatabase db, QueryIntent outer, Dictionary<string, QueryIntent> coteMap,
+        SharcDatabase db, QueryIntent outer, Dictionary<string, QueryPlan> coteMap,
         IReadOnlyDictionary<string, object>? parameters)
     {
         var resolved = ResolveSingleIntent(outer, coteMap);
@@ -140,7 +153,7 @@ internal static class CompoundQueryExecutor
     /// Returns true when all Cote references in a compound plan can be inlined.
     /// Requires a simple two-way plan with no nested compounds.
     /// </summary>
-    private static bool CanResolveCompound(CompoundQueryPlan plan, Dictionary<string, QueryIntent> coteMap)
+    private static bool CanResolveCompound(CompoundQueryPlan plan, Dictionary<string, QueryPlan> coteMap)
     {
         if (plan.RightCompound != null) return false;
         if (plan.RightSimple == null) return false;
@@ -159,7 +172,7 @@ internal static class CompoundQueryExecutor
     /// Replaces Cote table references with real table intents, merging filters.
     /// </summary>
     private static CompoundQueryPlan ResolveCompound(
-        CompoundQueryPlan plan, Dictionary<string, QueryIntent> coteMap)
+        CompoundQueryPlan plan, Dictionary<string, QueryPlan> coteMap)
     {
         return new CompoundQueryPlan
         {
@@ -177,10 +190,13 @@ internal static class CompoundQueryExecutor
     /// If the intent references a Cote, returns a new intent targeting the real table
     /// with the Cote filter and outer filter merged via AND.
     /// </summary>
-    private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryIntent> coteMap)
+    private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryPlan> coteMap)
     {
-        if (!coteMap.TryGetValue(intent.TableName, out var coteQuery))
+        if (!coteMap.TryGetValue(intent.TableName, out var cotePlan))
             return intent;
+
+        // Guaranteed to be simple by CanResolveCoteSimple check
+        var coteQuery = cotePlan.Simple!;
 
         return new QueryIntent
         {
@@ -548,6 +564,11 @@ internal static class CompoundQueryExecutor
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters)
     {
+        if (intent.HasJoins)
+        {
+            return Execution.JoinExecutor.Execute(db, intent, parameters);
+        }
+
         var reader = db.CreateReaderFromIntent(intent, parameters);
         return QueryPostProcessor.Apply(reader, intent);
     }

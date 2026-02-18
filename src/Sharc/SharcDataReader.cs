@@ -84,21 +84,32 @@ public sealed class SharcDataReader : IDisposable
     private readonly IndexSet? _dedupRightIndex;
     private readonly IndexSet? _dedupSeen;
 
-    internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
-        IReadOnlyList<ColumnInfo> columns, int[]? projection,
-        IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null,
-        ResolvedFilter[]? filters = null, IFilterNode? filterNode = null)
+    internal readonly record struct CursorReaderConfig
     {
+        public required IReadOnlyList<ColumnInfo> Columns { get; init; }
+        public int[]? Projection { get; init; }
+        public IBTreeReader? BTreeReader { get; init; }
+        public IReadOnlyList<IndexInfo>? TableIndexes { get; init; }
+        public ResolvedFilter[]? Filters { get; init; }
+        public IFilterNode? FilterNode { get; init; }
+    }
+
+    internal SharcDataReader(
+        IBTreeCursor cursor,
+        IRecordDecoder recordDecoder,
+        CursorReaderConfig config)
+    {
+        var columns = config.Columns;
+
         _cursor = cursor;
         _recordDecoder = recordDecoder;
         _columns = columns;
-        _projection = projection;
-        _bTreeReader = bTreeReader;
-        _tableIndexes = tableIndexes;
-        _filters = filters;
-        _filters = filters;
-        _filterNode = filterNode;
-        _concreteFilterNode = filterNode as FilterNode;
+        _projection = config.Projection;
+        _bTreeReader = config.BTreeReader;
+        _tableIndexes = config.TableIndexes;
+        _filters = config.Filters;
+        _filterNode = config.FilterNode;
+        _concreteFilterNode = config.FilterNode as FilterNode;
         _columnCount = columns.Count;
 
         // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
@@ -154,7 +165,7 @@ public sealed class SharcDataReader : IDisposable
         _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
         // Pool serial type buffer for byte-level filter evaluation
-        if (filterNode != null)
+        if (_filterNode != null)
         {
             _filterSerialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
             _filterSerialTypes.AsSpan(0, bufferSize).Clear();
