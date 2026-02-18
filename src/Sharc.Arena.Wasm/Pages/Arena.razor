@@ -378,6 +378,18 @@ else
         var activePreset = _presets.FirstOrDefault(p => p.Id == _preset);
         if (activePreset is null) { Stop(); return; }
 
+        // Periodic timer to keep stopwatch ticking during sync operations.
+        // In single-threaded WASM, this fires only when the thread yields.
+        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+        var tickTask = Task.Run(async () =>
+        {
+            while (await ticker.WaitForNextTickAsync(token))
+            {
+                _elapsedMs = sw.Elapsed.TotalMilliseconds;
+                await InvokeAsync(StateHasChanged);
+            }
+        }, token);
+
         try
         {
             for (var i = 0; i < _slides.Count; i++)
@@ -396,6 +408,11 @@ else
                 }
                 catch (OperationCanceledException) { break; }
                 if (token.IsCancellationRequested) break;
+
+                // Update timer right before heavy work starts
+                _elapsedMs = sw.Elapsed.TotalMilliseconds;
+                StateHasChanged();
+                await Task.Yield();
 
                 // Run benchmark
                 try
@@ -429,6 +446,9 @@ else
         }
 
         sw.Stop();
+        ticker.Dispose();
+        try { await tickTask; } catch (OperationCanceledException) { }
+
         _elapsedMs = sw.Elapsed.TotalMilliseconds;
         _currentIndex = -1;
         _state = BenchmarkState.Done;
