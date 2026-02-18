@@ -1900,3 +1900,326 @@ body {
 @media (min-width: 1024px) {
     /* desktop defaults */
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SQL Playground
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.playground-page {
+    max-width: 960px;
+    width: 100%;
+    padding: var(--space-xl) var(--space-lg);
+}
+
+.playground-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.playground-workload {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.playground-workload-label {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-right: var(--space-xs);
+}
+
+.playground-workload-btn {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 6px 12px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.playground-workload-btn:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.playground-workload-btn.active {
+    border-color: var(--sharc);
+    color: var(--sharc);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.playground-editor-wrap {
+    margin-bottom: var(--space-md);
+}
+
+.playground-editor {
+    width: 100%;
+    min-height: 120px;
+    padding: var(--space-md);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #e2e8f0;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.playground-editor:focus {
+    border-color: var(--sharc);
+}
+
+.playground-editor::placeholder {
+    color: rgba(255, 255, 255, 0.15);
+}
+
+.playground-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.playground-run-btn {
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    background: var(--sharc);
+    color: #000;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 44px;
+}
+
+.playground-run-btn:hover:not(:disabled) {
+    background: var(--sharc-dark);
+}
+
+.playground-run-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.playground-clear-btn {
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    padding: 10px 16px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 44px;
+}
+
+.playground-clear-btn:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.playground-schema-hint {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.2);
+    margin-left: auto;
+}
+
+.playground-error {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--error);
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    word-break: break-word;
+}
+
+/* ── Performance Panel ── */
+
+.playground-perf {
+    display: flex;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.playground-perf-card {
+    flex: 1;
+    padding: var(--space-md);
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    border-top-width: 3px;
+    text-align: center;
+}
+
+.playground-perf-card.winner {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.06);
+}
+
+.playground-perf-engine {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: var(--space-sm);
+}
+
+.playground-perf-time {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+}
+
+.playground-perf-alloc {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.3);
+    margin-bottom: 4px;
+}
+
+.playground-perf-rows {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+.playground-winner {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: var(--space-lg);
+    padding: var(--space-sm);
+}
+
+/* ── Result Grid ── */
+
+.playground-grid {
+    margin-bottom: var(--space-lg);
+}
+
+.playground-grid-info {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.2);
+    margin-bottom: var(--space-sm);
+}
+
+.playground-grid-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.playground-grid table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.playground-grid th {
+    position: sticky;
+    top: 0;
+    background: rgba(8, 8, 18, 0.98);
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 700;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-light);
+    white-space: nowrap;
+}
+
+.playground-grid td {
+    padding: 6px 12px;
+    color: rgba(255, 255, 255, 0.6);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.playground-grid tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.01);
+}
+
+.playground-grid tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.playground-grid .null-cell {
+    color: rgba(255, 255, 255, 0.15);
+    font-style: italic;
+}
+
+/* ── Sample Queries ── */
+
+.playground-samples {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    margin-top: var(--space-md);
+}
+
+.playground-samples-label {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-right: var(--space-xs);
+}
+
+.playground-chip {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 5px 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 20px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.playground-chip:hover {
+    border-color: var(--sharc);
+    color: var(--sharc);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+/* ── Playground responsive ── */
+
+@media (max-width: 767px) {
+    .playground-perf { flex-direction: column; }
+    .playground-grid { font-size: 0.7rem; }
+    .playground-schema-hint { display: none; }
+    .playground-perf-time { font-size: 1.2rem; }
+    .playground-editor { min-height: 100px; font-size: 0.78rem; }
+    .playground-samples { gap: 6px; }
+}

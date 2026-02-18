@@ -23,7 +23,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     private readonly SqliteEngine _sqliteEngine;
     private readonly IndexedDbEngine _indexedDbEngine;
     private readonly ReferenceEngine _referenceEngine;
-    private readonly DataGenerator _dataGenerator = new();
+    private readonly DataGenerator _dataGenerator;
 
     private byte[]? _dbBytes;
     private int _lastUserCount;
@@ -33,12 +33,14 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         SharcEngine sharcEngine,
         SqliteEngine sqliteEngine,
         IndexedDbEngine indexedDbEngine,
-        ReferenceEngine referenceEngine)
+        ReferenceEngine referenceEngine,
+        DataGenerator dataGenerator)
     {
         _sharcEngine = sharcEngine;
         _sqliteEngine = sqliteEngine;
         _indexedDbEngine = indexedDbEngine;
         _referenceEngine = referenceEngine;
+        _dataGenerator = dataGenerator;
     }
 
     public async Task<IReadOnlyDictionary<string, EngineBaseResult>> RunSlideAsync(
@@ -57,11 +59,29 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
         await EnsureAllEnginesInitialized(userCount, nodeCount);
 
         // Run Tier 1 engines (sync, same .NET runtime)
-        var sharcResult = RunSharcSlide(slide.Id, scale);
-        var sqliteResult = RunSqliteSlide(slide.Id, scale);
+        EngineBaseResult sharcResult, sqliteResult, indexedDbResult;
+
+        try { sharcResult = RunSharcSlide(slide.Id, scale); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Runner] Sharc slide {slide.Id} failed: {ex.Message}");
+            sharcResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
+        }
+
+        try { sqliteResult = RunSqliteSlide(slide.Id, scale); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Runner] SQLite slide {slide.Id} failed: {ex.Message}");
+            sqliteResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
+        }
 
         // Run Tier 2 engine (async, JS interop)
-        var indexedDbResult = await _indexedDbEngine.RunSlide(slide.Id, scale);
+        try { indexedDbResult = await _indexedDbEngine.RunSlide(slide.Id, scale); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Runner] IndexedDB slide {slide.Id} failed: {ex.Message}");
+            indexedDbResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
+        }
 
         // Merge: live results for all engines, reference as fallback
         var merged = new Dictionary<string, EngineBaseResult>(referenceResults.Count);
@@ -120,14 +140,30 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             _sharcEngine.Reset();
             _sharcEngine.EnsureInitialized(_dbBytes);
 
-            _sqliteEngine.Reset();
-            _sqliteEngine.EnsureInitialized(_dbBytes);
+            try
+            {
+                _sqliteEngine.Reset();
+                _sqliteEngine.EnsureInitialized(_dbBytes);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Runner] SQLite init failed: {ex.Message}");
+            }
 
             _lastUserCount = userCount;
             _lastNodeCount = nodeCount;
         }
 
-        await _indexedDbEngine.EnsureInitialized(_dbBytes!, userCount, nodeCount);
+        if (_dbBytes is null) return;
+
+        try
+        {
+            await _indexedDbEngine.EnsureInitialized(_dbBytes, userCount, nodeCount);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Runner] IndexedDB init failed: {ex.Message}");
+        }
     }
 
     private EngineBaseResult RunSharcSlide(string slideId, double scale) =>
