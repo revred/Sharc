@@ -57,6 +57,7 @@ internal static class BenchmarkTiers
         "*WriteBenchmarks.*_100Rows*",
         "*SharQlParser*Parse_Simple*",
         "*SharQlParser*Parse_Medium*",
+        "*JoinEfficiencyBenchmarks*",
     ];
 
     // ── Standard: ~38 benchmarks, ~12 min ──

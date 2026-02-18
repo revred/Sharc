@@ -99,6 +99,12 @@ public sealed class SafeMemMapdPageSource : IPageSource
         return PageSize;
     }
 
+    /// <inheritdoc />
+    public void Invalidate(uint pageNumber)
+    {
+        // OS-managed mapping, no internal cache to invalidate.
+    }
+
     /// <summary>
     /// Releases the memory-mapped view, file mapping, and pointer.
     /// </summary>

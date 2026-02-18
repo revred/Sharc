@@ -72,6 +72,7 @@ public sealed class SharcDataReader : IDisposable
     // Unboxed materialized mode — QueryValue stores int/double inline without boxing
     private readonly Query.QueryValue[][]? _queryValueRows;
     private readonly List<Query.QueryValue[]>? _queryValueList;
+    private IEnumerator<Query.QueryValue[]>? _queryValueEnumerator;
 
     // Concatenating mode — streams two readers sequentially for UNION ALL
     private readonly SharcDataReader? _concatFirst;
@@ -214,6 +215,18 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Creates a streaming reader from an <see cref="IEnumerable{T}"/> of rows.
+    /// Used for low-allocation JOIN and filtered streaming.
+    /// </summary>
+    internal SharcDataReader(IEnumerable<Query.QueryValue[]> rows, string[] columnNames)
+    {
+        _queryValueEnumerator = rows.GetEnumerator();
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
     /// Creates a concatenating reader that streams from <paramref name="first"/> then
     /// <paramref name="second"/>. Used for zero-materialization UNION ALL.
     /// </summary>
@@ -251,14 +264,18 @@ public sealed class SharcDataReader : IDisposable
         ?? _columns!.Count;
 
     /// <summary>Returns true when the reader is in unboxed <see cref="Query.QueryValue"/> mode.</summary>
-    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null;
+    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null || _queryValueEnumerator != null;
 
     /// <summary>Gets the current row in materialized mode (array or list).</summary>
     private Query.QueryValue[] CurrentMaterializedRow
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _queryValueRows != null ? _queryValueRows[_materializedIndex]
-            : _queryValueList![_materializedIndex];
+        get
+        {
+            if (_queryValueRows != null) return _queryValueRows[_materializedIndex];
+            if (_queryValueList != null) return _queryValueList[_materializedIndex];
+            return _queryValueEnumerator!.Current;
+        }
     }
 
     /// <summary>Returns true when the reader is in concatenating mode (streaming UNION ALL).</summary>
@@ -451,6 +468,10 @@ public sealed class SharcDataReader : IDisposable
         {
             _materializedIndex++;
             return _materializedIndex < _queryValueList.Count;
+        }
+        if (_queryValueEnumerator != null)
+        {
+            return _queryValueEnumerator.MoveNext();
         }
 
         while (_cursor!.MoveNext())
@@ -1203,6 +1224,8 @@ public sealed class SharcDataReader : IDisposable
         {
             ArrayPool<ColumnValue>.Shared.Return(_reusableBuffer, clearArray: true);
             _reusableBuffer = null;
+        _queryValueEnumerator?.Dispose();
+        _queryValueEnumerator = null;
         }
 
         if (_serialTypes is not null)

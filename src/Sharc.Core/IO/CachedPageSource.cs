@@ -159,6 +159,34 @@ public sealed class CachedPageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_syncRoot)
+        {
+            if (_lookup.TryGetValue(pageNumber, out int slot))
+            {
+                _lookup.Remove(pageNumber);
+                RemoveNode(slot);
+                
+                // Return buffer to pool
+                if (_slots[slot].Data != null)
+                {
+                    ArrayPool<byte>.Shared.Return(_slots[slot].Data);
+                    _slots[slot].Data = null!;
+                    AllocatedSlotCount--;
+                }
+                
+                _freeSlots.Push(slot);
+                _count--;
+            }
+            
+            _inner.Invalidate(pageNumber);
+        }
+    }
+
+    /// <inheritdoc />
     public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

@@ -40,7 +40,8 @@ public sealed class SharcDatabase : IDisposable
 {
     private readonly ProxyPageSource _proxySource;
     private readonly IPageSource _rawSource;
-    private readonly DatabaseHeader _header;
+    private DatabaseHeader _header;
+    private uint _lastValidatedCookie;
     private Transaction? _activeTransaction;
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
@@ -151,6 +152,7 @@ public sealed class SharcDatabase : IDisposable
         _proxySource = proxySource;
         _rawSource = rawSource;
         _header = header;
+        _lastValidatedCookie = header.SchemaCookie;
         _bTreeReader = bTreeReader;
         _recordDecoder = recordDecoder;
         _info = info;
@@ -172,7 +174,32 @@ public sealed class SharcDatabase : IDisposable
     private SharcSchema GetSchema() =>
         _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
         
-    internal void InvalidateSchema() => _schema = null;
+    internal void InvalidateSchema()
+    {
+        _schema = null;
+        _queryCache?.Clear();
+        _readerInfoCache?.Clear();
+        _paramFilterCache?.Clear();
+    }
+
+    private void EnsureSchemaUpToDate()
+    {
+        // 1. Force the page source to re-read Page 1 by invalidating any cache
+        _rawSource.Invalidate(1);
+
+        // 2. Read the 100-byte header from page 1 (use GetPage to avoid size mismatch)
+        var page1 = _rawSource.GetPage(1);
+        var headerBuf = page1[..SQLiteLayout.DatabaseHeaderSize];
+
+        // 3. Parse and check cookie
+        var currentHeader = DatabaseHeader.Parse(headerBuf);
+        if (currentHeader.SchemaCookie != _lastValidatedCookie)
+        {
+            _header = currentHeader;
+            _lastValidatedCookie = currentHeader.SchemaCookie;
+            InvalidateSchema();
+        }
+    }
 
     /// <summary>
     /// Creates a new, empty Sharc database valid for both engine and trust usage.
@@ -320,12 +347,22 @@ public sealed class SharcDatabase : IDisposable
         Core.Trust.AgentInfo? agent)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureSchemaUpToDate();
 
         var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
         // Resolve views (recursively rewrites view tables as Cotes)
-        plan = ResolveViews(plan);
+        if (plan.ResolvedViewPlan != null)
+        {
+            plan = plan.ResolvedViewPlan;
+        }
+        else
+        {
+            var resolved = ResolveViews(plan);
+            plan.ResolvedViewPlan = resolved;
+            plan = resolved;
+        }
 
         // Enforce entitlements when an agent is specified
         if (agent is not null)

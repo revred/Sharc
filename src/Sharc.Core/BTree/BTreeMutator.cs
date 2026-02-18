@@ -19,8 +19,8 @@ internal sealed class BTreeMutator : IDisposable
 {
     private readonly IWritablePageSource _source;
     private readonly int _usablePageSize;
-    private readonly Dictionary<uint, byte[]> _pageCache = new();
-    private readonly List<byte[]> _rentedBuffers = new();
+    private readonly Dictionary<uint, byte[]> _pageCache = new(16);
+    private readonly List<byte[]> _rentedBuffers = new(8);
     private bool _disposed;
 
     /// <summary>Header size for a leaf table page.</summary>

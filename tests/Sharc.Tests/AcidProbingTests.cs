@@ -268,6 +268,7 @@ public class AcidProbingTests
         }
 
         public void Flush() => _inner.Flush();
+        public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
         public void Dispose() => _inner.Dispose();
     }
 }
