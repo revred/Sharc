@@ -13,7 +13,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
 {
     private readonly IPageSource _pageSource;
     private readonly int _usablePageSize;
-    private readonly Stack<(uint page, int cellIndex, int headerOffset, BTreePageHeader header)> _stack = new();
+    private readonly Stack<CursorStackFrame> _stack = new();
 
     // Current leaf page state
     private uint _currentLeafPage;
@@ -108,12 +108,12 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
             // Interior page — push onto stack and descend to leftmost child
             if (header.CellCount == 0)
             {
-                _stack.Push((pageNumber, 0, headerOffset, header));
+                _stack.Push(new CursorStackFrame(pageNumber, 0, headerOffset, header));
                 pageNumber = header.RightChildPage;
                 continue;
             }
 
-            _stack.Push((pageNumber, 0, headerOffset, header));
+            _stack.Push(new CursorStackFrame(pageNumber, 0, headerOffset, header));
 
             // For index interior cells: [leftChild:4-BE] [payloadSize:varint] [payload...]
             ushort cellPtr = header.GetCellPointer(page[headerOffset..], 0);
@@ -247,14 +247,14 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
 
             if (idx != -1)
             {
-                _stack.Push((pageNumber, idx, headerOffset, header));
+                _stack.Push(new CursorStackFrame(pageNumber, idx, headerOffset, header));
                 int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
                 uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(page[cellOffset..]);
                 pageNumber = leftChild;
             }
             else
             {
-                _stack.Push((pageNumber, header.CellCount - 1, headerOffset, header));
+                _stack.Push(new CursorStackFrame(pageNumber, header.CellCount - 1, headerOffset, header));
                 pageNumber = header.RightChildPage;
             }
         }
@@ -331,7 +331,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
 
             if (nextCellIndex < header.CellCount)
             {
-                _stack.Push((page, nextCellIndex, headerOffset, header));
+                _stack.Push(new CursorStackFrame(page, nextCellIndex, headerOffset, header));
 
                 var interiorPage = _pageSource.GetPage(page);
                 ushort cellPtr = header.GetCellPointer(interiorPage[headerOffset..], nextCellIndex);
