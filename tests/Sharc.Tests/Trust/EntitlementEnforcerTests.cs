@@ -117,7 +117,7 @@ public class EntitlementEnforcerTests
     public void Enforce_ExpiredAgent_Throws()
     {
         // Agent expired 1 hour ago
-        long pastEnd = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds();
+        long pastEnd = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
         var agent = MakeTimedAgent("*", 0, pastEnd);
 
         Assert.Throws<UnauthorizedAccessException>(() =>
@@ -128,7 +128,7 @@ public class EntitlementEnforcerTests
     public void Enforce_NotYetActiveAgent_Throws()
     {
         // Agent starts 1 hour from now
-        long futureStart = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+        long futureStart = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
         var agent = MakeTimedAgent("*", futureStart, 0);
 
         Assert.Throws<UnauthorizedAccessException>(() =>
@@ -146,7 +146,7 @@ public class EntitlementEnforcerTests
     [Fact]
     public void EnforceWrite_ExpiredAgent_Throws()
     {
-        long pastEnd = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds();
+        long pastEnd = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
         var agent = new AgentInfo("test-agent", AgentClass.User, Array.Empty<byte>(), 0,
             "*", "*", 0, pastEnd, "", false, Array.Empty<byte>());
 
