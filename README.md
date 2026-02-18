@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-2%2C022_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-2%2C038_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -104,7 +104,7 @@ writer.Insert("entities",
     ColumnValue.Text(15, "Alice"u8.ToArray()));
 ```
 
-`GetGuid(ordinal)` checks merged columns first (two `DecodeInt64Direct` calls, zero-alloc), then falls back to BLOB(16). Both paths produce identical `Guid` values.
+`GetGuid(ordinal)` checks merged columns first (two `DecodeInt64At` calls, zero-alloc), then falls back to BLOB(16). Both paths produce identical `Guid` values.
 
 ---
 
@@ -200,7 +200,7 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 2,022 tests
+dotnet test                                             # Run all 2,038 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -216,7 +216,7 @@ src/
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
-  Sharc.Tests/              1,207 unit tests
+  Sharc.Tests/              1,229 unit tests
   Sharc.IntegrationTests/   293 end-to-end tests
   Sharc.Query.Tests/        425 query pipeline tests
   Sharc.Graph.Tests.Unit/   55 graph tests
@@ -235,7 +235,7 @@ PRC/                        Architecture decisions, specs, execution plans
 ## Current Limitations
 
 - **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
-- **Write support** -- INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE with B-tree splits, ACID transactions, freelist recycling, and vacuum
+- **Single-writer** -- one writer at a time; no WAL-mode concurrent writes
 - **No JOIN support** -- single-table queries only; use UNION/Cote for multi-table workflows
 - **No virtual tables** -- FTS5, R-Tree not supported
 

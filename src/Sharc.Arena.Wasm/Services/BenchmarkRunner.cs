@@ -57,8 +57,10 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
         Console.WriteLine($"[Runner] Initializing engines with {userCount} users, {nodeCount} nodes");
         await EnsureAllEnginesInitialized(userCount, nodeCount);
+        await Task.Yield(); // Yield after init to let UI update stopwatch
 
         // Run Tier 1 engines (sync, same .NET runtime)
+        // Yield between each to prevent WASM UI thread starvation
         EngineBaseResult sharcResult, sqliteResult, indexedDbResult;
 
         try { sharcResult = RunSharcSlide(slide.Id, scale); }
@@ -68,12 +70,16 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             sharcResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
         }
 
+        await Task.Yield(); // Yield after Sharc to let UI breathe
+
         try { sqliteResult = RunSqliteSlide(slide.Id, scale); }
         catch (Exception ex)
         {
             Console.WriteLine($"[Runner] SQLite slide {slide.Id} failed: {ex.Message}");
             sqliteResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
         }
+
+        await Task.Yield(); // Yield after SQLite
 
         // Run Tier 2 engine (async, JS interop)
         try { indexedDbResult = await _indexedDbEngine.RunSlide(slide.Id, scale); }
@@ -96,8 +102,6 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             };
         }
 
-        // Yield to avoid blocking the UI thread
-        await Task.Yield();
         return merged;
     }
 
@@ -186,7 +190,14 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
         try
         {
-            await _indexedDbEngine.EnsureInitialized(_dbBytes, userCount, nodeCount);
+            if (userCount <= 1000)
+            {
+                await _indexedDbEngine.EnsureInitialized(_dbBytes, userCount, nodeCount);
+            }
+            else
+            {
+                // Console.WriteLine("[Runner] Skipping IDB init (too large for WASM interop)");
+            }
         }
         catch (Exception ex)
         {
