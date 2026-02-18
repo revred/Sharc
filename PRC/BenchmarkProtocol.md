@@ -191,6 +191,7 @@ After each benchmark cycle:
 | Cell pointers | On-demand read (no pre-allocation) | 41 KB for 100K row scan |
 | Row invalidation | Generation counter pattern | O(1) instead of O(N) clear |
 | Lazy decode | Projection skips unwanted columns | 885 KB vs 33.9 MB |
+| Page cache buffers | Demand-driven allocation (ADR-015) | 0 B at open; pays only for pages accessed |
 
 ### Known Costs (Accepted)
 

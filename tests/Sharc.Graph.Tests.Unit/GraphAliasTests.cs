@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Text;
 using System.Buffers.Binary;
 using Sharc.Core;
@@ -5,13 +8,13 @@ using Sharc.Core.Primitives;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Core.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit;
 
-[TestClass]
 public class GraphAliasTests
 {
-    [TestMethod]
+    [Fact]
     public void GetNode_WithAlias_ReturnsAlias()
     {
         // 1. Setup Schema with Alias
@@ -77,12 +80,12 @@ public class GraphAliasTests
         var node = graph.GetNode(new NodeKey(100));
 
         // 4. Assert
-        Assert.IsNotNull(node);
-        Assert.AreEqual(100, node.Value.Key.Value);
-        Assert.AreEqual("my-alias", node.Value.Alias);
+        Assert.NotNull(node);
+        Assert.Equal(100, node.Value.Key.Value);
+        Assert.Equal("my-alias", node.Value.Alias);
     }
     
-    [TestMethod]
+    [Fact]
     public void GetNode_WithoutAlias_ReturnsNull()
     {
         var adapter = new AliasSchemaAdapter();
@@ -143,8 +146,8 @@ public class GraphAliasTests
 
         var node = graph.GetNode(new NodeKey(100));
 
-        Assert.IsNotNull(node);
-        Assert.IsNull(node.Value.Alias);
+        Assert.NotNull(node);
+        Assert.Null(node.Value.Alias);
     }
 
     // --- Helpers ---

@@ -16,120 +16,112 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class RecordIdTests
 {
-    [TestMethod]
+    [Fact]
     public void Parse_ValidFormat_ReturnsRecordId()
     {
         var id = RecordId.Parse("person:alice");
-        Assert.AreEqual("person", id.Table);
-        Assert.AreEqual("alice", id.Id);
+        Assert.Equal("person", id.Table);
+        Assert.Equal("alice", id.Id);
     }
 
-    [TestMethod]
+    [Fact]
     public void Parse_TableAndId_Extracted()
     {
         var id = RecordId.Parse("file:src/Auth.cs");
-        Assert.AreEqual("file", id.Table);
-        Assert.AreEqual("src/Auth.cs", id.Id);
+        Assert.Equal("file", id.Table);
+        Assert.Equal("src/Auth.cs", id.Id);
     }
 
-    [TestMethod]
+    [Fact]
     public void Parse_NoColon_ThrowsFormatException()
     {
-        try
-        {
-            RecordId.Parse("invalid");
-            Assert.Fail("Expected FormatException was not thrown.");
-        }
-        catch (FormatException)
-        {
-            // Expected
-        }
+        Assert.Throws<FormatException>(() => RecordId.Parse("invalid"));
     }
 
-    [TestMethod]
+    [Fact]
     public void Parse_MultipleColons_TakesFirstAsDelimiter()
     {
         var id = RecordId.Parse("log:2024:01:01");
-        Assert.AreEqual("log", id.Table);
-        Assert.AreEqual("2024:01:01", id.Id);
+        Assert.Equal("log", id.Table);
+        Assert.Equal("2024:01:01", id.Id);
     }
 
-    [TestMethod]
+    [Fact]
     public void TryParse_Null_ReturnsFalse()
     {
-        Assert.IsFalse(RecordId.TryParse(null, out _));
-        Assert.IsFalse(RecordId.TryParse("", out _));
+        Assert.False(RecordId.TryParse(null, out _));
+        Assert.False(RecordId.TryParse("", out _));
     }
 
-    [TestMethod]
+    [Fact]
     public void TryParse_Valid_ReturnsTrue()
     {
-        Assert.IsTrue(RecordId.TryParse("a:b", out var result));
-        Assert.AreEqual("a", result.Table);
-        Assert.AreEqual("b", result.Id);
+        Assert.True(RecordId.TryParse("a:b", out var result));
+        Assert.Equal("a", result.Table);
+        Assert.Equal("b", result.Id);
     }
 
-    [TestMethod]
+    [Fact]
     public void IntegerConstruction_SetsKey()
     {
         var key = new NodeKey(123);
         var id = new RecordId(1, "guid", key);
         
-        Assert.AreEqual("1", id.Table);
-        Assert.AreEqual("guid", id.Id);
-        Assert.AreEqual(key, id.Key);
-        Assert.IsTrue(id.HasIntegerKey);
+        Assert.Equal("1", id.Table);
+        Assert.Equal("guid", id.Id);
+        Assert.Equal(key, id.Key);
+        Assert.True(id.HasIntegerKey);
     }
 
-    [TestMethod]
+    [Fact]
     public void HasIntegerKey_WhenKeySet_ReturnsTrue()
     {
         var id = new RecordId("t", "i", new NodeKey(1));
-        Assert.IsTrue(id.HasIntegerKey);
+        Assert.True(id.HasIntegerKey);
     }
 
-    [TestMethod]
+    [Fact]
     public void HasIntegerKey_WhenDefault_ReturnsFalse()
     {
         var id = new RecordId("t", "i");
-        Assert.IsFalse(id.HasIntegerKey);
+        Assert.False(id.HasIntegerKey);
     }
 
-    [TestMethod]
+    [Fact]
     public void IsRecordLink_ValidLink_ReturnsTrue()
     {
-        Assert.IsTrue(RecordId.IsRecordLink("table:id"));
+        Assert.True(RecordId.IsRecordLink("table:id"));
     }
 
-    [TestMethod]
+    [Fact]
     public void IsRecordLink_NoColon_ReturnsFalse()
     {
-        Assert.IsFalse(RecordId.IsRecordLink("tableid"));
+        Assert.False(RecordId.IsRecordLink("tableid"));
     }
     
-    [TestMethod]
+    [Fact]
     public void IsRecordLink_Slash_ReturnsFalse()
     {
-        Assert.IsFalse(RecordId.IsRecordLink("http://example.com"));
+        Assert.False(RecordId.IsRecordLink("http://example.com"));
     }
     
-    [TestMethod]
+    [Fact]
     public void IsRecordLink_Space_ReturnsFalse()
     {
-        Assert.IsFalse(RecordId.IsRecordLink("table : id"));
+        Assert.False(RecordId.IsRecordLink("table : id"));
     }
 
-    [TestMethod]
+    [Fact]
     public void Equality_SameTableAndId_AreEqual()
     {
         var id1 = new RecordId("t", "i");
         var id2 = new RecordId("t", "i");
-        Assert.AreEqual(id1, id2);
+        Assert.Equal(id1, id2);
     }
 }

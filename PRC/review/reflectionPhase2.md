@@ -99,7 +99,7 @@ The core reader (Sharc + Sharc.Core) is genuinely excellent. The five-layer stac
 
 ### 🟡 Benchmark Honesty (Fix README Claims)
 
-**BENCH-01 · Sharc allocates 10x–50x more than SQLite in realistic workloads.** The README's own benchmark table shows: schema reads 40 KB vs 872 B, sustained 1M-row scans 407 KB vs 7 KB. The "Zero GC pressure" headline only holds for isolated micro-benchmarks, not for any workload involving schema parsing or sustained iteration.
+**BENCH-01 · Sharc allocates 10x–50x more than SQLite in realistic workloads.** The README's own benchmark table shows: schema reads 40 KB vs 872 B, sustained 1M-row scans 407 KB vs 7 KB. The "Zero GC pressure" headline only holds for isolated micro-benchmarks, not for any workload involving schema parsing or sustained iteration. **Partially addressed (ADR-015):** CachedPageSource is now demand-driven — the ~8 MB eager pre-allocation at open time is eliminated. Write path reduced from 6,113 KB to < 200 KB. Schema allocation (~40 KB) remains as a known accepted cost.
 
 **BENCH-02 · "41x faster seek" compares different things.** Sharc's B-tree seek is compared against SQLite's full SQL pipeline (parse → plan → VDBE → seek → marshal). The comparison is valid as "total API cost" but misleading as "B-tree performance."
 

@@ -16,13 +16,13 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Schema;
 
-[TestClass]
 public class GenericSchemaAdapterTests
 {
-    [TestMethod]
+    [Fact]
     public void Constructor_CanSetProperties()
     {
         var adapter = new GenericSchemaAdapter
@@ -39,10 +39,10 @@ public class GenericSchemaAdapterTests
             EdgeDataColumn = "props"
         };
         
-        Assert.AreEqual("n_table", adapter.NodeTableName);
-        Assert.AreEqual("e_table", adapter.EdgeTableName);
-        Assert.AreEqual("pk", adapter.NodeIdColumn);
-        Assert.AreEqual("k", adapter.NodeKeyColumn);
-        Assert.AreEqual("orig", adapter.EdgeOriginColumn);
+        Assert.Equal("n_table", adapter.NodeTableName);
+        Assert.Equal("e_table", adapter.EdgeTableName);
+        Assert.Equal("pk", adapter.NodeIdColumn);
+        Assert.Equal("k", adapter.NodeKeyColumn);
+        Assert.Equal("orig", adapter.EdgeOriginColumn);
     }
 }

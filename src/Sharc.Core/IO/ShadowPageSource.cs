@@ -1,17 +1,15 @@
-using System.Buffers;
-
 namespace Sharc.Core.IO;
 
 /// <summary>
 /// A page source that shadows an underlying source.
-/// All writes are stored in memory until committed.
+/// All writes are stored in a contiguous <see cref="PageArena"/> until committed.
 /// Reads check the shadow (dirty) pages first.
-/// Dirty page buffers are rented from <see cref="ArrayPool{T}"/> and returned on clear/dispose.
 /// </summary>
 public sealed class ShadowPageSource : IWritablePageSource
 {
     private readonly IPageSource _baseSource;
-    private readonly Dictionary<uint, byte[]> _dirtyPages = new();
+    private readonly Dictionary<uint, int> _dirtySlots = new();
+    private PageArena? _arena;
     private uint _maxDirtyPage;
     private bool _disposed;
 
@@ -30,17 +28,20 @@ public sealed class ShadowPageSource : IWritablePageSource
         get
         {
             int baseCount = _baseSource.PageCount;
-            if (_dirtyPages.Count == 0) return baseCount;
+            if (_dirtySlots.Count == 0) return baseCount;
             return Math.Max(baseCount, (int)_maxDirtyPage);
         }
     }
+
+    /// <summary>Number of dirty pages buffered in this shadow source.</summary>
+    internal int DirtyPageCount => _dirtySlots.Count;
 
     /// <inheritdoc />
     public ReadOnlySpan<byte> GetPage(uint pageNumber)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_dirtyPages.TryGetValue(pageNumber, out var dirty))
-            return dirty.AsSpan(0, PageSize);
+        if (_dirtySlots.TryGetValue(pageNumber, out int slot))
+            return _arena!.GetSlot(slot)[..PageSize];
         return _baseSource.GetPage(pageNumber);
     }
 
@@ -48,9 +49,9 @@ public sealed class ShadowPageSource : IWritablePageSource
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_dirtyPages.TryGetValue(pageNumber, out var dirty))
+        if (_dirtySlots.TryGetValue(pageNumber, out int slot))
         {
-            dirty.AsSpan(0, PageSize).CopyTo(destination);
+            _arena!.GetSlot(slot)[..PageSize].CopyTo(destination);
             return PageSize;
         }
         return _baseSource.ReadPage(pageNumber, destination);
@@ -60,13 +61,15 @@ public sealed class ShadowPageSource : IWritablePageSource
     public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_dirtyPages.TryGetValue(pageNumber, out var dirty))
+        _arena ??= new PageArena(PageSize);
+
+        if (!_dirtySlots.TryGetValue(pageNumber, out int slot))
         {
-            dirty = ArrayPool<byte>.Shared.Rent(PageSize);
-            dirty.AsSpan(0, PageSize).Clear();
-            _dirtyPages[pageNumber] = dirty;
+            var span = _arena.Allocate(out slot);
+            span.Clear();
+            _dirtySlots[pageNumber] = slot;
         }
-        source.CopyTo(dirty);
+        source.CopyTo(_arena.GetSlot(slot));
         if (pageNumber > _maxDirtyPage) _maxDirtyPage = pageNumber;
     }
 
@@ -76,18 +79,41 @@ public sealed class ShadowPageSource : IWritablePageSource
         // Shadow pages are in memory, nothing to flush to persistence yet.
     }
 
+    /// <summary>Returns the dirty page numbers for journal creation.</summary>
+    internal IEnumerable<uint> GetDirtyPageNumbers() => _dirtySlots.Keys;
+
     /// <summary>
-    /// Returns the collection of dirty pages to be written back to the base source.
+    /// Writes all dirty pages to the target page source in one pass.
     /// </summary>
-    internal IReadOnlyDictionary<uint, byte[]> GetDirtyPages() => _dirtyPages;
+    internal void WriteDirtyPagesTo(IWritablePageSource target)
+    {
+        int pageSize = PageSize;
+        foreach (var (pageNumber, slot) in _dirtySlots)
+        {
+            target.WritePage(pageNumber, _arena!.GetSlot(slot)[..pageSize]);
+        }
+    }
 
     /// <summary>
     /// Clears all dirty pages (Rollback equivalent).
     /// </summary>
-    internal void ClearShadow()
+    internal void ClearShadow() => ClearInternal();
+
+    /// <summary>
+    /// Clears dirty pages and resets the arena, but keeps the object reusable.
+    /// Unlike Dispose, the object can accept new writes after Reset.
+    /// Dictionary capacity is preserved to avoid re-allocation.
+    /// </summary>
+    internal void Reset()
     {
-        ReturnAllBuffers();
-        _dirtyPages.Clear();
+        ClearInternal();
+        _disposed = false;
+    }
+
+    private void ClearInternal()
+    {
+        _dirtySlots.Clear();
+        _arena?.Reset();
         _maxDirtyPage = 0;
     }
 
@@ -96,14 +122,9 @@ public sealed class ShadowPageSource : IWritablePageSource
     {
         if (_disposed) return;
         _disposed = true;
-        ReturnAllBuffers();
-        _dirtyPages.Clear();
+        _dirtySlots.Clear();
+        _arena?.Dispose();
+        _arena = null;
         _maxDirtyPage = 0;
-    }
-
-    private void ReturnAllBuffers()
-    {
-        foreach (var buf in _dirtyPages.Values)
-            ArrayPool<byte>.Shared.Return(buf);
     }
 }

@@ -16,13 +16,13 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class ChangeEventTests
 {
-    [TestMethod]
+    [Fact]
     public void Constructor_SetsProperties()
     {
         var id = RecordId.Parse("t:i");
@@ -32,9 +32,9 @@ public class ChangeEventTests
         
         var evt = new ChangeEvent(ChangeType.Update, id, before, after); // Pass by value if struct, so implicit constructor match
         
-        Assert.AreEqual(ChangeType.Update, evt.Type);
-        Assert.AreEqual(id, evt.Id);
-        Assert.AreEqual(before, evt.Before);
-        Assert.AreEqual(after, evt.After);
+        Assert.Equal(ChangeType.Update, evt.Type);
+        Assert.Equal(id, evt.Id);
+        Assert.Equal(before, evt.Before);
+        Assert.Equal(after, evt.After);
     }
 }

@@ -231,4 +231,87 @@ public class CachedPageSourceTests
 
         Assert.Equal(5, cached.CacheMissCount);
     }
+
+    // --- Demand-Driven Allocation Tests ---
+
+    [Fact]
+    public void Constructor_DemandDriven_NoBuffersRentedAtConstruction()
+    {
+        var data = CreateMinimalDatabase();
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, capacity: 2000);
+
+        // Capacity is a maximum, not a reservation.
+        // No page buffers should be rented until first access.
+        Assert.Equal(0, cached.AllocatedSlotCount);
+    }
+
+    [Fact]
+    public void GetPage_FirstAccess_RentsOneBuffer()
+    {
+        var data = CreateMinimalDatabase();
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, capacity: 100);
+
+        cached.GetPage(1);
+
+        Assert.Equal(1, cached.AllocatedSlotCount);
+    }
+
+    [Fact]
+    public void GetPage_NDistinctPages_RentsNBuffers()
+    {
+        var data = CreateMinimalDatabase(pageCount: 5);
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, capacity: 100);
+
+        cached.GetPage(1);
+        cached.GetPage(2);
+        cached.GetPage(3);
+
+        Assert.Equal(3, cached.AllocatedSlotCount);
+    }
+
+    [Fact]
+    public void GetPage_CacheHit_DoesNotRentAdditionalBuffer()
+    {
+        var data = CreateMinimalDatabase(pageCount: 5);
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, capacity: 100);
+
+        cached.GetPage(1);
+        cached.GetPage(2);
+        cached.GetPage(1); // hit — no new buffer
+
+        Assert.Equal(2, cached.AllocatedSlotCount);
+    }
+
+    [Fact]
+    public void Dispose_WithNoAccesses_ReturnsNoBuffers()
+    {
+        var data = CreateMinimalDatabase();
+        using var inner = new MemoryPageSource(data);
+        var cached = new CachedPageSource(inner, capacity: 2000);
+
+        Assert.Equal(0, cached.AllocatedSlotCount);
+        cached.Dispose(); // should not throw — nothing to return
+    }
+
+    [Fact]
+    public void Eviction_ReusesExistingBuffer_NoNewRent()
+    {
+        var data = CreateMinimalDatabase(pageCount: 5);
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, capacity: 2);
+
+        cached.GetPage(1); // rent slot 0
+        cached.GetPage(2); // rent slot 1 — cache full (2/2)
+        Assert.Equal(2, cached.AllocatedSlotCount);
+
+        cached.GetPage(3); // evicts page 1, reuses slot — no new rent
+        Assert.Equal(2, cached.AllocatedSlotCount);
+
+        cached.GetPage(4); // evicts page 2, reuses slot — no new rent
+        Assert.Equal(2, cached.AllocatedSlotCount);
+    }
 }
