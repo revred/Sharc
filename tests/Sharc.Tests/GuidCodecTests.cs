@@ -49,10 +49,10 @@ public class GuidCodecTests
     [Fact]
     public void Encode_ThenDecode_MultipleRandomGuids_AllRoundTrip()
     {
+        Span<byte> buffer = stackalloc byte[16];
         for (int i = 0; i < 100; i++)
         {
             var original = Guid.NewGuid();
-            Span<byte> buffer = stackalloc byte[16];
             GuidCodec.Encode(original, buffer);
             var decoded = GuidCodec.Decode(buffer);
             Assert.Equal(original, decoded);

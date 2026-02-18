@@ -121,6 +121,7 @@ public class SimpleFilteringTests : IDisposable
 
     public void Dispose()
     {
+        GC.SuppressFinalize(this);
         if (File.Exists(_dbPath))
         {
             try { File.Delete(_dbPath); } catch { }
