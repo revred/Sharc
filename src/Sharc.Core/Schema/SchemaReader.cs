@@ -1,7 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-
+using System.Buffers;
 
 namespace Sharc.Core.Schema;
 
@@ -12,7 +12,6 @@ internal sealed class SchemaReader
 {
     private readonly IBTreeReader _bTreeReader;
     private readonly IRecordDecoder _recordDecoder;
-    private readonly ColumnValue[] _columnBuffer = new ColumnValue[5];
 
     public SchemaReader(IBTreeReader bTreeReader, IRecordDecoder recordDecoder)
     {
@@ -25,6 +24,19 @@ internal sealed class SchemaReader
     /// </summary>
     /// <returns>The parsed database schema.</returns>
     public SharcSchema ReadSchema()
+    {
+        var columnBuffer = ArrayPool<ColumnValue>.Shared.Rent(5);
+        try
+        {
+        return ReadSchemaCore(columnBuffer);
+        }
+        finally
+        {
+            ArrayPool<ColumnValue>.Shared.Return(columnBuffer, clearArray: true);
+        }
+    }
+
+    private SharcSchema ReadSchemaCore(ColumnValue[] _columnBuffer)
     {
         var tables = new List<TableInfo>
         {
