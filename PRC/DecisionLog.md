@@ -4,6 +4,34 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-018: O(K²) → O(K) Column Offset Precomputation
+
+**Date**: 2026-02-18
+**Status**: Accepted
+**Context**: Arena WASM query benchmarks showed Sharc losing 10 of 13 queries to SQLite. Profiling revealed the root cause: every column access in `SharcDataReader` called `RecordDecoder.ComputeColumnOffset()`, which iterated serial types from index 0 to the target column — an O(K) loop per column, yielding O(K²) per row. For the Arena's 9-column `users` table, this meant 36 `GetContentSize` calls per row instead of 9. Combined with single-iteration benchmarks susceptible to WASM JIT noise, the results were unreliable.
+
+**Decision**: Two fixes:
+
+1. **Column offset precomputation**: Added `ComputeColumnOffsets()` to `IRecordDecoder` — a single O(K) pass that fills an `ArrayPool<int>`-rented `_columnOffsets` buffer once per row in `DecodeCurrentRow()`. Added O(1) offset-aware decode methods (`DecodeColumnAt`, `DecodeInt64At`, `DecodeDoubleAt`, `DecodeStringAt`) that bypass the per-column loop. All hot paths in `SharcDataReader` (`GetColumnValue`, `GetInt64`, `GetDouble`, `GetString`, `GetGuid`, `GetColumnFingerprint`, `GetCursorRowFingerprint`) updated to use precomputed offsets.
+
+2. **Benchmark methodology**: Updated `QueryPipelineEngine` from 1 warmup + 1 measured to 3 warmups + 5 interleaved measured iterations with median selection. Interleaving levels GC pressure between Sharc and SQLite; median resists JIT/GC spikes.
+
+**Files modified**: `IRecordDecoder.cs` (5 new methods), `RecordDecoder.cs` (5 implementations), `SharcDataReader.cs` (precompute + all access paths), `QueryPipelineEngine.cs` (benchmark methodology), `WithoutRowIdCursorAdapterTests.cs` and `SchemaReaderTests.cs` (test stub updates).
+
+**Results**:
+
+- Column decode cost: O(K²) → O(K) per row (4x fewer `GetContentSize` calls for 9-column table)
+- Benchmark noise: eliminated single-sample WASM JIT variance
+- All 1,613 tests pass (0 warnings, 0 errors)
+
+**Consequences**:
+
+- `_columnOffsets` adds one `ArrayPool<int>` rent/return per reader lifetime — negligible vs the O(K²) savings
+- Old `ComputeColumnOffset` and `Decode*Direct` methods retained for backward compatibility but no longer on hot paths
+- Fixed latent `_physicalColumnCount` bug: columns after merged GUID pairs (physical ordinals > merged pair indices) were not counted, causing uninitialized offsets
+
+---
+
 ## ADR-017: Write Architecture Technical Debt Reduction
 
 **Date**: 2026-02-18

@@ -213,7 +213,9 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | | `Cote + UNION ALL` | **273 us** | 972 us | **3.6x** | 1.4 KB |
 | **Parameterized** | `WHERE $param AND $param` | **223 us** | 819 us | **3.7x** | 81 KB |
 
-> **Sharc wins or ties every benchmark.** Key optimizations: lazy column decode (576 B for full-table scan), cached Cote intent resolution with inlined filters (808 B, 3.1x faster), predicate pushdown, filter compilation caching, query plan + intent caching, streaming 3-way UNION ALL, JIT-specialized struct comparer for TopN heap, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
+> **Sharc wins or ties every benchmark.** Key optimizations: O(K) column offset precomputation (eliminates O(K²) per-row decode overhead), lazy column decode (576 B for full-table scan), cached Cote intent resolution with inlined filters (808 B, 3.1x faster), predicate pushdown, filter compilation caching, query plan + intent caching, streaming 3-way UNION ALL, JIT-specialized struct comparer for TopN heap, ArrayPool-backed IndexSet for set dedup (1.4 KB vs 1.2 MB), index-based string pooling for aggregates.
+>
+> **Methodology**: 3 warmup iterations + 5 measured iterations (interleaved Sharc/SQLite to level GC pressure), median selected. Allocation measured on first iteration via `GC.GetAllocatedBytesForCurrentThread()`.
 
 ---
 

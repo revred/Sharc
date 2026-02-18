@@ -63,27 +63,50 @@ public sealed class QueryPipelineEngine
         return _fallbackResults;
     }
 
+    private const int WarmupIterations = 3;
+    private const int MeasuredIterations = 5;
+
     private static QueryResult RunSingleQuery(SharcDatabase db, SqliteConnection conn, QuerySpec spec)
     {
-        // --- Warm-up (JIT + plan cache) ---
-        DrainSharc(db, spec);
-        DrainSqlite(conn, spec);
+        // --- Warm-up: 3 iterations of each (stabilize WASM JIT + page cache) ---
+        for (int i = 0; i < WarmupIterations; i++)
+        {
+            DrainSharc(db, spec);
+            DrainSqlite(conn, spec);
+        }
 
-        // --- Measure Sharc ---
-        var sharcAllocBefore = GC.GetAllocatedBytesForCurrentThread();
-        var sw = Stopwatch.StartNew();
-        DrainSharc(db, spec);
-        sw.Stop();
-        var sharcAllocAfter = GC.GetAllocatedBytesForCurrentThread();
-        var sharcUs = sw.Elapsed.TotalMicroseconds();
+        // --- Measure: 5 iterations of each, interleaved to level GC pressure ---
+        Span<double> sharcTimes = stackalloc double[MeasuredIterations];
+        Span<double> sqliteTimes = stackalloc double[MeasuredIterations];
+        var sw = new Stopwatch();
 
-        // --- Measure SQLite ---
-        var sqliteAllocBefore = GC.GetAllocatedBytesForCurrentThread();
-        sw.Restart();
-        DrainSqlite(conn, spec);
-        sw.Stop();
-        var sqliteAllocAfter = GC.GetAllocatedBytesForCurrentThread();
-        var sqliteUs = sw.Elapsed.TotalMicroseconds();
+        long sharcAllocBefore = 0, sharcAllocAfter = 0;
+        long sqliteAllocBefore = 0, sqliteAllocAfter = 0;
+
+        for (int i = 0; i < MeasuredIterations; i++)
+        {
+            // Measure Sharc
+            if (i == 0) sharcAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+            sw.Restart();
+            DrainSharc(db, spec);
+            sw.Stop();
+            if (i == 0) sharcAllocAfter = GC.GetAllocatedBytesForCurrentThread();
+            sharcTimes[i] = sw.Elapsed.TotalMicroseconds();
+
+            // Measure SQLite
+            if (i == 0) sqliteAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+            sw.Restart();
+            DrainSqlite(conn, spec);
+            sw.Stop();
+            if (i == 0) sqliteAllocAfter = GC.GetAllocatedBytesForCurrentThread();
+            sqliteTimes[i] = sw.Elapsed.TotalMicroseconds();
+        }
+
+        // Take median of measured iterations (robust against GC spikes)
+        sharcTimes.Sort();
+        sqliteTimes.Sort();
+        double sharcUs = sharcTimes[MeasuredIterations / 2];
+        double sqliteUs = sqliteTimes[MeasuredIterations / 2];
 
         // --- Build result ---
         var sharcAlloc = sharcAllocAfter - sharcAllocBefore;
