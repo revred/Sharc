@@ -67,7 +67,7 @@
     "baseResults": {
       "sqlite":    { "notSupported": true, "note": "Requires SQLCipher" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 340, "allocation": "48 KB", "note": "AES-256-GCM + Argon2id, page-level" }
+      "sharc":     { "value": 345, "allocation": "48 KB", "note": "AES-256-GCM + Argon2id, page-level" }
     }
   }
 ]
