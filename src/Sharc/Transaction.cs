@@ -8,7 +8,7 @@ namespace Sharc;
 
 /// <summary>
 /// Represents an ACID transaction in Sharc.
-/// All writes performed during the transaction are buffered in memory and 
+/// All writes performed during the transaction are buffered in memory and
 /// only persisted to the underlying storage upon <see cref="Commit"/>.
 /// </summary>
 public sealed class Transaction : IDisposable
@@ -16,6 +16,7 @@ public sealed class Transaction : IDisposable
     private readonly SharcDatabase _db;
     private readonly IWritablePageSource _baseSource;
     private readonly ShadowPageSource _shadowSource;
+    private readonly bool _ownsShadow; // false when shadow is pooled by SharcWriter
     private BTreeMutator? _mutator;
     private FreelistManager? _freelistManager;
     private bool _isCompleted;
@@ -28,13 +29,14 @@ public sealed class Transaction : IDisposable
     public IPageSource PageSource => _shadowSource;
 
     /// <summary>
-    /// Returns the shadow page source for advanced write operations.
+    /// Returns the shadow page source for pooling by SharcWriter.
     /// </summary>
     internal ShadowPageSource GetShadowSource() => _shadowSource;
 
     /// <summary>
     /// Returns a cached <see cref="BTreeMutator"/> for this transaction, creating one on first call.
     /// The mutator's page cache is shared across all operations within the transaction.
+    /// A fresh mutator and FreelistManager are always created per-transaction to avoid stale freelist state.
     /// </summary>
     internal BTreeMutator FetchMutator(int usablePageSize)
     {
@@ -58,6 +60,22 @@ public sealed class Transaction : IDisposable
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _baseSource = baseSource ?? throw new ArgumentNullException(nameof(baseSource));
         _shadowSource = new ShadowPageSource(baseSource);
+        _ownsShadow = true;
+    }
+
+    /// <summary>
+    /// Creates a transaction that reuses a pooled ShadowPageSource.
+    /// The shadow must have been Reset() before this call.
+    /// Caller owns the shadow lifecycle — this transaction will not dispose it.
+    /// The mutator is always created fresh per-transaction.
+    /// </summary>
+    internal Transaction(SharcDatabase db, IWritablePageSource baseSource,
+        ShadowPageSource cachedShadow)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _baseSource = baseSource ?? throw new ArgumentNullException(nameof(baseSource));
+        _shadowSource = cachedShadow;
+        _ownsShadow = false;
     }
 
     /// <summary>
@@ -75,12 +93,11 @@ public sealed class Transaction : IDisposable
             // Track whether B-tree operations occurred (mutator was used)
             bool hadMutator = _mutator != null;
 
-            // Dispose mutator first to return pooled buffers before flushing dirty pages
+            // Release mutator page buffers before flushing dirty pages.
             _mutator?.Dispose();
             _mutator = null;
 
-            var dirtyPages = _shadowSource.GetDirtyPages();
-            if (dirtyPages.Count == 0)
+            if (_shadowSource.DirtyPageCount == 0)
             {
                 _isCompleted = true;
                 _db.EndTransaction(this);
@@ -92,21 +109,14 @@ public sealed class Transaction : IDisposable
             if (hadMutator)
                 UpdateDatabaseHeader();
 
-            // Re-read dirty pages after header update (page 1 may now be dirty)
-            dirtyPages = _shadowSource.GetDirtyPages();
-
             string? journalPath = null;
             if (_db.FilePath != null)
             {
                 journalPath = _db.FilePath + ".journal";
-                RollbackJournal.CreateJournal(journalPath, _baseSource, dirtyPages.Keys);
+                RollbackJournal.CreateJournal(journalPath, _baseSource, _shadowSource.GetDirtyPageNumbers());
             }
 
-            int pageSize = _shadowSource.PageSize;
-            foreach (var (pageNumber, data) in dirtyPages)
-            {
-                _baseSource.WritePage(pageNumber, data.AsSpan(0, pageSize));
-            }
+            _shadowSource.WriteDirtyPagesTo(_baseSource);
             _baseSource.Flush();
 
             if (journalPath != null && File.Exists(journalPath))
@@ -198,7 +208,7 @@ public sealed class Transaction : IDisposable
         // Read freelist state from manager (if active), otherwise preserve existing values
         uint freelistFirstPage = _freelistManager?.FirstTrunkPage ?? oldHeader.FirstFreelistPage;
         int freelistCount = _freelistManager?.FreelistPageCount ?? oldHeader.FreelistPageCount;
-        
+
         uint schemaCookie = _newSchemaCookie ?? oldHeader.SchemaCookie;
 
         // Build updated header preserving all fields except PageCount, ChangeCounter, and freelist
@@ -234,7 +244,8 @@ public sealed class Transaction : IDisposable
         }
         _mutator?.Dispose();
         _mutator = null;
-        _shadowSource.Dispose();
+        if (_ownsShadow)
+            _shadowSource.Dispose();
         _disposed = true;
     }
 }

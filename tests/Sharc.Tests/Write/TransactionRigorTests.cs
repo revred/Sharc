@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.IO;
 using Sharc.Core;
 using Sharc.Core.IO;
@@ -97,6 +100,6 @@ public sealed class TransactionRigorTests
         using var writer = SharcWriter.From(db);
         using var tx1 = writer.BeginTransaction();
         
-        Assert.ThrowsAny<Exception>(() => writer.BeginTransaction());
+        Assert.Throws<InvalidOperationException>(() => writer.BeginTransaction());
     }
 }

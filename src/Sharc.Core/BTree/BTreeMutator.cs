@@ -38,6 +38,7 @@ internal sealed class BTreeMutator : IDisposable
 
     private readonly Func<uint>? _freePageAllocator;
     private readonly Action<uint>? _freePageCallback;
+    private CellRef[] _cellRefBuffer = new CellRef[256]; // pooled, grows as needed
 
     public BTreeMutator(IWritablePageSource source, int usablePageSize,
         Func<uint>? freePageAllocator = null, Action<uint>? freePageCallback = null)
@@ -68,7 +69,9 @@ internal sealed class BTreeMutator : IDisposable
         ReadOnlySpan<byte> cellBytes = cellBuf[..cellSize];
 
         // Navigate from root to the correct leaf, collecting the ancestor path.
-        var path = new List<(uint PageNum, int CellIndex)>();
+        // Max B-tree depth for SQLite is ~20 (4096-byte pages, min 2 keys per interior page).
+        Span<(uint PageNum, int CellIndex)> path = stackalloc (uint, int)[20];
+        int pathCount = 0;
         uint currentPage = rootPage;
 
         while (true)
@@ -81,18 +84,18 @@ internal sealed class BTreeMutator : IDisposable
             {
                 // Binary search for insertion point
                 int insertIdx = FindLeafInsertionPoint(page, hdrOff, hdr, rowId);
-                path.Add((currentPage, insertIdx));
+                path[pathCount++] = (currentPage, insertIdx);
                 break;
             }
 
             // Interior page — binary search for child
             int childIdx = FindInteriorChild(page, hdrOff, hdr, rowId, out uint childPage);
-            path.Add((currentPage, childIdx));
+            path[pathCount++] = (currentPage, childIdx);
             currentPage = childPage;
         }
 
         // Insert into the leaf (last element in path). Splits propagate upward.
-        return InsertCellAndSplit(path, path.Count - 1, cellBytes, rowId, rootPage);
+        return InsertCellAndSplit(path[..pathCount], pathCount - 1, cellBytes, rowId, rootPage);
     }
 
     /// <summary>
@@ -171,15 +174,37 @@ internal sealed class BTreeMutator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Returns all rented buffers and clears the page cache, but keeps the object reusable.
+    /// Dictionary/List capacity is preserved to avoid re-allocation on the next cycle.
+    /// </summary>
+    public void Reset()
+    {
+        ReturnRentedBuffers();
+        _nextAllocPage = 0;
+        _disposed = false;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        ReturnRentedBuffers();
+    }
+
+    private void ReturnRentedBuffers()
+    {
         _pageCache.Clear();
         foreach (var buf in _rentedBuffers)
             ArrayPool<byte>.Shared.Return(buf);
         _rentedBuffers.Clear();
+    }
+
+    private void EnsureCellRefCapacity(int needed)
+    {
+        if (_cellRefBuffer.Length < needed)
+            _cellRefBuffer = new CellRef[Math.Max(needed, _cellRefBuffer.Length * 2)];
     }
 
     // ── Navigation helpers ─────────────────────────────────────────
@@ -262,7 +287,7 @@ internal sealed class BTreeMutator : IDisposable
     /// Returns the (possibly new) root page number.
     /// </summary>
     private uint InsertCellAndSplit(
-        List<(uint PageNum, int CellIndex)> path,
+        Span<(uint PageNum, int CellIndex)> path,
         int pathIndex,
         ReadOnlySpan<byte> cellBytes,
         long promotedRowId,
@@ -282,32 +307,34 @@ internal sealed class BTreeMutator : IDisposable
 
         // ── Page is full — split ──────────────────────────────────
 
-        // Gather all existing cells + the new cell into a contiguous buffer
-        var (cellBuf, cellRefs) = GatherCellsWithInsertion(pageBuf, hdrOff, hdr, insertIdx, cellBytes);
+        // Gather all existing cells + the new cell into a contiguous buffer.
+        // Cell descriptors are in _cellRefBuffer[0..refCount].
+        var (cellBuf, refCount) = GatherCellsWithInsertion(pageBuf, hdrOff, hdr, insertIdx, cellBytes);
+        var cells = new ReadOnlySpan<CellRef>(_cellRefBuffer, 0, refCount);
 
         // Split point: divide roughly in half by total byte count
         int totalBytes = 0;
-        foreach (var c in cellRefs) totalBytes += c.Length;
+        for (int i = 0; i < cells.Length; i++) totalBytes += cells[i].Length;
         int halfTarget = totalBytes / 2;
 
         int splitIdx = 0;
         int runningBytes = 0;
-        for (int i = 0; i < cellRefs.Count; i++)
+        for (int i = 0; i < cells.Length; i++)
         {
-            runningBytes += cellRefs[i].Length;
+            runningBytes += cells[i].Length;
             if (runningBytes >= halfTarget) { splitIdx = i; break; }
         }
 
         // Ensure split leaves at least 1 cell on each side
         if (splitIdx == 0) splitIdx = 1;
-        if (splitIdx >= cellRefs.Count - 1) splitIdx = cellRefs.Count - 2;
+        if (splitIdx >= refCount - 1) splitIdx = refCount - 2;
 
         // For leaf pages: left gets [0..splitIdx], right gets [splitIdx+1..end]
         // The median (splitIdx) is promoted to parent
         bool isLeaf = hdr.IsLeaf;
 
         // Parse the median cell to get the promoted rowId
-        var medianRef = cellRefs[splitIdx];
+        var medianRef = cells[splitIdx];
         var medianSpan = cellBuf.AsSpan(medianRef.Offset, medianRef.Length);
         long medianRowId;
         if (isLeaf)
@@ -325,27 +352,23 @@ internal sealed class BTreeMutator : IDisposable
         // Build left page (reuse existing page buffer)
         if (isLeaf)
         {
-            // Left gets [0..splitIdx] (inclusive — leaf keeps the median too)
-            BuildLeafPage(pageBuf, hdrOff, cellBuf, cellRefs, 0, splitIdx);
+            BuildLeafPage(pageBuf, hdrOff, cellBuf, cells[..(splitIdx + 1)]);
             WritePageBuffer(pageNum, pageBuf);
 
-            // Right gets [splitIdx+1..end]
             var rightBuf = RentPageBuffer();
-            BuildLeafPage(rightBuf, 0, cellBuf, cellRefs, splitIdx + 1, cellRefs.Count - 1);
+            BuildLeafPage(rightBuf, 0, cellBuf, cells[(splitIdx + 1)..]);
             WritePageBuffer(newPageNum, rightBuf);
         }
         else
         {
             CellParser.ParseTableInteriorCell(medianSpan, out uint medianLeftChild, out _);
 
-            // Left page: cells [0..splitIdx-1], rightChild = medianLeftChild
-            BuildInteriorPage(pageBuf, hdrOff, cellBuf, cellRefs, 0, splitIdx - 1, medianLeftChild);
+            BuildInteriorPage(pageBuf, hdrOff, cellBuf, cells[..splitIdx], medianLeftChild);
             WritePageBuffer(pageNum, pageBuf);
 
-            // Right page: cells [splitIdx+1..end], rightChild = original rightChild
             var rightBuf = RentPageBuffer();
             uint originalRightChild = hdr.RightChildPage;
-            BuildInteriorPage(rightBuf, 0, cellBuf, cellRefs, splitIdx + 1, cellRefs.Count - 1, originalRightChild);
+            BuildInteriorPage(rightBuf, 0, cellBuf, cells[(splitIdx + 1)..], originalRightChild);
             WritePageBuffer(newPageNum, rightBuf);
         }
 
@@ -415,7 +438,7 @@ internal sealed class BTreeMutator : IDisposable
     /// and the new page (via the right reference).
     /// </summary>
     private void UpdateParentAfterSplit(
-        List<(uint PageNum, int CellIndex)> path,
+        Span<(uint PageNum, int CellIndex)> path,
         int parentPathIndex,
         ReadOnlySpan<byte> promotedCell,
         uint newRightChild)
@@ -499,8 +522,9 @@ internal sealed class BTreeMutator : IDisposable
     /// <summary>
     /// Collects all cells from a page plus the new cell at the insertion point.
     /// Packs cells into a single contiguous rented buffer instead of per-cell allocations.
+    /// Cell descriptors are written to <see cref="_cellRefBuffer"/>.
     /// </summary>
-    private (byte[] Buffer, List<CellRef> Refs) GatherCellsWithInsertion(byte[] pageBuf, int hdrOff,
+    private (byte[] cellBuf, int refCount) GatherCellsWithInsertion(byte[] pageBuf, int hdrOff,
         BTreePageHeader hdr, int insertIdx, ReadOnlySpan<byte> newCell)
     {
         var pageSpan = pageBuf.AsSpan();
@@ -515,7 +539,10 @@ internal sealed class BTreeMutator : IDisposable
 
         var buffer = ArrayPool<byte>.Shared.Rent(totalBytes);
         _rentedBuffers.Add(buffer);
-        var refs = new List<CellRef>(hdr.CellCount + 1);
+
+        EnsureCellRefCapacity(hdr.CellCount + 1);
+
+        int refCount = 0;
         int writeOff = 0;
 
         for (int i = 0; i < insertIdx; i++)
@@ -523,12 +550,12 @@ internal sealed class BTreeMutator : IDisposable
             int cellPtr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
             int cellLen = MeasureCell(pageSpan[cellPtr..], hdr.IsLeaf);
             pageSpan.Slice(cellPtr, cellLen).CopyTo(buffer.AsSpan(writeOff));
-            refs.Add(new CellRef(writeOff, cellLen));
+            _cellRefBuffer[refCount++] = new CellRef(writeOff, cellLen);
             writeOff += cellLen;
         }
 
         newCell.CopyTo(buffer.AsSpan(writeOff));
-        refs.Add(new CellRef(writeOff, newCell.Length));
+        _cellRefBuffer[refCount++] = new CellRef(writeOff, newCell.Length);
         writeOff += newCell.Length;
 
         for (int i = insertIdx; i < hdr.CellCount; i++)
@@ -536,11 +563,11 @@ internal sealed class BTreeMutator : IDisposable
             int cellPtr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
             int cellLen = MeasureCell(pageSpan[cellPtr..], hdr.IsLeaf);
             pageSpan.Slice(cellPtr, cellLen).CopyTo(buffer.AsSpan(writeOff));
-            refs.Add(new CellRef(writeOff, cellLen));
+            _cellRefBuffer[refCount++] = new CellRef(writeOff, cellLen);
             writeOff += cellLen;
         }
 
-        return (buffer, refs);
+        return (buffer, refCount);
     }
 
     /// <summary>
@@ -563,65 +590,53 @@ internal sealed class BTreeMutator : IDisposable
         }
     }
 
-    /// <summary>Builds a leaf table page from a slice of cells in a contiguous buffer.</summary>
-    private void BuildLeafPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, List<CellRef> refs, int from, int to)
+    /// <summary>Builds a leaf table page from a span of cell descriptors in a contiguous buffer.</summary>
+    private void BuildLeafPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, ReadOnlySpan<CellRef> cells)
     {
         var span = pageBuf.AsSpan(0, _source.PageSize);
-        // Clear only the B-Tree portion of the page to preserve any headers (e.g. on Page 1)
         span[hdrOff..].Clear();
-
-        int cellCount = to - from + 1;
-        if (cellCount <= 0) cellCount = 0;
 
         int contentEnd = _usablePageSize;
         int ptrBase = hdrOff + LeafHeaderSize;
 
-        for (int i = from; i <= to && i < refs.Count; i++)
+        for (int i = 0; i < cells.Length; i++)
         {
-            var cell = refs[i];
+            var cell = cells[i];
             contentEnd -= cell.Length;
             cellBuf.AsSpan(cell.Offset, cell.Length).CopyTo(span[contentEnd..]);
-
-            int ptrIdx = i - from;
-            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + ptrIdx * 2)..], (ushort)contentEnd);
+            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + i * 2)..], (ushort)contentEnd);
         }
 
         var hdr = new BTreePageHeader(
             BTreePageType.LeafTable, 0,
-            (ushort)cellCount,
+            (ushort)cells.Length,
             (ushort)contentEnd,
             0, 0
         );
         BTreePageHeader.Write(span[hdrOff..], hdr);
     }
 
-    /// <summary>Builds an interior table page from a slice of cells in a contiguous buffer.</summary>
-    private void BuildInteriorPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, List<CellRef> refs,
-        int from, int to, uint rightChildPage)
+    /// <summary>Builds an interior table page from a span of cell descriptors in a contiguous buffer.</summary>
+    private void BuildInteriorPage(byte[] pageBuf, int hdrOff, byte[] cellBuf,
+        ReadOnlySpan<CellRef> cells, uint rightChildPage)
     {
         var span = pageBuf.AsSpan(0, _source.PageSize);
-        // Clear only the B-Tree portion of the page to preserve any headers (e.g. on Page 1)
         span[hdrOff..].Clear();
-
-        int cellCount = to - from + 1;
-        if (cellCount <= 0) cellCount = 0;
 
         int contentEnd = _usablePageSize;
         int ptrBase = hdrOff + InteriorHeaderSize;
 
-        for (int i = from; i <= to && i < refs.Count; i++)
+        for (int i = 0; i < cells.Length; i++)
         {
-            var cell = refs[i];
+            var cell = cells[i];
             contentEnd -= cell.Length;
             cellBuf.AsSpan(cell.Offset, cell.Length).CopyTo(span[contentEnd..]);
-
-            int ptrIdx = i - from;
-            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + ptrIdx * 2)..], (ushort)contentEnd);
+            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + i * 2)..], (ushort)contentEnd);
         }
 
         var hdr = new BTreePageHeader(
             BTreePageType.InteriorTable, 0,
-            (ushort)cellCount,
+            (ushort)cells.Length,
             (ushort)contentEnd,
             0,
             rightChildPage
@@ -682,7 +697,8 @@ internal sealed class BTreeMutator : IDisposable
 
             var defragBuf = ArrayPool<byte>.Shared.Rent(totalCellBytesForDefrag);
             _rentedBuffers.Add(defragBuf);
-            var defragRefs = new List<CellRef>(newCellCount);
+            EnsureCellRefCapacity(newCellCount);
+            int defragRefCount = 0;
             int writeOff = 0;
 
             for (int i = 0; i < newCellCount; i++)
@@ -690,10 +706,10 @@ internal sealed class BTreeMutator : IDisposable
                 int ptr = BinaryPrimitives.ReadUInt16BigEndian(pageSpan[(ptrBase + i * 2)..]);
                 int len = MeasureCell(pageSpan[ptr..], hdr.IsLeaf);
                 pageSpan.Slice(ptr, len).CopyTo(defragBuf.AsSpan(writeOff));
-                defragRefs.Add(new CellRef(writeOff, len));
+                _cellRefBuffer[defragRefCount++] = new CellRef(writeOff, len);
                 writeOff += len;
             }
-            BuildLeafPage(pageBuf, hdrOff, defragBuf, defragRefs, 0, defragRefs.Count - 1);
+            BuildLeafPage(pageBuf, hdrOff, defragBuf, new ReadOnlySpan<CellRef>(_cellRefBuffer, 0, defragRefCount));
             return;
         }
 
@@ -717,7 +733,7 @@ internal sealed class BTreeMutator : IDisposable
         int headerSize = hdr.HeaderSize;
         int ptrBase = hdrOff + headerSize;
 
-        // Measure total cell bytes and collect descriptors
+        // Measure total cell bytes and collect descriptors into _cellRefBuffer
         int totalCellBytes = 0;
         for (int i = 0; i < hdr.CellCount; i++)
         {
@@ -727,24 +743,25 @@ internal sealed class BTreeMutator : IDisposable
 
         var defragBuf = ArrayPool<byte>.Shared.Rent(totalCellBytes);
         _rentedBuffers.Add(defragBuf);
+        EnsureCellRefCapacity(hdr.CellCount);
         int writeOff = 0;
-        var offsets = new (int Offset, int Length)[hdr.CellCount];
 
         for (int i = 0; i < hdr.CellCount; i++)
         {
             int ptr = hdr.GetCellPointer(pageSpan[hdrOff..], i);
             int len = MeasureCell(pageSpan[ptr..], hdr.IsLeaf);
             pageSpan.Slice(ptr, len).CopyTo(defragBuf.AsSpan(writeOff));
-            offsets[i] = (writeOff, len);
+            _cellRefBuffer[i] = new CellRef(writeOff, len);
             writeOff += len;
         }
 
+        var cells = new ReadOnlySpan<CellRef>(_cellRefBuffer, 0, hdr.CellCount);
         int contentEnd = _usablePageSize;
-        for (int i = 0; i < offsets.Length; i++)
+        for (int i = 0; i < cells.Length; i++)
         {
-            var (off, len) = offsets[i];
-            contentEnd -= len;
-            defragBuf.AsSpan(off, len).CopyTo(pageSpan[contentEnd..]);
+            var cell = cells[i];
+            contentEnd -= cell.Length;
+            defragBuf.AsSpan(cell.Offset, cell.Length).CopyTo(pageSpan[contentEnd..]);
             BinaryPrimitives.WriteUInt16BigEndian(pageSpan[(ptrBase + i * 2)..], (ushort)contentEnd);
         }
 

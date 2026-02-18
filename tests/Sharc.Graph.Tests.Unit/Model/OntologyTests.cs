@@ -16,23 +16,23 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class OntologyTests
 {
-    [TestMethod]
+    [Fact]
     public void ConceptKind_ValuesAreDefined()
     {
-        Assert.IsTrue(Enum.IsDefined(ConceptKind.File));
-        Assert.IsTrue(Enum.IsDefined(ConceptKind.Class));
+        Assert.True(Enum.IsDefined(ConceptKind.File));
+        Assert.True(Enum.IsDefined(ConceptKind.Class));
     }
 
-    [TestMethod]
+    [Fact]
     public void RelationKind_ValuesAreDefined()
     {
-        Assert.IsTrue(Enum.IsDefined(RelationKind.Contains));
-        Assert.IsTrue(Enum.IsDefined(RelationKind.Calls));
+        Assert.True(Enum.IsDefined(RelationKind.Contains));
+        Assert.True(Enum.IsDefined(RelationKind.Calls));
     }
 }

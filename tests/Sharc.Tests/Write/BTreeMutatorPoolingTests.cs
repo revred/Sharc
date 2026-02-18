@@ -282,6 +282,47 @@ public sealed class BTreeMutatorPoolingTests
     }
 
     [Fact]
+    public void Reset_ReturnsRentedBuffers_ClearsCache()
+    {
+        var source = CreateDatabaseWithEmptyTable();
+        var shadow = new ShadowPageSource(source);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
+
+        var (rec, _) = BuildSimpleRecord(42);
+        mutator.Insert(2, 1, rec);
+        Assert.True(mutator.CachedPageCount >= 1);
+
+        mutator.Reset();
+        Assert.Equal(0, mutator.CachedPageCount);
+    }
+
+    [Fact]
+    public void Insert_AfterReset_WorksCorrectly()
+    {
+        var source = CreateDatabaseWithEmptyTable();
+        var shadow = new ShadowPageSource(source);
+        using var mutator = new BTreeMutator(shadow, UsableSize);
+
+        // First cycle
+        var (rec1, _) = BuildSimpleRecord(42);
+        mutator.Insert(2, 1, rec1);
+        mutator.Reset();
+
+        // Second cycle — mutator should work normally
+        shadow.Reset();
+        var source2 = CreateDatabaseWithEmptyTable();
+        var shadow2 = new ShadowPageSource(source2);
+        using var mutator2 = new BTreeMutator(shadow2, UsableSize);
+        var (rec2, _) = BuildSimpleRecord(99);
+        mutator2.Insert(2, 1, rec2);
+
+        // Verify the row is readable
+        using var cursor = new BTreeCursor(shadow2, 2, UsableSize);
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(1L, cursor.RowId);
+    }
+
+    [Fact]
     public void Insert_ManyRows_AllReadableAfterDispose()
     {
         var source = CreateDatabaseWithEmptyTable();

@@ -16,65 +16,65 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Schema;
 
-[TestClass]
 public class MakerAiAdapterTests
 {
     private readonly MakerAiAdapter _adapter = new();
 
-    [TestMethod]
+    [Fact]
     public void TableNames_AreCorrect()
     {
-        Assert.AreEqual("Entity", _adapter.NodeTableName);
-        Assert.AreEqual("Edge", _adapter.EdgeTableName);
-        Assert.AreEqual("EdgeHistory", _adapter.EdgeHistoryTableName);
-        Assert.IsNull(_adapter.MetaTableName);
+        Assert.Equal("Entity", _adapter.NodeTableName);
+        Assert.Equal("Edge", _adapter.EdgeTableName);
+        Assert.Equal("EdgeHistory", _adapter.EdgeHistoryTableName);
+        Assert.Null(_adapter.MetaTableName);
     }
 
-    [TestMethod]
+    [Fact]
     public void ColumnMapping_Entity_AllColumnsPresent()
     {
-        Assert.AreEqual("GUID", _adapter.NodeIdColumn);
-        Assert.AreEqual("BarID", _adapter.NodeKeyColumn);
-        Assert.AreEqual("TypeID", _adapter.NodeTypeColumn);
-        Assert.AreEqual("Details", _adapter.NodeDataColumn);
-        Assert.AreEqual("CVN", _adapter.NodeCvnColumn);
-        Assert.AreEqual("LVN", _adapter.NodeLvnColumn);
-        Assert.AreEqual("SyncStatus", _adapter.NodeSyncColumn);
-        Assert.AreEqual("LastUpdatedUTC", _adapter.NodeUpdatedColumn);
+        Assert.Equal("GUID", _adapter.NodeIdColumn);
+        Assert.Equal("BarID", _adapter.NodeKeyColumn);
+        Assert.Equal("TypeID", _adapter.NodeTypeColumn);
+        Assert.Equal("Details", _adapter.NodeDataColumn);
+        Assert.Equal("CVN", _adapter.NodeCvnColumn);
+        Assert.Equal("LVN", _adapter.NodeLvnColumn);
+        Assert.Equal("SyncStatus", _adapter.NodeSyncColumn);
+        Assert.Equal("LastUpdatedUTC", _adapter.NodeUpdatedColumn);
     }
     
-    [TestMethod]
+    [Fact]
     public void ColumnMapping_Edge_AllColumnsPresent()
     {
-        Assert.AreEqual("GUID", _adapter.EdgeIdColumn);
-        Assert.AreEqual("OriginID", _adapter.EdgeOriginColumn);
-        Assert.AreEqual("TargetID", _adapter.EdgeTargetColumn);
-        Assert.AreEqual("LinkID", _adapter.EdgeKindColumn);
-        Assert.AreEqual("Details", _adapter.EdgeDataColumn);
-        Assert.AreEqual("CVN", _adapter.EdgeCvnColumn);
-        Assert.AreEqual("LVN", _adapter.EdgeLvnColumn);
-        Assert.AreEqual("SyncStatus", _adapter.EdgeSyncColumn);
+        Assert.Equal("GUID", _adapter.EdgeIdColumn);
+        Assert.Equal("OriginID", _adapter.EdgeOriginColumn);
+        Assert.Equal("TargetID", _adapter.EdgeTargetColumn);
+        Assert.Equal("LinkID", _adapter.EdgeKindColumn);
+        Assert.Equal("Details", _adapter.EdgeDataColumn);
+        Assert.Equal("CVN", _adapter.EdgeCvnColumn);
+        Assert.Equal("LVN", _adapter.EdgeLvnColumn);
+        Assert.Equal("SyncStatus", _adapter.EdgeSyncColumn);
     }
 
-    [TestMethod]
+    [Fact]
     public void TypeNames_Contains_CommonTypes()
     {
         var types = _adapter.TypeNames;
         
-        Assert.AreEqual("project", types[1]);
-        Assert.AreEqual("shopjob", types[2]);
-        Assert.AreEqual("operation", types[3]);
-        Assert.AreEqual("capability", types[13]);
+        Assert.Equal("project", types[1]);
+        Assert.Equal("shopjob", types[2]);
+        Assert.Equal("operation", types[3]);
+        Assert.Equal("capability", types[13]);
     }
 
-    [TestMethod]
+    [Fact]
     public void RequiredIndexDDL_HasBarIdIndex()
     {
         var ddl = _adapter.RequiredIndexDDL;
         bool hasBarId = ddl.Any(x => x.Contains("Entity") && x.Contains("BarID"));
-        Assert.IsTrue(hasBarId, "Should index BarID");
+        Assert.True(hasBarId, "Should index BarID");
     }
 }

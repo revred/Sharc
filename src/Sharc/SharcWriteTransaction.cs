@@ -12,13 +12,15 @@ public sealed class SharcWriteTransaction : IDisposable
 {
     private readonly SharcDatabase _db;
     private readonly Transaction _innerTx;
+    private readonly Dictionary<string, uint>? _rootCache;
     private bool _completed;
     private bool _disposed;
 
-    internal SharcWriteTransaction(SharcDatabase db, Transaction innerTx)
+    internal SharcWriteTransaction(SharcDatabase db, Transaction innerTx, Dictionary<string, uint>? rootCache = null)
     {
         _db = db;
         _innerTx = innerTx;
+        _rootCache = rootCache;
     }
 
     /// <summary>
@@ -29,7 +31,7 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.InsertCore(_innerTx, tableName, values, TryGetTableInfo(tableName));
+        return SharcWriter.InsertCore(_innerTx, tableName, values, TryGetTableInfo(tableName), _rootCache);
     }
 
     /// <summary>
@@ -40,7 +42,7 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.DeleteCore(_innerTx, tableName, rowId);
+        return SharcWriter.DeleteCore(_innerTx, tableName, rowId, _rootCache);
     }
 
     /// <summary>
@@ -51,7 +53,7 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, TryGetTableInfo(tableName));
+        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, TryGetTableInfo(tableName), _rootCache);
     }
 
     private TableInfo? TryGetTableInfo(string tableName)

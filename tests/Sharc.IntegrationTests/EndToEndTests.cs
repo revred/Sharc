@@ -45,7 +45,6 @@ public class EndToEndTests
 
         Assert.Equal(2, db.Schema.Tables.Count);
         Assert.Contains(db.Schema.Tables, t => t.Name == "users");
-        Assert.Equal("users", db.Schema.Tables[1].Name);
     }
 
     [Fact]

@@ -16,13 +16,13 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Model;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Model;
 
-[TestClass]
 public class GraphEdgeTests
 {
-    [TestMethod]
+    [Fact]
     public void Constructor_SetsAllProperties()
     {
         var origin = new NodeKey(1);
@@ -39,14 +39,14 @@ public class GraphEdgeTests
             LVN = 20
         };
 
-        Assert.AreEqual(id, edge.Id);
-        Assert.AreEqual(origin, edge.OriginKey);
-        Assert.AreEqual(target, edge.TargetKey);
-        Assert.AreEqual(1008, edge.Kind);
-        Assert.AreEqual("has_op", edge.KindName);
-        Assert.AreEqual("{}", edge.JsonData);
-        Assert.AreEqual(now, edge.CreatedAt);
-        Assert.AreEqual(10, edge.CVN);
-        Assert.AreEqual(20, edge.LVN);
+        Assert.Equal(id, edge.Id);
+        Assert.Equal(origin, edge.OriginKey);
+        Assert.Equal(target, edge.TargetKey);
+        Assert.Equal(1008, edge.Kind);
+        Assert.Equal("has_op", edge.KindName);
+        Assert.Equal("{}", edge.JsonData);
+        Assert.Equal(now, edge.CreatedAt);
+        Assert.Equal(10, edge.CVN);
+        Assert.Equal(20, edge.LVN);
     }
 }

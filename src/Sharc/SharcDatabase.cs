@@ -571,6 +571,26 @@ public sealed class SharcDatabase : IDisposable
         return _activeTransaction;
     }
 
+    /// <summary>
+    /// Begins a transaction that reuses a pooled ShadowPageSource.
+    /// A fresh BTreeMutator is created per-transaction to avoid stale freelist state.
+    /// </summary>
+    internal Transaction BeginPooledTransaction(ShadowPageSource cachedShadow)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_activeTransaction != null)
+            throw new InvalidOperationException("A transaction is already active.");
+
+        if (_rawSource is not IWritablePageSource writable)
+            throw new NotSupportedException("The database is opened in read-only mode.");
+
+        cachedShadow.Reset();
+
+        _activeTransaction = new Transaction(this, writable, cachedShadow);
+        _proxySource.SetTarget(_activeTransaction.PageSource);
+        return _activeTransaction;
+    }
+
     internal void EndTransaction(Transaction transaction)
     {
         if (_activeTransaction == transaction)

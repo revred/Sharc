@@ -16,27 +16,27 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Graph.Schema;
+using Xunit;
 
 namespace Sharc.Graph.Tests.Unit.Schema;
 
-[TestClass]
 public class NativeSchemaAdapterTests
 {
-    [TestMethod]
+    [Fact]
     public void NativeAdapter_ExpectedConfiguration()
     {
         var adapter = new NativeSchemaAdapter();
         
-        Assert.AreEqual("_concepts", adapter.NodeTableName);
-        Assert.AreEqual("_relations", adapter.EdgeTableName);
+        Assert.Equal("_concepts", adapter.NodeTableName);
+        Assert.Equal("_relations", adapter.EdgeTableName);
         
-        Assert.AreEqual("id", adapter.NodeIdColumn);
-        Assert.AreEqual("key", adapter.NodeKeyColumn);
-        Assert.AreEqual("kind", adapter.NodeTypeColumn);
-        Assert.AreEqual("data", adapter.NodeDataColumn);
+        Assert.Equal("id", adapter.NodeIdColumn);
+        Assert.Equal("key", adapter.NodeKeyColumn);
+        Assert.Equal("kind", adapter.NodeTypeColumn);
+        Assert.Equal("data", adapter.NodeDataColumn);
         
-        Assert.AreEqual("source_key", adapter.EdgeOriginColumn);
-        Assert.AreEqual("target_key", adapter.EdgeTargetColumn);
-        Assert.AreEqual("kind", adapter.EdgeKindColumn);
+        Assert.Equal("source_key", adapter.EdgeOriginColumn);
+        Assert.Equal("target_key", adapter.EdgeTargetColumn);
+        Assert.Equal("kind", adapter.EdgeKindColumn);
     }
 }

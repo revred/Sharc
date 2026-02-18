@@ -1,8 +1,11 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using Xunit;
 using Sharc.Core;
 using Sharc.Core.Records;
-using Sharc; // Added for SharcWriter
-using Sharc.IntegrationTests.Helpers; // TestDatabaseFactory
+using Sharc;
+using Sharc.IntegrationTests.Helpers;
 
 namespace Sharc.IntegrationTests;
 
@@ -49,7 +52,7 @@ public class SimpleWriteTests : IDisposable
         // 3. Verify Read with Sharc
         using (var db = SharcDatabase.Open(_dbPath))
         {
-            var reader = db.CreateReader("users", "name");
+            using var reader = db.CreateReader("users", "name");
             
             Assert.True(reader.Read());
             Assert.Equal("Alice", reader.GetString(0));

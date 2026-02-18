@@ -92,11 +92,11 @@ public sealed class ShadowPageSourcePoolingTests
         data[0] = 0xFF;
         shadow.WritePage(2, data);
 
-        Assert.Equal(1, shadow.GetDirtyPages().Count);
+        Assert.Equal(1, shadow.DirtyPageCount);
 
         shadow.ClearShadow();
 
-        Assert.Equal(0, shadow.GetDirtyPages().Count);
+        Assert.Equal(0, shadow.DirtyPageCount);
     }
 
     [Fact]
@@ -142,6 +142,50 @@ public sealed class ShadowPageSourcePoolingTests
         // First bytes of base page 1 are "SQLite format 3\0"
         Assert.Equal((byte)'S', readBuf[0]);
         Assert.Equal((byte)'Q', readBuf[1]);
+    }
+
+    [Fact]
+    public void Reset_ReturnBuffersAndClearPages_ObjectReusable()
+    {
+        using var baseSource = CreateBase();
+        using var shadow = new ShadowPageSource(baseSource);
+
+        var data = new byte[PageSize];
+        data[0] = 0xAA;
+        shadow.WritePage(2, data);
+        Assert.Equal(1, shadow.DirtyPageCount);
+
+        // Reset should clear dirty pages but keep the object usable
+        shadow.Reset();
+        Assert.Equal(0, shadow.DirtyPageCount);
+
+        // Should be usable again after Reset
+        data[0] = 0xBB;
+        shadow.WritePage(2, data);
+        Assert.Equal(1, shadow.DirtyPageCount);
+
+        var readBuf = new byte[PageSize];
+        shadow.ReadPage(2, readBuf);
+        Assert.Equal(0xBB, readBuf[0]);
+    }
+
+    [Fact]
+    public void Reset_MultipleCycles_NoMemoryGrowth()
+    {
+        using var baseSource = CreateBase(4);
+        using var shadow = new ShadowPageSource(baseSource);
+
+        for (int cycle = 0; cycle < 10; cycle++)
+        {
+            var data = new byte[PageSize];
+            data[0] = (byte)cycle;
+            shadow.WritePage(2, data);
+            shadow.WritePage(3, data);
+            shadow.Reset();
+        }
+
+        // After final reset, no dirty pages
+        Assert.Equal(0, shadow.DirtyPageCount);
     }
 
     [Fact]
