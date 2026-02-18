@@ -87,8 +87,10 @@ internal static class JoinExecutor
                 
                 var (rightRows, rightSchema) = MaterializeRows(db, rightIntent, parameters, joinAlias);
 
-                // Merge schemas (always [left, right])
-                var mergedSchema = new Dictionary<string, int>(leftSchema);
+                // Merge schemas (always [left, right]) — pre-sized to avoid rehashing
+                var mergedSchema = new Dictionary<string, int>(leftSchema.Count + rightSchema.Count, StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in leftSchema)
+                    mergedSchema[kv.Key] = kv.Value;
                 int offset = leftSchema.Count;
                 foreach (var kv in rightSchema)
                 {
@@ -132,18 +134,16 @@ internal static class JoinExecutor
              return new SharcDataReader(finalRows, columns);
         }
 
-        // 6. Streaming Limit/Offset if no OrderBy
+        // 6. Streaming Limit/Offset if no OrderBy — avoid materializing the entire result
         if (intent.Limit.HasValue || intent.Offset.HasValue)
         {
-            // We need a streaming ApplyLimitOffset or just materialize a bit.
-            // For now, let's just materialize the limited set.
-            var finalRows = QueryPostProcessor.ApplyLimitOffset(probeStream.ToList(), intent.Limit, intent.Offset);
+            probeStream = StreamingLimitOffset(probeStream, (int)(intent.Offset ?? 0), (int?)intent.Limit);
             if (intent.Columns != null)
             {
-                 var projectedRows = ProjectRows(finalRows, leftSchema, intent.Columns);
-                 return new SharcDataReader(projectedRows, intent.ColumnsArray!);
+                 var projectedStream = ProjectRows(probeStream, leftSchema, intent.Columns);
+                 return new SharcDataReader(projectedStream, intent.ColumnsArray!);
             }
-            return new SharcDataReader(finalRows, columns);
+            return new SharcDataReader(probeStream, columns);
         }
 
         // 7. Full Streaming Projection
@@ -162,6 +162,8 @@ internal static class JoinExecutor
         JoinIntent join)
     {
         int rightColumnCount = rightSchema.Count;
+        int leftColumnCount = leftSchema.Count;
+        int mergedWidth = leftColumnCount + rightColumnCount;
 
         // For now, always build on Right side to support streaming Left.
         // In the future, a cost-based optimizer could swap these if Kind == Inner.
@@ -213,7 +215,7 @@ internal static class JoinExecutor
             if (join.Kind == JoinType.Cross)
             {
                 foreach (var buildRow in buildRows)
-                    yield return MergeRows(probeRow, buildRow);
+                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount);
                 continue;
             }
 
@@ -222,22 +224,41 @@ internal static class JoinExecutor
             {
                 foreach (var buildRow in matches)
                 {
-                    yield return MergeRows(probeRow, buildRow);
+                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount);
                 }
             }
             else if (join.Kind == JoinType.Left)
             {
-                yield return MergeRows(probeRow, leftJoinNullRow!);
+                yield return MergeRows(probeRow, leftJoinNullRow!, mergedWidth, leftColumnCount);
             }
         }
     }
 
-    private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right)
+    private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right, int mergedWidth, int leftLen)
     {
-        var combined = new QueryValue[left.Length + right.Length];
-        Array.Copy(left, 0, combined, 0, left.Length);
-        Array.Copy(right, 0, combined, left.Length, right.Length);
+        var combined = new QueryValue[mergedWidth];
+        Array.Copy(left, 0, combined, 0, leftLen);
+        Array.Copy(right, 0, combined, leftLen, right.Length);
         return combined;
+    }
+
+    /// <summary>
+    /// Streaming LIMIT/OFFSET — avoids materializing the entire join result into a List.
+    /// </summary>
+    private static IEnumerable<QueryValue[]> StreamingLimitOffset(
+        IEnumerable<QueryValue[]> source, int offset, int? limit)
+    {
+        int skipped = 0;
+        int emitted = 0;
+        int max = limit ?? int.MaxValue;
+
+        foreach (var row in source)
+        {
+            if (skipped < offset) { skipped++; continue; }
+            if (emitted >= max) yield break;
+            yield return row;
+            emitted++;
+        }
     }
 
     private static (IEnumerable<QueryValue[]> Rows, Dictionary<string, int> Schema) MaterializeRows(

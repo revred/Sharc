@@ -12,7 +12,7 @@ public class JoinEfficiencyBenchmarks
     private SharcDatabase _db = null!;
 
     [Params(1000, 5000)]
-    public int UserCount;
+    public int UserCount { get; set; }
 
     [GlobalSetup]
     public void Setup()

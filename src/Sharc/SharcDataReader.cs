@@ -1220,12 +1220,13 @@ public sealed class SharcDataReader : IDisposable
         _concatSecond?.Dispose();
         _cursor?.Dispose();
 
+        _queryValueEnumerator?.Dispose();
+        _queryValueEnumerator = null;
+
         if (_reusableBuffer is not null)
         {
             ArrayPool<ColumnValue>.Shared.Return(_reusableBuffer, clearArray: true);
             _reusableBuffer = null;
-        _queryValueEnumerator?.Dispose();
-        _queryValueEnumerator = null;
         }
 
         if (_serialTypes is not null)
