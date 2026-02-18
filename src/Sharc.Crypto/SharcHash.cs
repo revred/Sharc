@@ -14,4 +14,12 @@ public static class SharcHash
     {
         return SHA256.HashData(data);
     }
+
+    /// <summary>
+    /// Attempts to compute the SHA-256 hash into a destination span.
+    /// </summary>
+    public static bool TryCompute(ReadOnlySpan<byte> data, Span<byte> destination, out int bytesWritten)
+    {
+        return SHA256.TryHashData(data, destination, out bytesWritten);
+    }
 }

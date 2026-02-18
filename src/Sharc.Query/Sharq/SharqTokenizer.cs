@@ -24,6 +24,8 @@ internal ref struct SharqTokenizer
     private static readonly FrozenDictionary<string, SharqTokenKind> s_keywords =
         new Dictionary<string, SharqTokenKind>(StringComparer.OrdinalIgnoreCase)
         {
+            ["CREATE"] = SharqTokenKind.Create,
+            ["VIEW"] = SharqTokenKind.View,
             ["SELECT"] = SharqTokenKind.Select,
             ["FROM"] = SharqTokenKind.From,
             ["WHERE"] = SharqTokenKind.Where,
@@ -61,6 +63,12 @@ internal ref struct SharqTokenizer
             ["INTERSECT"] = SharqTokenKind.Intersect,
             ["EXCEPT"] = SharqTokenKind.Except,
             ["EXISTS"] = SharqTokenKind.Exists,
+            ["JOIN"] = SharqTokenKind.Join,
+            ["INNER"] = SharqTokenKind.Inner,
+            ["LEFT"] = SharqTokenKind.Left,
+            ["RIGHT"] = SharqTokenKind.Right,
+            ["CROSS"] = SharqTokenKind.Cross,
+            ["ON"] = SharqTokenKind.On,
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private readonly ReadOnlySpan<char> _sql;

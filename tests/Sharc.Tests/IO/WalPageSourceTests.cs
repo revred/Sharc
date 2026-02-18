@@ -166,6 +166,7 @@ public class WalPageSourceTests
             _pages[pageNumber - 1].CopyTo(destination);
             return PageSize;
         }
+        public void Invalidate(uint pageNumber) { }
         public void Dispose() => IsDisposed = true;
     }
 

@@ -11,12 +11,18 @@ namespace Sharc.Trust;
 internal static class EntitlementEnforcer
 {
     /// <summary>
+    /// Optional hook for pluggable identity verification (e.g., verifying agent signatures
+    /// against a registry or public key). If set, this is called before entitlement checks.
+    /// </summary>
+    public static Action<AgentInfo>? IdentityValidator { get; set; }
+
+    /// <summary>
     /// Validates that the agent's ReadScope permits the requested table and columns.
     /// Throws <see cref="UnauthorizedAccessException"/> if access is denied.
     /// </summary>
     internal static void Enforce(AgentInfo agent, string tableName, string[]? columns)
     {
-        ValidateAgentActive(agent);
+        ValidateAgent(agent);
         var scope = ScopeDescriptor.Parse(agent.ReadScope);
         EnforceScope(scope, agent.AgentId, "read", tableName, columns);
     }
@@ -27,7 +33,7 @@ internal static class EntitlementEnforcer
     /// </summary>
     internal static void EnforceWrite(AgentInfo agent, string tableName, string[]? columns)
     {
-        ValidateAgentActive(agent);
+        ValidateAgent(agent);
         var scope = ScopeDescriptor.Parse(agent.WriteScope);
         EnforceScope(scope, agent.AgentId, "write", tableName, columns);
     }
@@ -38,7 +44,7 @@ internal static class EntitlementEnforcer
     /// </summary>
     internal static void EnforceAll(AgentInfo agent, List<Query.TableReference> targets)
     {
-        ValidateAgentActive(agent);
+        ValidateAgent(agent);
         var scope = ScopeDescriptor.Parse(agent.ReadScope);
         foreach (var (table, columns) in targets)
         {
@@ -52,10 +58,16 @@ internal static class EntitlementEnforcer
     /// </summary>
     internal static void EnforceSchemaAdmin(AgentInfo agent)
     {
-        ValidateAgentActive(agent);
+        ValidateAgent(agent);
         var scope = ScopeDescriptor.Parse(agent.WriteScope);
         if (!scope.IsSchemaAdmin)
              throw new UnauthorizedAccessException($"Agent '{agent.AgentId}' does not have schema administration rights.");
+    }
+
+    private static void ValidateAgent(AgentInfo agent)
+    {
+        IdentityValidator?.Invoke(agent);
+        ValidateAgentActive(agent);
     }
 
     /// <summary>
@@ -64,15 +76,15 @@ internal static class EntitlementEnforcer
     /// </summary>
     private static void ValidateAgentActive(AgentInfo agent)
     {
-        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         if (agent.ValidityStart > 0 && now < agent.ValidityStart)
             throw new UnauthorizedAccessException(
-                $"Agent '{agent.AgentId}' is not yet active (starts at {agent.ValidityStart}).");
+                $"Agent '{agent.AgentId}' is not yet active (starts at {agent.ValidityStart} ms). Current: {now}");
 
         if (agent.ValidityEnd > 0 && now > agent.ValidityEnd)
             throw new UnauthorizedAccessException(
-                $"Agent '{agent.AgentId}' has expired (ended at {agent.ValidityEnd}).");
+                $"Agent '{agent.AgentId}' has expired (ended at {agent.ValidityEnd} ms). Current: {now}");
     }
 
     private static void EnforceScope(

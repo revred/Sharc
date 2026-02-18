@@ -11,6 +11,7 @@ internal sealed class SelectStatement
     public bool IsDistinct { get; init; }
     public required IReadOnlyList<SelectItem> Columns { get; init; }
     public required TableRef From { get; init; }
+    public IReadOnlyList<JoinClause>? Joins { get; init; }
     public SharqStar? Where { get; init; }
     public IReadOnlyList<SharqStar>? GroupBy { get; init; }
     public SharqStar? Having { get; init; }

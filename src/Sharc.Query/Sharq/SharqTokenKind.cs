@@ -57,6 +57,18 @@ internal enum SharqTokenKind : byte
     Exists,
     UnionAll,       // |a (shorthand for UNION ALL)
 
+    // DDL
+    Create,
+    View,
+
+    // Joins
+    Join,
+    Inner,
+    Left,
+    Right,
+    Cross,
+    On,
+
     // Comparison operators
     Equal,          // =
     NotEqual,       // != or <>

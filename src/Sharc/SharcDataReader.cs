@@ -72,6 +72,7 @@ public sealed class SharcDataReader : IDisposable
     // Unboxed materialized mode — QueryValue stores int/double inline without boxing
     private readonly Query.QueryValue[][]? _queryValueRows;
     private readonly List<Query.QueryValue[]>? _queryValueList;
+    private IEnumerator<Query.QueryValue[]>? _queryValueEnumerator;
 
     // Concatenating mode — streams two readers sequentially for UNION ALL
     private readonly SharcDataReader? _concatFirst;
@@ -84,21 +85,32 @@ public sealed class SharcDataReader : IDisposable
     private readonly IndexSet? _dedupRightIndex;
     private readonly IndexSet? _dedupSeen;
 
-    internal SharcDataReader(IBTreeCursor cursor, IRecordDecoder recordDecoder,
-        IReadOnlyList<ColumnInfo> columns, int[]? projection,
-        IBTreeReader? bTreeReader = null, IReadOnlyList<IndexInfo>? tableIndexes = null,
-        ResolvedFilter[]? filters = null, IFilterNode? filterNode = null)
+    internal readonly record struct CursorReaderConfig
     {
+        public required IReadOnlyList<ColumnInfo> Columns { get; init; }
+        public int[]? Projection { get; init; }
+        public IBTreeReader? BTreeReader { get; init; }
+        public IReadOnlyList<IndexInfo>? TableIndexes { get; init; }
+        public ResolvedFilter[]? Filters { get; init; }
+        public IFilterNode? FilterNode { get; init; }
+    }
+
+    internal SharcDataReader(
+        IBTreeCursor cursor,
+        IRecordDecoder recordDecoder,
+        CursorReaderConfig config)
+    {
+        var columns = config.Columns;
+
         _cursor = cursor;
         _recordDecoder = recordDecoder;
         _columns = columns;
-        _projection = projection;
-        _bTreeReader = bTreeReader;
-        _tableIndexes = tableIndexes;
-        _filters = filters;
-        _filters = filters;
-        _filterNode = filterNode;
-        _concreteFilterNode = filterNode as FilterNode;
+        _projection = config.Projection;
+        _bTreeReader = config.BTreeReader;
+        _tableIndexes = config.TableIndexes;
+        _filters = config.Filters;
+        _filterNode = config.FilterNode;
+        _concreteFilterNode = config.FilterNode as FilterNode;
         _columnCount = columns.Count;
 
         // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
@@ -154,7 +166,7 @@ public sealed class SharcDataReader : IDisposable
         _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
         // Pool serial type buffer for byte-level filter evaluation
-        if (filterNode != null)
+        if (_filterNode != null)
         {
             _filterSerialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
             _filterSerialTypes.AsSpan(0, bufferSize).Clear();
@@ -203,6 +215,18 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Creates a streaming reader from an <see cref="IEnumerable{T}"/> of rows.
+    /// Used for low-allocation JOIN and filtered streaming.
+    /// </summary>
+    internal SharcDataReader(IEnumerable<Query.QueryValue[]> rows, string[] columnNames)
+    {
+        _queryValueEnumerator = rows.GetEnumerator();
+        _materializedColumnNames = columnNames;
+        _columnCount = columnNames.Length;
+        _rowidAliasOrdinal = -1;
+    }
+
+    /// <summary>
     /// Creates a concatenating reader that streams from <paramref name="first"/> then
     /// <paramref name="second"/>. Used for zero-materialization UNION ALL.
     /// </summary>
@@ -240,14 +264,18 @@ public sealed class SharcDataReader : IDisposable
         ?? _columns!.Count;
 
     /// <summary>Returns true when the reader is in unboxed <see cref="Query.QueryValue"/> mode.</summary>
-    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null;
+    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null || _queryValueEnumerator != null;
 
     /// <summary>Gets the current row in materialized mode (array or list).</summary>
     private Query.QueryValue[] CurrentMaterializedRow
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _queryValueRows != null ? _queryValueRows[_materializedIndex]
-            : _queryValueList![_materializedIndex];
+        get
+        {
+            if (_queryValueRows != null) return _queryValueRows[_materializedIndex];
+            if (_queryValueList != null) return _queryValueList[_materializedIndex];
+            return _queryValueEnumerator!.Current;
+        }
     }
 
     /// <summary>Returns true when the reader is in concatenating mode (streaming UNION ALL).</summary>
@@ -440,6 +468,10 @@ public sealed class SharcDataReader : IDisposable
         {
             _materializedIndex++;
             return _materializedIndex < _queryValueList.Count;
+        }
+        if (_queryValueEnumerator != null)
+        {
+            return _queryValueEnumerator.MoveNext();
         }
 
         while (_cursor!.MoveNext())
@@ -1187,6 +1219,9 @@ public sealed class SharcDataReader : IDisposable
         _concatFirst?.Dispose();
         _concatSecond?.Dispose();
         _cursor?.Dispose();
+
+        _queryValueEnumerator?.Dispose();
+        _queryValueEnumerator = null;
 
         if (_reusableBuffer is not null)
         {

@@ -15,14 +15,15 @@ internal static class IntentToFilterBridge
     /// Builds an <see cref="IFilterStar"/> from the flat predicate intent.
     /// </summary>
     internal static IFilterStar Build(PredicateIntent intent,
-        IReadOnlyDictionary<string, object>? parameters = null)
+        IReadOnlyDictionary<string, object>? parameters = null,
+        string? tableAlias = null)
     {
         var cache = new IFilterStar[intent.Nodes.Length];
-        return BuildNode(intent.Nodes, intent.RootIndex, cache, parameters);
+        return BuildNode(intent.Nodes, intent.RootIndex, cache, parameters, tableAlias);
     }
 
     private static IFilterStar BuildNode(IntentPredicateNode[] nodes, int index,
-        IFilterStar[] cache, IReadOnlyDictionary<string, object>? parameters)
+        IFilterStar[] cache, IReadOnlyDictionary<string, object>? parameters, string? tableAlias)
     {
         if (cache[index] is not null)
             return cache[index];
@@ -32,16 +33,16 @@ internal static class IntentToFilterBridge
         {
             // Logical
             IntentOp.And => FilterStar.And(
-                BuildNode(nodes, node.LeftIndex, cache, parameters),
-                BuildNode(nodes, node.RightIndex, cache, parameters)),
+                BuildNode(nodes, node.LeftIndex, cache, parameters, tableAlias),
+                BuildNode(nodes, node.RightIndex, cache, parameters, tableAlias)),
             IntentOp.Or => FilterStar.Or(
-                BuildNode(nodes, node.LeftIndex, cache, parameters),
-                BuildNode(nodes, node.RightIndex, cache, parameters)),
+                BuildNode(nodes, node.LeftIndex, cache, parameters, tableAlias),
+                BuildNode(nodes, node.RightIndex, cache, parameters, tableAlias)),
             IntentOp.Not => FilterStar.Not(
-                BuildNode(nodes, node.LeftIndex, cache, parameters)),
+                BuildNode(nodes, node.LeftIndex, cache, parameters, tableAlias)),
 
             // Leaf operations
-            _ => BuildLeaf(node, parameters),
+            _ => BuildLeaf(node, parameters, tableAlias),
         };
 
         cache[index] = result;
@@ -49,9 +50,18 @@ internal static class IntentToFilterBridge
     }
 
     private static IFilterStar BuildLeaf(in IntentPredicateNode node,
-        IReadOnlyDictionary<string, object>? parameters)
+        IReadOnlyDictionary<string, object>? parameters, string? tableAlias)
     {
-        var col = FilterStar.Column(node.ColumnName!);
+        var colName = node.ColumnName!;
+        if (!string.IsNullOrEmpty(tableAlias) &&
+            colName.Length > tableAlias.Length + 1 &&
+            colName[tableAlias.Length] == '.' &&
+            colName.AsSpan(0, tableAlias.Length).Equals(tableAlias.AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            colName = colName[(tableAlias.Length + 1)..];
+        }
+
+        var col = FilterStar.Column(colName);
 
         // Resolve parameter to concrete value if needed
         if (node.Value.Kind == IntentValueKind.Parameter)

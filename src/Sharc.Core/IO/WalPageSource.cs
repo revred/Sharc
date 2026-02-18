@@ -62,6 +62,9 @@ public sealed class WalPageSource : IPageSource
     }
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
+
+    /// <inheritdoc />
     public void Dispose()
     {
         _inner.Dispose();

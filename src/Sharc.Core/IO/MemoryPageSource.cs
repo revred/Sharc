@@ -58,6 +58,12 @@ public sealed class MemoryPageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber)
+    {
+        // No cache to invalidate
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         GetPage(pageNumber).CopyTo(destination);

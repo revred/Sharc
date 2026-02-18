@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Sharc.Core.Format;
 
@@ -19,8 +20,8 @@ internal sealed class BTreeMutator : IDisposable
 {
     private readonly IWritablePageSource _source;
     private readonly int _usablePageSize;
-    private readonly Dictionary<uint, byte[]> _pageCache = new();
-    private readonly List<byte[]> _rentedBuffers = new();
+    private readonly Dictionary<uint, byte[]> _pageCache = new(4);
+    private readonly List<byte[]> _rentedBuffers = new(4);
     private bool _disposed;
 
     /// <summary>Header size for a leaf table page.</summary>
@@ -38,7 +39,7 @@ internal sealed class BTreeMutator : IDisposable
 
     private readonly Func<uint>? _freePageAllocator;
     private readonly Action<uint>? _freePageCallback;
-    private CellRef[] _cellRefBuffer = new CellRef[256]; // pooled, grows as needed
+    private CellRef[]? _cellRefBuffer; // lazy — only allocated when a split or defrag is needed
 
     public BTreeMutator(IWritablePageSource source, int usablePageSize,
         Func<uint>? freePageAllocator = null, Action<uint>? freePageCallback = null)
@@ -201,10 +202,11 @@ internal sealed class BTreeMutator : IDisposable
         _rentedBuffers.Clear();
     }
 
+    [MemberNotNull(nameof(_cellRefBuffer))]
     private void EnsureCellRefCapacity(int needed)
     {
-        if (_cellRefBuffer.Length < needed)
-            _cellRefBuffer = new CellRef[Math.Max(needed, _cellRefBuffer.Length * 2)];
+        if (_cellRefBuffer == null || _cellRefBuffer.Length < needed)
+            _cellRefBuffer = new CellRef[Math.Max(needed, _cellRefBuffer?.Length * 2 ?? 256)];
     }
 
     // ── Navigation helpers ─────────────────────────────────────────

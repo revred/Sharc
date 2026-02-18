@@ -13,14 +13,16 @@ public sealed class SharcWriteTransaction : IDisposable
     private readonly SharcDatabase _db;
     private readonly Transaction _innerTx;
     private readonly Dictionary<string, uint>? _rootCache;
+    private readonly Core.Trust.AgentInfo? _agent;
     private bool _completed;
     private bool _disposed;
 
-    internal SharcWriteTransaction(SharcDatabase db, Transaction innerTx, Dictionary<string, uint>? rootCache = null)
+    internal SharcWriteTransaction(SharcDatabase db, Transaction innerTx, Dictionary<string, uint>? rootCache = null, Core.Trust.AgentInfo? agent = null)
     {
         _db = db;
         _innerTx = innerTx;
         _rootCache = rootCache;
+        _agent = agent;
     }
 
     /// <summary>
@@ -31,7 +33,14 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.InsertCore(_innerTx, tableName, values, TryGetTableInfo(tableName), _rootCache);
+        
+        var tableInfo = TryGetTableInfo(tableName);
+        if (_agent != null)
+        {
+            Trust.EntitlementEnforcer.EnforceWrite(_agent, tableName, GetColumnNames(tableInfo, values.Length));
+        }
+
+        return SharcWriter.InsertCore(_innerTx, tableName, values, tableInfo, _rootCache);
     }
 
     /// <summary>
@@ -42,6 +51,12 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
+
+        if (_agent != null)
+        {
+            Trust.EntitlementEnforcer.EnforceWrite(_agent, tableName, null);
+        }
+
         return SharcWriter.DeleteCore(_innerTx, tableName, rowId, _rootCache);
     }
 
@@ -53,7 +68,23 @@ public sealed class SharcWriteTransaction : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_completed) throw new InvalidOperationException("Transaction already completed.");
-        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, TryGetTableInfo(tableName), _rootCache);
+
+        var tableInfo = TryGetTableInfo(tableName);
+        if (_agent != null)
+        {
+            Trust.EntitlementEnforcer.EnforceWrite(_agent, tableName, GetColumnNames(tableInfo, values.Length));
+        }
+
+        return SharcWriter.UpdateCore(_innerTx, tableName, rowId, values, tableInfo, _rootCache);
+    }
+
+    private static string[]? GetColumnNames(TableInfo? table, int valueCount)
+    {
+        if (table == null || valueCount == 0) return null;
+        var cols = new string[Math.Min(valueCount, table.Columns.Count)];
+        for (int i = 0; i < cols.Length; i++)
+            cols[i] = table.Columns[i].Name;
+        return cols;
     }
 
     private TableInfo? TryGetTableInfo(string tableName)

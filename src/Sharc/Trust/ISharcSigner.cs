@@ -24,4 +24,14 @@ public interface ISharcSigner : IDisposable
     /// Gets the public key bytes for this signer.
     /// </summary>
     byte[] GetPublicKey();
+
+    /// <summary>
+    /// Gets the size of the signature produced by this signer in bytes.
+    /// </summary>
+    int SignatureSize { get; }
+
+    /// <summary>
+    /// Attempts to sign the given data into a destination span.
+    /// </summary>
+    bool TrySign(ReadOnlySpan<byte> data, Span<byte> destination, out int bytesWritten);
 }

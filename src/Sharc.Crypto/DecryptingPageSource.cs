@@ -59,6 +59,9 @@ internal sealed class DecryptingPageSource : IPageSource
     }
 
     /// <inheritdoc />
+    public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;

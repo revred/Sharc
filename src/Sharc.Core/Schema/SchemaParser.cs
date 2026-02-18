@@ -14,7 +14,7 @@ internal static class SchemaParser
         if (closeParen < 0) return [];
 
         var body = sql.Slice(openParen + 1, closeParen - openParen - 1).Trim();
-        var columns = new List<ColumnInfo>();
+        var columns = new List<ColumnInfo>(8); // typical table has 5-10 columns
         int ordinal = 0, pos = 0;
 
         while (pos < body.Length)
@@ -46,7 +46,7 @@ internal static class SchemaParser
         if (closeParen < 0) return [];
 
         var body = sql.Slice(openParen + 1, closeParen - openParen - 1).Trim();
-        var columns = new List<IndexColumnInfo>();
+        var columns = new List<IndexColumnInfo>(4); // typical index has 1-3 columns
         int ordinal = 0, bPos = 0;
 
         while (bPos < body.Length)
@@ -110,8 +110,8 @@ internal static class SchemaParser
         if (loNames.Count == 0)
             return (physicalColumns, physicalColumns.Count);
 
-        var consumed = new HashSet<int>(); // physical ordinals consumed by merges
-        var result = new List<ColumnInfo>();
+        var consumed = new HashSet<int>(loNames.Count * 2); // physical ordinals consumed by merges
+        var result = new List<ColumnInfo>(physicalColumns.Count);
         int logicalOrdinal = 0;
 
         for (int i = 0; i < physicalColumns.Count; i++)
