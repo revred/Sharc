@@ -181,12 +181,50 @@ internal static class JoinExecutor
         int leftColumnCount = leftSchema.Count;
         int mergedWidth = leftColumnCount + rightColumnCount;
 
-        // For now, always build on Right side to support streaming Left.
-        // In the future, a cost-based optimizer could swap these if Kind == Inner.
-        var buildRows = (rightRows as RowSet) ?? rightRows.ToList();
-        var buildSchema = rightSchema;
-        var buildCol = join.RightColumn;
-        var probeCol = join.LeftColumn;
+        // For INNER JOIN, build the hash table on the smaller side to reduce
+        // hash bucket memory. LEFT/CROSS must always build on right.
+        bool swapped = false;
+        RowSet buildRows;
+        IEnumerable<QueryValue[]> probeRows;
+        Dictionary<string, int> buildSchema, probeSchema;
+        string? buildCol, probeCol;
+
+        var rightList = (rightRows as RowSet) ?? rightRows.ToList();
+
+        if (join.Kind == JoinType.Inner)
+        {
+            var leftList = (leftRows as RowSet) ?? leftRows.ToList();
+            if (leftList.Count <= rightList.Count)
+            {
+                // Build on left (smaller), probe with right
+                buildRows = leftList;
+                probeRows = rightList;
+                buildSchema = leftSchema;
+                probeSchema = rightSchema;
+                buildCol = join.LeftColumn;
+                probeCol = join.RightColumn;
+                swapped = true;
+            }
+            else
+            {
+                buildRows = rightList;
+                probeRows = leftList;
+                buildSchema = rightSchema;
+                probeSchema = leftSchema;
+                buildCol = join.RightColumn;
+                probeCol = join.LeftColumn;
+            }
+        }
+        else
+        {
+            // LEFT/CROSS: always build on right, stream left as probe
+            buildRows = rightList;
+            probeRows = leftRows;
+            buildSchema = rightSchema;
+            probeSchema = leftSchema;
+            buildCol = join.RightColumn;
+            probeCol = join.LeftColumn;
+        }
 
         // Build Hash Table
         var hashTable = new Dictionary<QueryValue, RowSet>(buildRows.Count);
@@ -210,7 +248,6 @@ internal static class JoinExecutor
         }
 
         // Probe
-        Dictionary<string, int> probeSchema = leftSchema;
         int probeColIdx = -1;
         if (join.Kind != JoinType.Cross)
         {
@@ -233,12 +270,17 @@ internal static class JoinExecutor
         // ProjectRows reads the buffer BEFORE advancing the source iterator.
         QueryValue[]? scratch = reuseBuffer ? new QueryValue[mergedWidth] : null;
 
-        foreach (var probeRow in leftRows)
+        foreach (var probeRow in probeRows)
         {
             if (join.Kind == JoinType.Cross)
             {
                 foreach (var buildRow in buildRows)
-                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
+                {
+                    // Output is always [left columns, right columns]
+                    yield return swapped
+                        ? MergeRows(buildRow, probeRow, mergedWidth, leftColumnCount, scratch)
+                        : MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
+                }
                 continue;
             }
 
@@ -247,7 +289,10 @@ internal static class JoinExecutor
             {
                 foreach (var buildRow in matches)
                 {
-                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
+                    // Maintain [left, right] column order regardless of build/probe swap
+                    yield return swapped
+                        ? MergeRows(buildRow, probeRow, mergedWidth, leftColumnCount, scratch)
+                        : MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
                 }
             }
             else if (join.Kind == JoinType.Left)

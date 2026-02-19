@@ -614,13 +614,16 @@ internal static class CompoundQueryExecutor
     {
         if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
         {
-            var rows = new RowSet(coteData.Rows);
+            RowSet rows = coteData.Rows;
             var columnNames = coteData.Columns;
 
             bool needsAggregate = intent.HasAggregates;
             bool needsDistinct = intent.IsDistinct;
             bool needsSort = intent.OrderBy is { Count: > 0 };
             bool needsLimit = intent.Limit.HasValue || intent.Offset.HasValue;
+
+            if (!needsAggregate && !needsDistinct && !needsSort && !needsLimit)
+                return new MaterializedResultSet(rows, columnNames);
 
             if (needsAggregate)
             {
@@ -635,7 +638,12 @@ internal static class CompoundQueryExecutor
                 rows = SetOperationProcessor.ApplyDistinct(rows, columnNames.Length);
 
             if (needsSort)
+            {
+                // OrderBy sorts in-place — copy only if rows still references the shared Cote data
+                if (ReferenceEquals(rows, coteData.Rows))
+                    rows = new RowSet(rows);
                 QueryPostProcessor.ApplyOrderBy(rows, intent.OrderBy!, columnNames);
+            }
 
             if (needsLimit)
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
