@@ -46,7 +46,7 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*SequentialScan*",
     ];
 
-    // ── Mini: ~14 benchmarks, ~4 min ──
+    // ── Mini: ~20 benchmarks, ~5 min ──
     private static readonly string[] Mini =
     [
         "*CoreBenchmarks.*EngineLoad*",
@@ -58,6 +58,7 @@ internal static class BenchmarkTiers
         "*SharQlParser*Parse_Simple*",
         "*SharQlParser*Parse_Medium*",
         "*JoinEfficiencyBenchmarks*",
+        "*IndexAcceleratedBenchmarks*",
         "*ViewBenchmarks.DirectTable*",
         "*ViewBenchmarks.RegisteredView*",
     ];

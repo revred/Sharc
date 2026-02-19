@@ -25,6 +25,22 @@ Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 
 ---
 
+## Index-Accelerated WHERE (5K users, 15K orders)
+
+When an index exists on the filtered column, Sharc's `IndexSeekCursor` uses `SeekFirst` for O(log N) binary search instead of full table scan. Supports both integer and text key indexes.
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+|:---|---:|---:|:---:|---:|---:|
+| WHERE int = N (indexed) | **1.25 us** | 35.4 us | **28x** | 1,456 B | 872 B |
+| WHERE int = N (full scan) | 506 us | -- | -- | 816 B | -- |
+| WHERE text = T (indexed) | **185 us** | 261 us | **1.4x** | 1,352 B | 728 B |
+| WHERE text = T (full scan) | 224 us | -- | -- | 672 B | -- |
+| WHERE unindexed col | **709 us** | 966 us | **1.4x** | 928 B | 720 B |
+
+> **Index seek is 450x faster than full scan** for integer point lookups (1.25 us vs 506 us), and **28x faster than SQLite**. Text index seek uses zero-allocation byte-span comparison (SIMD-accelerated `SequenceEqual`) — no per-row string allocations. Both paths allocate ~1.4 KB total (cursor construction only). Index selection is automatic: `PredicateAnalyzer` extracts sargable conditions, `IndexSelector` picks the best index, and `IndexSeekCursor` wraps the index + table cursors.
+
+---
+
 ## Graph Storage (5K nodes, 15K edges)
 
 Sharc's built-in graph layer (`Sharc.Graph`) maps concept/relation tables to a traversable graph with O(log N) index seeks.
@@ -251,6 +267,9 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 ```bash
 # Core benchmarks: 9 operations, Sharc vs SQLite
 dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *CoreBenchmarks*
+
+# Index acceleration: index seek vs full scan vs SQLite
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *IndexAccelerated*
 
 # Graph benchmarks: scans, seeks, traversal
 dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *Graph*

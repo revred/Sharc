@@ -4,17 +4,17 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-2%2C216_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-2%2C267_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
 | **Speed** | **Size** | **Trust** |
 | :--- | :--- | :--- |
-| **61x faster** B-tree seeks | **~52 KB** engine footprint | **ECDSA** agent attestation |
-| **39x faster** single UPDATE | **Zero** native dependencies | **AES-256-GCM** encryption |
+| **450x faster** indexed WHERE | **~52 KB** engine footprint | **ECDSA** agent attestation |
+| **61x faster** B-tree seeks | **Zero** native dependencies | **AES-256-GCM** encryption |
 | **31x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
-| **~0 B** per-row read allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
+| **~0 B** per-row read allocation | SQL query pipeline built-in | JOIN / UNION / INTERSECT / EXCEPT / Cote |
 
 ---
 
@@ -116,6 +116,8 @@ writer.Insert("entities",
 
 | Category | Operation | Sharc | SQLite | Speedup |
 | :--- | :--- | ---: | ---: | ---: |
+| **Index Seek** | WHERE on indexed int col | **1.25 us** | 35.4 us | **28x** |
+| | WHERE on indexed text col | **185 us** | 261 us | **1.4x** |
 | **Point Ops** | B-tree Seek | **392 ns** | 24,011 ns | **61x** |
 | | Batch 6 Seeks | **1,940 ns** | 127,526 ns | **66x** |
 | **Scans** | Sequential (5K rows) | **1.54 ms** | 6.22 ms | **4x** |
@@ -237,7 +239,7 @@ PRC/                        Architecture decisions, specs, execution plans
 
 - **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
 - **Single-writer** -- one writer at a time; no WAL-mode concurrent writes
-- **JOIN support** -- INNER, LEFT, and CROSS joins via hash join strategy; no RIGHT or FULL OUTER joins yet
+- **JOIN support** -- INNER, LEFT, RIGHT, and CROSS joins via hash join strategy with index-accelerated WHERE pushdown
 - **No virtual tables** -- FTS5, R-Tree not supported
 
 Sharc is a **complement** to SQLite, not a replacement. See [When NOT to Use Sharc](docs/WHEN_NOT_TO_USE.md).

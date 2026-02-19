@@ -98,6 +98,16 @@ public interface IIndexBTreeCursor : IDisposable
     bool SeekFirst(long firstColumnKey);
 
     /// <summary>
+    /// Seeks to the first index entry whose first column (text, UTF-8) equals or exceeds
+    /// <paramref name="utf8Key"/> using byte-ordinal comparison (BINARY collation).
+    /// After calling this method, <see cref="Payload"/> points to the first matching entry
+    /// (if found), and subsequent <see cref="MoveNext"/> calls continue from that position.
+    /// </summary>
+    /// <param name="utf8Key">The UTF-8 encoded text value to seek for in the first column.</param>
+    /// <returns>True if an entry with first column == <paramref name="utf8Key"/> was found.</returns>
+    bool SeekFirst(ReadOnlySpan<byte> utf8Key);
+
+    /// <summary>
     /// Gets the payload data of the current index entry.
     /// The payload is a standard SQLite record where the last column is the table rowid.
     /// May involve reading overflow pages. Valid until <see cref="MoveNext"/> is called.

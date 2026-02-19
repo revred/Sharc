@@ -4,7 +4,7 @@ namespace Sharc.Comparisons;
 
 public static class JoinDataGenerator
 {
-    public static void Generate(string dbPath, int userCount, int ordersPerUser)
+    public static void Generate(string dbPath, int userCount, int ordersPerUser, bool createIndexes = false)
     {
         if (File.Exists(dbPath)) File.Delete(dbPath);
 
@@ -15,7 +15,7 @@ public static class JoinDataGenerator
         cmd.CommandText = @"
             PRAGMA journal_mode = DELETE;
             PRAGMA page_size = 4096;
-            
+
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -30,6 +30,16 @@ public static class JoinDataGenerator
             );
         ";
         cmd.ExecuteNonQuery();
+
+        if (createIndexes)
+        {
+            using var idxCmd = conn.CreateCommand();
+            idxCmd.CommandText = @"
+                CREATE INDEX idx_orders_user_id ON orders(user_id);
+                CREATE INDEX idx_users_dept ON users(dept);
+            ";
+            idxCmd.ExecuteNonQuery();
+        }
 
         using var tx = conn.BeginTransaction();
         var rng = new Random(42);
