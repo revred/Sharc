@@ -263,17 +263,7 @@ public sealed class DataGenerator
 
     private static byte[] ExportToBytes(SqliteConnection connection)
     {
-        // Use SQLite backup API to export in-memory DB to a byte array
-        using var destConnection = new SqliteConnection("Data Source=:memory:");
-        destConnection.Open();
-
-        using var srcRaw = connection;
-        connection.BackupDatabase(destConnection);
-
-        // Now read from dest using VACUUM INTO a temp file approach
-        // Actually, simplest: serialize via the backup API to another in-memory DB,
-        // then export via custom serialization.
-        // Cleanest approach: write to temp file and read back
+        // Backup in-memory DB directly to a temp file and read back
         var tempPath = Path.GetTempFileName();
         try
         {
