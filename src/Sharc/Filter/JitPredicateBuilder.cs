@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Text;
+using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
 namespace Sharc;
@@ -28,10 +29,10 @@ internal static class JitPredicateBuilder
 
         // NULL handling (SQLite semantics: NULL is never equal, but matches IS NULL)
         if (pred.Operator == FilterOp.IsNull)
-            return Expression.AndAlso(Expression.Equal(serialTypeExpr, Expression.Constant(0L)), Expression.NotEqual(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
+            return Expression.AndAlso(Expression.Equal(serialTypeExpr, Expression.Constant(SerialTypeCodec.NullSerialType)), Expression.NotEqual(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
 
         if (pred.Operator == FilterOp.IsNotNull)
-            return Expression.OrElse(Expression.NotEqual(serialTypeExpr, Expression.Constant(0L)), Expression.Equal(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
+            return Expression.OrElse(Expression.NotEqual(serialTypeExpr, Expression.Constant(SerialTypeCodec.NullSerialType)), Expression.Equal(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
 
         // RowID Alias
         if (ordinal == rowidAliasOrdinal) return BuildRowIdPredicate(pred, rowId);
@@ -65,30 +66,74 @@ internal static class JitPredicateBuilder
             _ => throw new NotSupportedException($"Operator {pred.Operator} is not a string operator.")
         };
 
-        return Expression.Call(method, data, Expression.Constant(pred.Value.AsUtf8().ToArray()));
+        // Cache the UTF-8 bytes as a single heap array — avoids re-allocating from ReadOnlySpan on each build.
+        byte[] utf8Bytes = pred.Value.AsUtf8().ToArray();
+        return Expression.Call(method, data, Expression.Constant(utf8Bytes));
     }
 
     private static ConditionalExpression BuildComparison(PredicateExpression pred, Expression serialType, Expression data)
     {
-        var isNull = Expression.Equal(serialType, Expression.Constant(0L));
+        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
         Expression comparison = pred.Value.ValueTag switch
         {
-            TypedFilterValue.Tag.Int64 => Expression.Condition(Expression.Call(JitMethodRegistry.IsIntegral, serialType), BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareInt64, data, serialType, Expression.Constant(pred.Value.AsInt64()))), Expression.Constant(false)),
-            TypedFilterValue.Tag.Double => Expression.Condition(Expression.Call(JitMethodRegistry.IsReal, serialType), BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareDouble, data, Expression.Constant(pred.Value.AsDouble()))), Expression.Constant(false)),
-            TypedFilterValue.Tag.Utf8 => Expression.Condition(Expression.Call(JitMethodRegistry.IsText, serialType), BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.Utf8Compare, data, Expression.Constant(pred.Value.AsUtf8().ToArray()))), Expression.Constant(false)),
+            // Int64 filter: prefer IsIntegral (same-type), fall back to IsReal (cross-type)
+            TypedFilterValue.Tag.Int64 => Expression.Condition(
+                Expression.Call(JitMethodRegistry.IsIntegral, serialType),
+                BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareInt64, data, serialType, Expression.Constant(pred.Value.AsInt64()))),
+                Expression.Condition(
+                    Expression.Call(JitMethodRegistry.IsReal, serialType),
+                    BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareDouble, data, Expression.Constant((double)pred.Value.AsInt64()))),
+                    Expression.Constant(false))),
+
+            // Double filter: prefer IsReal (same-type), fall back to IsIntegral (cross-type)
+            TypedFilterValue.Tag.Double => Expression.Condition(
+                Expression.Call(JitMethodRegistry.IsReal, serialType),
+                BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareDouble, data, Expression.Constant(pred.Value.AsDouble()))),
+                Expression.Condition(
+                    Expression.Call(JitMethodRegistry.IsIntegral, serialType),
+                    BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareIntAsDouble, data, serialType, Expression.Constant(pred.Value.AsDouble()))),
+                    Expression.Constant(false))),
+
+            TypedFilterValue.Tag.Utf8 => BuildUtf8Comparison(pred, serialType, data),
             _ => Expression.Constant(false)
         };
 
         return Expression.Condition(isNull, Expression.Constant(false), comparison);
     }
 
+    private static ConditionalExpression BuildUtf8Comparison(PredicateExpression pred, Expression serialType, Expression data)
+    {
+        // Cache UTF-8 bytes once to avoid repeated Span→Array allocation.
+        byte[] utf8Bytes = pred.Value.AsUtf8().ToArray();
+        return Expression.Condition(
+            Expression.Call(JitMethodRegistry.IsText, serialType),
+            BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.Utf8Compare, data, Expression.Constant(utf8Bytes))),
+            Expression.Constant(false));
+    }
+
     private static ConditionalExpression BuildBetween(PredicateExpression pred, Expression serialType, Expression data)
     {
-        var isNull = Expression.Equal(serialType, Expression.Constant(0L));
+        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
         Expression comparison = pred.Value.ValueTag switch
         {
-            TypedFilterValue.Tag.Int64Range => Expression.Condition(Expression.Call(JitMethodRegistry.IsIntegral, serialType), BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType), pred.Value.AsInt64(), pred.Value.AsInt64High()), Expression.Constant(false)),
-            TypedFilterValue.Tag.DoubleRange => Expression.Condition(Expression.Call(JitMethodRegistry.IsReal, serialType), BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeDouble, data), pred.Value.AsDouble(), pred.Value.AsDoubleHigh()), Expression.Constant(false)),
+            // Int64Range: prefer IsIntegral, cross-type fall back to IsReal
+            TypedFilterValue.Tag.Int64Range => Expression.Condition(
+                Expression.Call(JitMethodRegistry.IsIntegral, serialType),
+                BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType), pred.Value.AsInt64(), pred.Value.AsInt64High()),
+                Expression.Condition(
+                    Expression.Call(JitMethodRegistry.IsReal, serialType),
+                    BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeDouble, data), (double)pred.Value.AsInt64(), (double)pred.Value.AsInt64High()),
+                    Expression.Constant(false))),
+
+            // DoubleRange: prefer IsReal, cross-type fall back to IsIntegral
+            TypedFilterValue.Tag.DoubleRange => Expression.Condition(
+                Expression.Call(JitMethodRegistry.IsReal, serialType),
+                BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeDouble, data), pred.Value.AsDouble(), pred.Value.AsDoubleHigh()),
+                Expression.Condition(
+                    Expression.Call(JitMethodRegistry.IsIntegral, serialType),
+                    BuildRangeCmp(Expression.Convert(Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType), typeof(double)), pred.Value.AsDouble(), pred.Value.AsDoubleHigh()),
+                    Expression.Constant(false))),
+
             _ => Expression.Constant(false)
         };
 
@@ -97,7 +142,7 @@ internal static class JitPredicateBuilder
 
     private static ConditionalExpression BuildIn(PredicateExpression pred, Expression serialType, Expression data)
     {
-        var isNull = Expression.Equal(serialType, Expression.Constant(0L));
+        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
         Expression comparison = pred.Value.ValueTag switch
         {
             TypedFilterValue.Tag.Int64Set => Expression.Condition(Expression.Call(JitMethodRegistry.IsIntegral, serialType), Expression.Call(Expression.Constant(new HashSet<long>(pred.Value.AsInt64Set())), JitMethodRegistry.HashSetInt64Contains, Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType)), Expression.Constant(false)),

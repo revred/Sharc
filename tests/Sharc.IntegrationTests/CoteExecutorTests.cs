@@ -239,6 +239,38 @@ public class CoteExecutorTests
         Assert.Contains("Dave", names);
     }
 
+    // ─── Cross-type Cote filter ─────────────────────────────────────
+
+    [Fact]
+    public void Query_CoteBetweenCrossType_IntColumnDoubleRange()
+    {
+        var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
+        {
+            TestDatabaseFactory.Execute(conn,
+                "CREATE TABLE scores (id INTEGER PRIMARY KEY, name TEXT, points INTEGER)");
+            TestDatabaseFactory.Execute(conn, "INSERT INTO scores VALUES (1, 'Alice', 10)");
+            TestDatabaseFactory.Execute(conn, "INSERT INTO scores VALUES (2, 'Bob', 25)");
+            TestDatabaseFactory.Execute(conn, "INSERT INTO scores VALUES (3, 'Carol', 30)");
+            TestDatabaseFactory.Execute(conn, "INSERT INTO scores VALUES (4, 'Dave', 50)");
+        });
+        using var db = SharcDatabase.OpenMemory(data);
+
+        // Cote materializes all rows; outer WHERE uses cross-type comparison
+        // (INTEGER column 'points' compared with double bounds via BETWEEN)
+        using var reader = db.Query(
+            "WITH all_scores AS (SELECT name, points FROM scores) " +
+            "SELECT name FROM all_scores WHERE points >= 20 AND points <= 35 ORDER BY name");
+
+        var names = new List<string>();
+        while (reader.Read())
+            names.Add(reader.GetString(0));
+
+        // Bob(25) and Carol(30) are in range [20, 35]
+        Assert.Equal(2, names.Count);
+        Assert.Equal("Bob", names[0]);
+        Assert.Equal("Carol", names[1]);
+    }
+
     // ─── Empty Cote result ─────────────────────────────────────────
 
     [Fact]

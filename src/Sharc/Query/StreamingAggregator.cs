@@ -122,7 +122,7 @@ internal sealed class StreamingAggregator
     /// <summary>
     /// Finalizes the aggregation and returns materialized result rows.
     /// </summary>
-    internal (List<QueryValue[]> rows, string[] columnNames) Finalize()
+    internal (RowSet rows, string[] columnNames) Finalize()
     {
         if (_groupOrdinals == null)
         {
@@ -130,7 +130,7 @@ internal sealed class StreamingAggregator
             return ([row], _outputColumns);
         }
 
-        var result = new List<QueryValue[]>(_groups.Count);
+        var result = new RowSet(_groups.Count);
         foreach (var (_, acc) in _groups)
         {
             var accCopy = acc; // struct copy for ref

@@ -16,14 +16,14 @@ internal sealed class PredicateNode : IFilterNode
     private readonly int _columnOrdinal;
     private readonly FilterOp _operator;
     private readonly TypedFilterValue _value;
-    private readonly int _rowidAliasOrdinal;
+    private readonly int _integerPrimaryKeyOrdinal;
 
     internal PredicateNode(int columnOrdinal, FilterOp op, TypedFilterValue value, int rowidAliasOrdinal = -1)
     {
         _columnOrdinal = columnOrdinal;
         _operator = op;
         _value = value;
-        _rowidAliasOrdinal = rowidAliasOrdinal;
+        _integerPrimaryKeyOrdinal = rowidAliasOrdinal;
     }
 
     public bool Evaluate(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes,
@@ -36,16 +36,16 @@ internal sealed class PredicateNode : IFilterNode
 
         // â”€â”€ Phase 1: Serial-type-only predicates (zero body access) â”€â”€
         if (_operator == FilterOp.IsNull)
-            return serialType == 0 && _columnOrdinal != _rowidAliasOrdinal;
+            return serialType == 0 && _columnOrdinal != _integerPrimaryKeyOrdinal;
 
         if (_operator == FilterOp.IsNotNull)
-            return serialType != 0 || _columnOrdinal == _rowidAliasOrdinal;
+            return serialType != 0 || _columnOrdinal == _integerPrimaryKeyOrdinal;
 
         // NULL columns never match any comparison (SQLite semantics)
         if (serialType == 0)
         {
             // INTEGER PRIMARY KEY alias: real value is rowid
-            if (_columnOrdinal == _rowidAliasOrdinal)
+            if (_columnOrdinal == _integerPrimaryKeyOrdinal)
                 return EvaluateRowidAlias(rowId);
             return false;
         }
@@ -84,6 +84,9 @@ internal sealed class PredicateNode : IFilterNode
         };
     }
 
+    // Cross-type coercion: when an integer column is compared against a double filter
+    // value (or vice versa), the integer is promoted to double for comparison. This
+    // matches SQLite's type affinity rules where numeric types are comparable.
     private bool EvaluateInteger(ReadOnlySpan<byte> data, long serialType)
     {
         return _operator switch
@@ -92,7 +95,7 @@ internal sealed class PredicateNode : IFilterNode
             {
                 TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) == 0,
                 TypedFilterValue.Tag.Double => (double)RawByteComparer.DecodeInt64(data, serialType) == _value.AsDouble(),
-                _ => false
+                _ => false // No typed path for this combination — defensively reject
             },
             FilterOp.Neq => _value.ValueTag switch
             {
@@ -100,16 +103,36 @@ internal sealed class PredicateNode : IFilterNode
                 TypedFilterValue.Tag.Double => (double)RawByteComparer.DecodeInt64(data, serialType) != _value.AsDouble(),
                 _ => true
             },
-            FilterOp.Lt => _value.ValueTag == TypedFilterValue.Tag.Int64 &&
-                           RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) < 0,
-            FilterOp.Lte => _value.ValueTag == TypedFilterValue.Tag.Int64 &&
-                            RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) <= 0,
-            FilterOp.Gt => _value.ValueTag == TypedFilterValue.Tag.Int64 &&
-                           RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) > 0,
-            FilterOp.Gte => _value.ValueTag == TypedFilterValue.Tag.Int64 &&
-                            RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) >= 0,
-            FilterOp.Between => _value.ValueTag == TypedFilterValue.Tag.Int64Range &&
-                                EvaluateInt64Between(data, serialType),
+            FilterOp.Lt => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) < 0,
+                TypedFilterValue.Tag.Double => RawByteComparer.CompareIntAsDouble(data, serialType, _value.AsDouble()) < 0,
+                _ => false
+            },
+            FilterOp.Lte => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) <= 0,
+                TypedFilterValue.Tag.Double => RawByteComparer.CompareIntAsDouble(data, serialType, _value.AsDouble()) <= 0,
+                _ => false
+            },
+            FilterOp.Gt => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) > 0,
+                TypedFilterValue.Tag.Double => RawByteComparer.CompareIntAsDouble(data, serialType, _value.AsDouble()) > 0,
+                _ => false
+            },
+            FilterOp.Gte => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) >= 0,
+                TypedFilterValue.Tag.Double => RawByteComparer.CompareIntAsDouble(data, serialType, _value.AsDouble()) >= 0,
+                _ => false
+            },
+            FilterOp.Between => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Int64Range => EvaluateInt64Between(data, serialType),
+                TypedFilterValue.Tag.DoubleRange => EvaluateIntAsDoubleBetween(data, serialType),
+                _ => false
+            },
             FilterOp.In => _value.ValueTag == TypedFilterValue.Tag.Int64Set &&
                            EvaluateInt64In(RawByteComparer.DecodeInt64(data, serialType)),
             FilterOp.NotIn => _value.ValueTag != TypedFilterValue.Tag.Int64Set ||
@@ -137,12 +160,36 @@ internal sealed class PredicateNode : IFilterNode
                 TypedFilterValue.Tag.Int64 => colVal != (double)_value.AsInt64(),
                 _ => true
             },
-            FilterOp.Lt => _value.ValueTag == TypedFilterValue.Tag.Double && colVal < _value.AsDouble(),
-            FilterOp.Lte => _value.ValueTag == TypedFilterValue.Tag.Double && colVal <= _value.AsDouble(),
-            FilterOp.Gt => _value.ValueTag == TypedFilterValue.Tag.Double && colVal > _value.AsDouble(),
-            FilterOp.Gte => _value.ValueTag == TypedFilterValue.Tag.Double && colVal >= _value.AsDouble(),
-            FilterOp.Between => _value.ValueTag == TypedFilterValue.Tag.DoubleRange &&
-                                colVal >= _value.AsDouble() && colVal <= _value.AsDoubleHigh(),
+            FilterOp.Lt => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Double => colVal < _value.AsDouble(),
+                TypedFilterValue.Tag.Int64 => colVal < (double)_value.AsInt64(),
+                _ => false
+            },
+            FilterOp.Lte => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Double => colVal <= _value.AsDouble(),
+                TypedFilterValue.Tag.Int64 => colVal <= (double)_value.AsInt64(),
+                _ => false
+            },
+            FilterOp.Gt => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Double => colVal > _value.AsDouble(),
+                TypedFilterValue.Tag.Int64 => colVal > (double)_value.AsInt64(),
+                _ => false
+            },
+            FilterOp.Gte => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.Double => colVal >= _value.AsDouble(),
+                TypedFilterValue.Tag.Int64 => colVal >= (double)_value.AsInt64(),
+                _ => false
+            },
+            FilterOp.Between => _value.ValueTag switch
+            {
+                TypedFilterValue.Tag.DoubleRange => colVal >= _value.AsDouble() && colVal <= _value.AsDoubleHigh(),
+                TypedFilterValue.Tag.Int64Range => colVal >= (double)_value.AsInt64() && colVal <= (double)_value.AsInt64High(),
+                _ => false
+            },
             _ => false
         };
     }
@@ -181,6 +228,12 @@ internal sealed class PredicateNode : IFilterNode
     {
         long val = RawByteComparer.DecodeInt64(data, serialType);
         return val >= _value.AsInt64() && val <= _value.AsInt64High();
+    }
+
+    private bool EvaluateIntAsDoubleBetween(ReadOnlySpan<byte> data, long serialType)
+    {
+        double val = (double)RawByteComparer.DecodeInt64(data, serialType);
+        return val >= _value.AsDouble() && val <= _value.AsDoubleHigh();
     }
 
     private bool EvaluateInt64In(long columnValue)
