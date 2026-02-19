@@ -94,7 +94,7 @@ public sealed class IndexedDbEngine
 
         return new EngineBaseResult
         {
-            Value = Math.Round(initMs + loadMs, 2),
+            Value = Math.Round((initMs + loadMs) * 1000.0, 0),
             Note = $"IDB open: {initMs:F0}ms + populate: {loadMs:F0}ms",
         };
     }

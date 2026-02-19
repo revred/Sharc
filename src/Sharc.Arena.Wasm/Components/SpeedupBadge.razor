@@ -13,7 +13,9 @@
 
     private string FormatSpeedup()
     {
-        if (Speedup >= 100) return $"{(int)Speedup}x";
+        if (double.IsInfinity(Speedup) || double.IsNaN(Speedup) || Speedup > 999_999)
+            return ">999999x";
+        if (Speedup >= 100) return $"{(long)Speedup}x";
         if (Speedup >= 10) return $"{Speedup:F0}x";
         return $"{Speedup:F1}x";
     }
