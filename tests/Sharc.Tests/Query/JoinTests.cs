@@ -143,4 +143,189 @@ public class JoinTests : IDisposable
 
         Assert.False(reader.Read());
     }
+
+    // --- RIGHT JOIN tests ---
+
+    [Fact]
+    public void RightJoin_AllMatched_EqualsInner()
+    {
+        // All orders have matching users, so RIGHT JOIN = INNER JOIN
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u RIGHT JOIN orders o ON u.id = o.user_id ORDER BY o.id");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(100.5, reader.GetDouble(1));
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(200.0, reader.GetDouble(1));
+
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader.GetString(0));
+        Assert.Equal(300.0, reader.GetDouble(1));
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void RightJoin_WithOrphanRow_EmitsNullLeft()
+    {
+        // Add an orphan order with user_id=99 (no matching user)
+        AddOrphanOrder();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u RIGHT JOIN orders o ON u.id = o.user_id ORDER BY o.id");
+
+        int count = 0;
+        bool foundOrphan = false;
+        while (reader.Read())
+        {
+            count++;
+            var amount = reader.GetDouble(1);
+            if (amount == 999.99)
+            {
+                Assert.True(reader.IsNull(0)); // u.name should be NULL
+                foundOrphan = true;
+            }
+        }
+        Assert.True(foundOrphan);
+        Assert.Equal(4, count); // 3 matched + 1 orphan
+    }
+
+    // --- Expanded coverage ---
+
+    [Fact]
+    public void InnerJoin_EmptyRightTable_ReturnsNoRows()
+    {
+        AddEmptyTable();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name FROM users u JOIN empty_table e ON u.id = e.user_id");
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void LeftJoin_EmptyRightTable_ReturnsAllLeftWithNulls()
+    {
+        AddEmptyTable();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, e.user_id FROM users u LEFT JOIN empty_table e ON u.id = e.user_id ORDER BY u.id");
+
+        int count = 0;
+        while (reader.Read())
+        {
+            Assert.True(reader.IsNull(1));
+            count++;
+        }
+        Assert.Equal(3, count);
+    }
+
+    [Fact]
+    public void InnerJoin_DuplicateKeys_ReturnsCartesian()
+    {
+        // Alice has 2 orders -> INNER JOIN returns 2 rows for Alice
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.id FROM users u JOIN orders o ON u.id = o.user_id WHERE u.name = 'Alice' ORDER BY o.id");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(10L, reader.GetInt64(1));
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(11L, reader.GetInt64(1));
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void Join_WithOrderByAndLimit_ReturnsCorrectSlice()
+    {
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id ORDER BY o.amount LIMIT 1");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(100.5, reader.GetDouble(1));
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void Join_WithLimit_ReturnsLimitedRows()
+    {
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id LIMIT 2");
+
+        int count = 0;
+        while (reader.Read()) count++;
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void CrossJoin_EmptyTable_ReturnsNoRows()
+    {
+        AddEmptyTable();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name FROM users u CROSS JOIN empty_table e");
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void Join_SelectSpecificColumns_ProjectsCorrectly()
+    {
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, u.age, o.amount FROM users u JOIN orders o ON u.id = o.user_id WHERE u.name = 'Bob'");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader.GetString(0));
+        Assert.Equal(40L, reader.GetInt64(1));
+        Assert.Equal(300.0, reader.GetDouble(2));
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void LeftJoin_WithWhereOnLeft_FiltersCorrectly()
+    {
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.age > 30 ORDER BY u.id");
+
+        // Bob (age 40) has one order
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader.GetString(0));
+        Assert.Equal(300.0, reader.GetDouble(1));
+
+        Assert.False(reader.Read());
+    }
+
+    // --- Helpers ---
+
+    private void AddOrphanOrder()
+    {
+        using var connection = new SqliteConnection($"Data Source={_dbPath}");
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "INSERT INTO orders VALUES (99, 99, 999.99)";
+        cmd.ExecuteNonQuery();
+    }
+
+    private void AddEmptyTable()
+    {
+        using var connection = new SqliteConnection($"Data Source={_dbPath}");
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "CREATE TABLE IF NOT EXISTS empty_table (id INTEGER PRIMARY KEY, user_id INTEGER)";
+        cmd.ExecuteNonQuery();
+    }
 }
