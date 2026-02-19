@@ -63,36 +63,27 @@ public class GraphTraversalBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("BFS")]
-    public (int, int) Sharc_BFS_2Hop()
+    public int Sharc_BFS_2Hop()
     {
-        try
-        {
-            long startKey = 1;
-            
-            // Hop 1
-            var hop1Targets = new HashSet<long>();
-            foreach (var edge in _graph.GetEdges(new NodeKey(startKey)))
-            {
-                hop1Targets.Add(edge.TargetKey.Value);
-            }
+        // Zero-allocation cursor: edge-only 2-hop traversal.
+        // Uses GetEdgeCursor + Reset — no GraphEdge allocation, no concept B-tree lookups.
+        using var cursor = _graph.GetEdgeCursor(new NodeKey(1));
 
-            // Hop 2
-            var hop2Count = 0;
-            foreach (var target in hop1Targets)
-            {
-                foreach (var edge in _graph.GetEdges(new NodeKey(target)))
-                {
-                    hop2Count++;
-                }
-            }
+        // Hop 1: collect unique target keys
+        var hop1Targets = new HashSet<long>();
+        while (cursor.MoveNext())
+            hop1Targets.Add(cursor.TargetKey);
 
-            return (hop1Targets.Count, hop2Count);
-        }
-        catch (Exception ex)
+        // Hop 2: count edges from each hop-1 target
+        int hop2Count = 0;
+        foreach (var target in hop1Targets)
         {
-            File.WriteAllText("benchmark_error.log", ex.ToString());
-            throw;
+            cursor.Reset(target);
+            while (cursor.MoveNext())
+                hop2Count++;
         }
+
+        return hop1Targets.Count + hop2Count;
     }
 
     [Benchmark]
