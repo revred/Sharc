@@ -12,11 +12,11 @@ If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now 
 
 *   **Latency matters:** You need sub-microsecond point lookups (392ns vs 24,011ns in SQLite).
 *   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
-*   **Context matters:** You need to traverse graphs at 13.5x the speed of SQLite recursive CTEs (Cotes in Sharc).
+*   **Context matters:** You need to traverse graphs at 31x the speed of SQLite recursive CTEs (Cotes in Sharc).
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
-The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,038 tests** across 6 test projects.
+The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,216 tests** across 6 test projects.
 
 The **Write Engine** supports:
 *   **Full CRUD**: `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`
@@ -45,7 +45,7 @@ Instead of complicated `JOIN` syntax, you can write:
 ```sql
 SELECT id |> friend |> name FROM users
 ```
-The Graph API already achieves ~13.5x faster traversal than SQLite recursive CTEs (Cotes in Sharc).
+The Graph API already achieves ~31x faster traversal than SQLite recursive CTEs (Cotes in Sharc).
 See [Sharq Reference](ParsingTsql.md).
 
 ### Can I just use regular SQL?

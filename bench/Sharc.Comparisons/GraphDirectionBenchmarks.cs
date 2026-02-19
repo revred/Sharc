@@ -50,17 +50,20 @@ public class GraphDirectionBenchmarks
         _graph?.Dispose();
     }
 
+    private static readonly TraversalPolicy IncomingPolicy = new()
+    {
+        Direction = TraversalDirection.Incoming,
+        MaxDepth = 1,
+        IncludeData = false,
+    };
+
     [Benchmark]
     [BenchmarkCategory("Incoming")]
     public int Sharc_Incoming_1Hop()
     {
-        int count = 0;
-        // Traversing Incoming edges for node 500 (mid-range)
-        foreach (var edge in _graph.GetIncomingEdges(new NodeKey(500)))
-        {
-            count++;
-        }
-        return count;
+        // Zero-allocation BFS via Traverse — replaces allocating GetIncomingEdges path.
+        var result = _graph.Traverse(new NodeKey(500), IncomingPolicy);
+        return result.Nodes.Count;
     }
 
     [Benchmark]

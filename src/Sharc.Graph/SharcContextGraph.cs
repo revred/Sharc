@@ -1,7 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-
+using System.Diagnostics;
 using Sharc.Core;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
@@ -28,6 +28,9 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     private readonly HashSet<NodeKey> _visitedCache = new();
     private readonly Queue<TraversalQueueItem> _traversalQueue = new();
     private readonly List<TraversalNode> _resultNodesCache = new();
+
+    // Two-phase BFS: collected keys from Phase 1 (edge traversal), resolved in Phase 2 (node lookup)
+    private readonly List<TraversalQueueItem> _collectedKeys = new();
 
     // Parent-pointer path tracking: O(N) instead of O(N*D) list copies
     private readonly List<PathReconstructionNode> _pathNodes = new();
@@ -77,39 +80,32 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     }
 
     /// <summary>
-    /// Disposes the graph context.
+    /// Disposes the graph context and its cached cursors.
     /// </summary>
     public void Dispose()
     {
         _outgoingCursor?.Dispose();
         _incomingCursor?.Dispose();
         _concepts.Dispose();
-        // RelationStore doesn't have Disposable cursors yet, but RelationStore itself doesn't need dispose.
-        // Actually, stores should be disposed if they hold persistent cursors.
-    }
-
-    private static void EnsureInitialized()
-    {
+        // RelationStore does not hold persistent cursors — nothing to dispose.
     }
 
     /// <inheritdoc/>
     public GraphRecord? GetNode(NodeKey key)
     {
-        EnsureInitialized();
         return _concepts.Get(key);
     }
 
     /// <inheritdoc/>
     public GraphRecord? GetNode(RecordId id)
     {
-        EnsureInitialized();
         return _concepts.Get(id.Key);
     }
 
     /// <inheritdoc/>
+    [Obsolete("Allocates per edge. Use GetEdgeCursor() for zero-alloc access or Traverse() for BFS.")]
     public IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null)
     {
-        EnsureInitialized();
         using var cursor = _relations.CreateEdgeCursor(origin, kind);
         while (cursor.MoveNext())
         {
@@ -118,9 +114,9 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     }
 
     /// <inheritdoc/>
+    [Obsolete("Allocates per edge. Use Traverse() with Direction=Incoming for zero-alloc BFS.")]
     public IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kind = null)
     {
-        EnsureInitialized();
         using var cursor = _relations.CreateIncomingEdgeCursor(target, kind);
         while (cursor.MoveNext())
         {
@@ -131,15 +127,12 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     /// <inheritdoc/>
     public IEdgeCursor GetEdgeCursor(NodeKey origin, RelationKind? kind = null)
     {
-        EnsureInitialized();
         return _relations.CreateEdgeCursor(origin, kind);
     }
 
     /// <inheritdoc/>
     public GraphResult Traverse(NodeKey startKey, TraversalPolicy policy)
     {
-        EnsureInitialized();
-
         var resultNodes = _resultNodesCache;
         resultNodes.Clear();
 
@@ -149,9 +142,16 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         var queue = _traversalQueue;
         queue.Clear();
 
+        var collectedKeys = _collectedKeys;
+        collectedKeys.Clear();
+
         bool trackPaths = policy.IncludePaths;
         var pathNodes = _pathNodes;
         pathNodes.Clear();
+
+        // Pre-size collections based on policy hints to avoid resizing
+        int capacityHint = EstimateCapacity(policy);
+        visited.EnsureCapacity(capacityHint);
 
         int startPathIndex = -1;
         if (trackPaths)
@@ -174,33 +174,42 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         var outgoingCursor = _outgoingCursor;
         var incomingCursor = _incomingCursor;
 
+        // Timeout: compute deadline once, check periodically
+        long? deadlineTicks = policy.Timeout.HasValue
+            ? Stopwatch.GetTimestamp() + (long)(policy.Timeout.Value.TotalSeconds * Stopwatch.Frequency)
+            : null;
+        int iterCount = 0;
+
+        // ── Phase 1: Edge-only BFS ──
+        // Discover reachable node set using edge cursors only.
+        // No concept lookups here — keeps page cache on the relation B-tree.
+        bool stoppedEarly = false;
         while (queue.Count > 0)
         {
-            var (currentKey, depth, pathIndex) = queue.Dequeue();
+            // Check timeout every 64 iterations to avoid Stopwatch overhead
+            if (deadlineTicks.HasValue && (++iterCount & 63) == 0
+                && Stopwatch.GetTimestamp() >= deadlineTicks.Value)
+                break;
 
-            var record = _concepts.Get(currentKey, policy.IncludeData);
-            if (record.HasValue)
-            {
-                IReadOnlyList<NodeKey>? path = trackPaths ? ReconstructPath(pathNodes, pathIndex) : null;
-                resultNodes.Add(new TraversalNode(record.Value, depth, path));
-            }
+            var item = queue.Dequeue();
+            collectedKeys.Add(item);
 
-            if (currentKey == policy.StopAtKey && visited.Count > 1) break;
+            if (item.Key == policy.StopAtKey && visited.Count > 1) { stoppedEarly = true; break; }
 
-            if (policy.MaxDepth.HasValue && depth >= policy.MaxDepth.Value) continue;
+            if (policy.MaxDepth.HasValue && item.Depth >= policy.MaxDepth.Value) continue;
 
             int fanOutCount = 0;
 
             if (outgoingCursor != null)
             {
-                outgoingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
-                ProcessCursor(outgoingCursor, false, depth, pathIndex);
+                outgoingCursor.Reset(item.Key.Value, filterKind != null ? (int)filterKind.Value : null);
+                ProcessCursor(outgoingCursor, false, item.Depth, item.PathIndex);
             }
 
             if (incomingCursor != null)
             {
-                incomingCursor.Reset(currentKey.Value, filterKind != null ? (int)filterKind.Value : null);
-                ProcessCursor(incomingCursor, true, depth, pathIndex);
+                incomingCursor.Reset(item.Key.Value, filterKind != null ? (int)filterKind.Value : null);
+                ProcessCursor(incomingCursor, true, item.Depth, item.PathIndex);
             }
 
             void ProcessCursor(IEdgeCursor cursor, bool isIncoming, int currentDepth, int currentPathIndex)
@@ -227,7 +236,53 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
             }
         }
 
+        // If stopped early (StopAtKey), also collect remaining queued nodes
+        // so they appear in results (they were discovered but not yet dequeued)
+        if (!stoppedEarly)
+        {
+            while (queue.Count > 0)
+                collectedKeys.Add(queue.Dequeue());
+        }
+
+        // ── Phase 2: Batch node lookup ──
+        // All concept B-tree lookups happen sequentially — better page cache locality.
+        int tokenBudget = policy.MaxTokens ?? int.MaxValue;
+        int tokensUsed = 0;
+        bool hasTypeFilter = policy.TargetTypeFilter.HasValue;
+        int targetType = policy.TargetTypeFilter.GetValueOrDefault();
+
+        foreach (var item in collectedKeys)
+        {
+            var record = _concepts.Get(item.Key, policy.IncludeData);
+            if (!record.HasValue) continue;
+
+            // TargetTypeFilter: skip nodes of the wrong type
+            if (hasTypeFilter && record.Value.TypeId != targetType) continue;
+
+            // MaxTokens: stop when token budget is exhausted (BFS order prioritizes closer nodes)
+            if (policy.MaxTokens.HasValue)
+            {
+                tokensUsed += record.Value.Tokens;
+                if (tokensUsed > tokenBudget) break;
+            }
+
+            IReadOnlyList<NodeKey>? path = trackPaths ? ReconstructPath(pathNodes, item.PathIndex) : null;
+            resultNodes.Add(new TraversalNode(record.Value, item.Depth, path));
+        }
+
         return new GraphResult(resultNodes);
+    }
+
+    private static int EstimateCapacity(TraversalPolicy policy)
+    {
+        if (policy.MaxDepth.HasValue && policy.MaxFanOut.HasValue)
+        {
+            int estimate = 1;
+            for (int d = 0; d < policy.MaxDepth.Value && estimate < 4096; d++)
+                estimate *= policy.MaxFanOut.Value;
+            return Math.Min(estimate, 4096);
+        }
+        return 128;
     }
 
     private static List<NodeKey> ReconstructPath(List<PathReconstructionNode> pathNodes, int index)
@@ -254,6 +309,9 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return path;
     }
 
+    // ── Obsolete support code: only used by deprecated GetEdges/GetIncomingEdges ──
+
+    [Obsolete("Only used by deprecated GetEdges/GetIncomingEdges.")]
     private string GetTypeName(int kind)
     {
         if (_typeNameCache.TryGetValue(kind, out var name)) return name;
@@ -267,6 +325,7 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return name;
     }
 
+    [Obsolete("Only used by deprecated GetEdges/GetIncomingEdges. Use cursor properties directly.")]
     private GraphEdge MapToEdge(IEdgeCursor cursor)
     {
         long originKey = cursor.OriginKey;
