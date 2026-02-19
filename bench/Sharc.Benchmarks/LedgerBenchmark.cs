@@ -3,15 +3,29 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using Sharc.Core;
 using Sharc.Core.Storage;
+using Sharc.Core.Trust;
 using Sharc.Trust;
 using Sharc;
 using System.IO;
 
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
+
 namespace Sharc.Benchmarks
 {
     [MemoryDiagnoser]
+    [Config(typeof(Config))]
     public class LedgerBenchmark
     {
+        private class Config : ManualConfig
+        {
+            public Config()
+            {
+                AddJob(Job.Default.WithToolchain(InProcessNoEmitToolchain.Instance));
+            }
+        }
+
         private string _dbPath;
         private SharcDatabase _db;
         private LedgerManager _ledger;
@@ -45,6 +59,23 @@ namespace Sharc.Benchmarks
             _db = SharcDatabase.Open(_dbPath, new SharcOpenOptions { Writable = true });
             _ledger = new LedgerManager(_db);
             _signer = new SharcSigner("bench-agent");
+
+            // Register Agent
+            var registry = new AgentRegistry(_db);
+            var unsignedInfo = new AgentInfo(
+                "bench-agent",
+                AgentClass.User,
+                _signer.GetPublicKey(),
+                1_000_000,
+                "*", "*",
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                DateTimeOffset.UtcNow.AddYears(1).ToUnixTimeSeconds(),
+                "", false, Array.Empty<byte>());
+            
+            var verifyBuf = AgentRegistry.GetVerificationBuffer(unsignedInfo);
+            var sig = _signer.Sign(verifyBuf);
+            var agentInfo = unsignedInfo with { Signature = sig };
+            registry.RegisterAgent(agentInfo);
 
             // Seed some data
             using var tx = _db.BeginTransaction();

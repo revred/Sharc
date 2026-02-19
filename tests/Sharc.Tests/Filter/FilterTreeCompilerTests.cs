@@ -214,4 +214,199 @@ public sealed class FilterTreeCompilerTests
             tier1.Evaluate(payload, serialTypes, 2, 1),
             tier2.Evaluate(payload, serialTypes, 2, 1));
     }
+
+    // ─── Cross-type: INTEGER column vs Double filter (Tier 1 + Tier 2 parity) ──
+
+    [Theory]
+    [InlineData(42, 42.0, true, true, false, true, false, true)]   // col==filter
+    [InlineData(42, 43.0, false, false, true, true, false, false)] // col < filter
+    [InlineData(42, 41.0, false, false, false, false, true, true)] // col > filter
+    public void CrossType_IntColumnDoubleFilter_AllOps(
+        long colVal, double filterVal,
+        bool expectEq, bool expectNeq_IsFalse, bool expectLt, bool expectLte, bool expectGt, bool expectGte)
+    {
+        var columns = MakeTypedColumns(("val", "INTEGER"));
+
+        // Encode column value as a 1-byte SQLite integer (serial type 1)
+        // Payload: [headerSize=2, serialType=1, bodyByte]
+        byte[] payload = [2, 1, (byte)colVal];
+        long[] serialTypes = [1];
+
+        // --- Eq ---
+        var filter = FilterStar.Column("val").Eq(filterVal);
+        var t1 = FilterTreeCompiler.Compile(filter, columns);
+        var t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectEq, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Neq ---
+        filter = FilterStar.Column("val").Neq(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(!expectNeq_IsFalse, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Lt ---
+        filter = FilterStar.Column("val").Lt(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectLt, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Lte ---
+        filter = FilterStar.Column("val").Lte(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectLte, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Gt ---
+        filter = FilterStar.Column("val").Gt(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectGt, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Gte ---
+        filter = FilterStar.Column("val").Gte(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectGte, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+    }
+
+    [Fact]
+    public void CrossType_IntColumnDoubleBetween_Tier1AndTier2Match()
+    {
+        var columns = MakeTypedColumns(("val", "INTEGER"));
+
+        // val=30 → Between(25.0, 35.0) should be true
+        byte[] payloadIn = [2, 1, 30];
+        // val=20 → Between(25.0, 35.0) should be false
+        byte[] payloadOut = [2, 1, 20];
+        long[] serialTypes = [1];
+
+        var filter = FilterStar.Column("val").Between(25.0, 35.0);
+        var t1 = FilterTreeCompiler.Compile(filter, columns);
+        var t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+
+        Assert.True(t1.Evaluate(payloadIn, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payloadIn, serialTypes, 2, 1),
+                     t2.Evaluate(payloadIn, serialTypes, 2, 1));
+
+        Assert.False(t1.Evaluate(payloadOut, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payloadOut, serialTypes, 2, 1),
+                     t2.Evaluate(payloadOut, serialTypes, 2, 1));
+    }
+
+    // ─── Cross-type: REAL column vs Int64 filter (Tier 1 + Tier 2 parity) ──
+
+    [Theory]
+    [InlineData(42.0, 42, true, true, false, true, false, true)]   // col==filter
+    [InlineData(41.5, 42, false, false, true, true, false, false)] // col < filter
+    [InlineData(42.5, 42, false, false, false, false, true, true)] // col > filter
+    public void CrossType_RealColumnIntFilter_AllOps(
+        double colVal, long filterVal,
+        bool expectEq, bool expectNeq_IsFalse, bool expectLt, bool expectLte, bool expectGt, bool expectGte)
+    {
+        var columns = MakeTypedColumns(("val", "REAL"));
+
+        // Encode as 8-byte big-endian double (serial type 7)
+        // Payload: [headerSize=2, serialType=7, 8 bytes of double]
+        byte[] payload = new byte[10];
+        payload[0] = 2; // header size
+        payload[1] = 7; // serial type REAL
+        BitConverter.TryWriteBytes(payload.AsSpan(2), colVal);
+        if (BitConverter.IsLittleEndian)
+            Array.Reverse(payload, 2, 8);
+        long[] serialTypes = [7];
+
+        // --- Eq ---
+        var filter = FilterStar.Column("val").Eq(filterVal);
+        var t1 = FilterTreeCompiler.Compile(filter, columns);
+        var t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectEq, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Neq ---
+        filter = FilterStar.Column("val").Neq(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(!expectNeq_IsFalse, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Lt ---
+        filter = FilterStar.Column("val").Lt(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectLt, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Lte ---
+        filter = FilterStar.Column("val").Lte(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectLte, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Gt ---
+        filter = FilterStar.Column("val").Gt(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectGt, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+
+        // --- Gte ---
+        filter = FilterStar.Column("val").Gte(filterVal);
+        t1 = FilterTreeCompiler.Compile(filter, columns);
+        t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+        Assert.Equal(expectGte, t1.Evaluate(payload, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payload, serialTypes, 2, 1),
+                     t2.Evaluate(payload, serialTypes, 2, 1));
+    }
+
+    [Fact]
+    public void CrossType_RealColumnIntBetween_Tier1AndTier2Match()
+    {
+        var columns = MakeTypedColumns(("val", "REAL"));
+
+        // val=30.5 → Between(25, 35) should be true
+        byte[] payloadIn = new byte[10];
+        payloadIn[0] = 2;
+        payloadIn[1] = 7;
+        BitConverter.TryWriteBytes(payloadIn.AsSpan(2), 30.5);
+        if (BitConverter.IsLittleEndian) Array.Reverse(payloadIn, 2, 8);
+
+        // val=20.0 → Between(25, 35) should be false
+        byte[] payloadOut = new byte[10];
+        payloadOut[0] = 2;
+        payloadOut[1] = 7;
+        BitConverter.TryWriteBytes(payloadOut.AsSpan(2), 20.0);
+        if (BitConverter.IsLittleEndian) Array.Reverse(payloadOut, 2, 8);
+
+        long[] serialTypes = [7];
+
+        var filter = FilterStar.Column("val").Between(25, 35);
+        var t1 = FilterTreeCompiler.Compile(filter, columns);
+        var t2 = FilterTreeCompiler.CompileBaked(filter, columns);
+
+        Assert.True(t1.Evaluate(payloadIn, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payloadIn, serialTypes, 2, 1),
+                     t2.Evaluate(payloadIn, serialTypes, 2, 1));
+
+        Assert.False(t1.Evaluate(payloadOut, serialTypes, 2, 1));
+        Assert.Equal(t1.Evaluate(payloadOut, serialTypes, 2, 1),
+                     t2.Evaluate(payloadOut, serialTypes, 2, 1));
+    }
 }

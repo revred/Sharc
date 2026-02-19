@@ -43,8 +43,13 @@ internal static class QueryPostProcessor
             return StreamingAggregateProcessor.Apply(source, intent, needsSort, needsLimit);
         }
 
+        // Fuse distinct into materialization when possible: reuse arrays
+        // of duplicate rows (spare-array pattern) instead of allocating all
+        // rows and then discarding duplicates in a separate pass.
+        bool fuseDistinct = needsDistinct && !needsAggregate;
+
         // Materialize all rows from the source reader into unboxed QueryValue arrays
-        var (rows, columnNames) = Materialize(source);
+        var (rows, columnNames) = Materialize(source, checkDistinct: fuseDistinct);
         source.Dispose();
 
         // Pipeline: Aggregate+GroupBy → Distinct → Sort → Limit/Offset (SQL semantics)
@@ -57,7 +62,8 @@ internal static class QueryPostProcessor
                 intent.Columns);
         }
 
-        if (needsDistinct)
+        // Skip distinct if already handled during materialization
+        if (needsDistinct && !fuseDistinct)
             rows = SetOperationProcessor.ApplyDistinct(rows, columnNames.Length);
 
         if (needsSort)
@@ -71,27 +77,56 @@ internal static class QueryPostProcessor
 
     // ─── Materialization ──────────────────────────────────────────
 
-    internal static MaterializedResultSet Materialize(SharcDataReader reader)
+    internal static MaterializedResultSet Materialize(SharcDataReader reader, bool checkDistinct = false)
     {
         int fieldCount = reader.FieldCount;
         var columnNames = reader.GetColumnNames();
 
-        var rows = new List<QueryValue[]>();
+        var rows = new RowSet();
+        var dedup = checkDistinct ? new RowDeduplicator(fieldCount) : null;
+
         while (reader.Read())
         {
-            var row = new QueryValue[fieldCount];
+            var row = dedup?.Spare ?? new QueryValue[fieldCount];
+            if (dedup != null) dedup.Spare = null;
             for (int i = 0; i < fieldCount; i++)
                 row[i] = QueryValueOps.MaterializeColumn(reader, i);
+
+            if (dedup != null && !dedup.TryAdd(row))
+                continue;
             rows.Add(row);
         }
 
         return new MaterializedResultSet(rows, columnNames);
     }
 
+    /// <summary>
+    /// Tracks unique rows during materialization using structural equality.
+    /// Recycles arrays of duplicate rows via <see cref="Spare"/>.
+    /// </summary>
+    private sealed class RowDeduplicator
+    {
+        private readonly HashSet<QueryValue[]> _seen;
+        public QueryValue[]? Spare;
+
+        public RowDeduplicator(int columnCount)
+        {
+            _seen = new HashSet<QueryValue[]>(new QueryValueOps.QvRowEqualityComparer(columnCount));
+        }
+
+        /// <summary>Returns true if the row is unique. On false, sets <see cref="Spare"/>.</summary>
+        public bool TryAdd(QueryValue[] row)
+        {
+            if (_seen.Add(row)) return true;
+            Spare = row;
+            return false;
+        }
+    }
+
     // ─── ORDER BY ─────────────────────────────────────────────────
 
     internal static void ApplyOrderBy(
-        List<QueryValue[]> rows,
+        RowSet rows,
         IReadOnlyList<OrderIntent> orderBy,
         string[] columnNames)
     {
@@ -121,8 +156,8 @@ internal static class QueryPostProcessor
 
     // ─── LIMIT / OFFSET ──────────────────────────────────────────
 
-    internal static List<QueryValue[]> ApplyLimitOffset(
-        List<QueryValue[]> rows,
+    internal static RowSet ApplyLimitOffset(
+        RowSet rows,
         long? limit,
         long? offset)
     {

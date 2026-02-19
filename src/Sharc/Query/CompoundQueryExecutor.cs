@@ -14,11 +14,17 @@ internal static class CompoundQueryExecutor
 {
     /// <summary>
     /// Executes a <see cref="QueryPlan"/> that is compound and/or has Cotes.
+    /// Prefers lazy Cote resolution: inlines simple Cote references as direct table
+    /// intents so streaming paths (concat, TopN, index-based set ops) remain available.
+    /// Falls back to full materialization only when Cotes carry pre-materialized data
+    /// (e.g. filtered registered views) or when inline resolution isn't possible.
+    /// Resolved intents are cached on the QueryPlan for zero-overhead repeat calls.
     /// </summary>
     internal static SharcDataReader Execute(
         SharcDatabase db,
         QueryPlan plan,
-        IReadOnlyDictionary<string, object>? parameters)
+        IReadOnlyDictionary<string, object>? parameters,
+        CoteMap? preMaterialized = null)
     {
         // ─── Lazy Cote: resolve references into real table intents ────
         // Instead of materializing all Cote rows upfront, inline simple Cotes
@@ -26,7 +32,7 @@ internal static class CompoundQueryExecutor
         // Resolved intents are cached on the QueryPlan so the same object reference
         // is reused across calls — this is critical for CreateReaderFromIntent's
         // CachedReaderInfo cache (keyed by QueryIntent reference equality).
-        if (plan.HasCotes)
+        if (plan.HasCotes && preMaterialized == null)
         {
             // Fast path: reuse previously resolved intents (reader cache will hit)
             if (!plan.IsCompound && plan.ResolvedSimple != null)
@@ -56,18 +62,37 @@ internal static class CompoundQueryExecutor
         }
 
         // ─── Fallback: materialize Cotes for complex cases ────────────
-        Dictionary<string, MaterializedResultSet>? coteResults = null;
+        CoteMap? coteResults = preMaterialized;
         if (plan.HasCotes)
-            coteResults = CoteExecutor.MaterializeCotes(db, plan.Cotes!, parameters);
+        {
+            // Skip Cotes already in preMaterialized — avoids redundant full-table scans
+            // for registered views whose filtered data was pre-materialized.
+            var coteMaterialized = CoteExecutor.MaterializeCotes(
+                db, plan.Cotes!, parameters, skip: preMaterialized);
+            if (coteResults != null)
+            {
+                // Merge: pre-materialized registered views take priority
+                foreach (var kvp in coteMaterialized)
+                    coteResults[kvp.Key] = kvp.Value;
+            }
+            else
+            {
+                coteResults = coteMaterialized;
+            }
+        }
 
         return ExecuteWithCotes(db, plan, parameters, coteResults);
     }
 
+    /// <summary>
+    /// Executes a query plan with pre-materialized Cote (CTE) results available.
+    /// Routes to compound (UNION/INTERSECT/EXCEPT) or simple execution based on the plan shape.
+    /// </summary>
     internal static SharcDataReader ExecuteWithCotes(
         SharcDatabase db,
         QueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, MaterializedResultSet>? coteResults)
+        CoteMap? coteResults)
     {
         if (plan.IsCompound)
         {
@@ -130,9 +155,12 @@ internal static class CompoundQueryExecutor
 
     /// <summary>
     /// Returns true when a simple Cote query can be resolved to a direct cursor read.
+    /// Rejects outer queries with JOINs — qualified column references (e.g., viewName.col)
+    /// cannot be remapped to the resolved table name without a full rewrite pass.
     /// </summary>
     private static bool CanResolveCoteSimple(QueryIntent outer, Dictionary<string, QueryPlan> coteMap)
     {
+        if (outer.HasJoins) return false; // JOINs require materialization (qualified column refs)
         if (!coteMap.TryGetValue(outer.TableName, out var cotePlan)) return false;
         return IsCoteSimpleTableScan(cotePlan, coteMap);
     }
@@ -189,6 +217,9 @@ internal static class CompoundQueryExecutor
     /// <summary>
     /// If the intent references a Cote, returns a new intent targeting the real table
     /// with the Cote filter and outer filter merged via AND.
+    /// ORDER BY columns not already in the SELECT list are appended so the reader
+    /// can sort by them (the materialization path exposes all Cote columns; the
+    /// lazy path must do the same for ORDER BY references).
     /// </summary>
     private static QueryIntent ResolveSingleIntent(QueryIntent intent, Dictionary<string, QueryPlan> coteMap)
     {
@@ -198,10 +229,12 @@ internal static class CompoundQueryExecutor
         // Guaranteed to be simple by CanResolveCoteSimple check
         var coteQuery = cotePlan.Simple!;
 
+        var columns = MergeColumnsWithOrderBy(intent.Columns, intent.OrderBy, coteQuery.Columns);
+
         return new QueryIntent
         {
             TableName = coteQuery.TableName,
-            Columns = intent.Columns ?? coteQuery.Columns,
+            Columns = columns,
             Filter = MergeFilters(coteQuery.Filter, intent.Filter),
             OrderBy = intent.OrderBy,
             Limit = intent.Limit,
@@ -211,6 +244,61 @@ internal static class CompoundQueryExecutor
             GroupBy = intent.GroupBy,
             HavingFilter = intent.HavingFilter,
         };
+    }
+
+    /// <summary>
+    /// Ensures ORDER BY columns are present in the resolved column list.
+    /// If the outer SELECT list omits a column that ORDER BY references (and
+    /// the column exists in the Cote's column set), appends it so the reader
+    /// has access during sorting.
+    /// </summary>
+    private static IReadOnlyList<string>? MergeColumnsWithOrderBy(
+        IReadOnlyList<string>? outerColumns,
+        IReadOnlyList<OrderIntent>? orderBy,
+        IReadOnlyList<string>? coteColumns)
+    {
+        // SELECT * — all columns available, no merging needed
+        if (outerColumns == null)
+            return coteColumns;
+
+        // No ORDER BY — use outer columns as-is
+        if (orderBy is not { Count: > 0 })
+            return outerColumns;
+
+        // Build set of columns already in the outer SELECT (case-insensitive)
+        var existing = new HashSet<string>(outerColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Build set of Cote columns for validation
+        HashSet<string>? coteSet = null;
+        if (coteColumns is { Count: > 0 })
+        {
+            coteSet = new HashSet<string>(coteColumns, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Find ORDER BY columns missing from the outer SELECT
+        List<string>? extras = null;
+        for (int i = 0; i < orderBy.Count; i++)
+        {
+            var col = orderBy[i].ColumnName;
+            if (!existing.Contains(col) && (coteSet == null || coteSet.Contains(col)))
+            {
+                extras ??= [];
+                extras.Add(col);
+                existing.Add(col); // Prevent duplicates
+            }
+        }
+
+        if (extras == null)
+            return outerColumns;
+
+        // Append extra ORDER BY columns after the SELECT columns
+        var merged = new string[outerColumns.Count + extras.Count];
+        for (int i = 0; i < outerColumns.Count; i++)
+            merged[i] = outerColumns[i];
+        for (int i = 0; i < extras.Count; i++)
+            merged[outerColumns.Count + i] = extras[i];
+
+        return merged;
     }
 
     /// <summary>
@@ -285,7 +373,7 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         CompoundQueryPlan plan,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, MaterializedResultSet>? coteResults)
+        CoteMap? coteResults)
     {
         // Streaming path: UNION/INTERSECT/EXCEPT with two simple sides, no Cote references.
         // Avoids full materialization of both sides — reads directly from B-tree cursors.
@@ -305,7 +393,7 @@ internal static class CompoundQueryExecutor
         // Materialized path: complex compounds, Cote references, or UNION ALL.
         var (leftRows, leftColumns) = ExecuteAndMaterialize(db, plan.Left, parameters, coteResults);
 
-        List<QueryValue[]> rightRows;
+        RowSet rightRows;
         if (plan.RightCompound != null)
         {
             (rightRows, _) = ExecuteCompoundCore(db, plan.RightCompound, parameters, coteResults);
@@ -339,7 +427,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamSetOp(
         CompoundQueryPlan plan,
-        Dictionary<string, MaterializedResultSet>? coteResults)
+        CoteMap? coteResults)
     {
         if (plan.Operator == CompoundOperator.UnionAll) return false;
         if (plan.RightCompound != null) return false;
@@ -382,7 +470,7 @@ internal static class CompoundQueryExecutor
     /// </summary>
     private static bool CanStreamChainedUnionAll(
         CompoundQueryPlan plan,
-        Dictionary<string, MaterializedResultSet>? coteResults)
+        CoteMap? coteResults)
     {
         var current = plan;
         while (current != null)
@@ -522,11 +610,11 @@ internal static class CompoundQueryExecutor
         SharcDatabase db,
         QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters,
-        Dictionary<string, MaterializedResultSet>? coteResults)
+        CoteMap? coteResults)
     {
         if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
         {
-            var rows = new List<QueryValue[]>(coteData.Rows);
+            var rows = new RowSet(coteData.Rows);
             var columnNames = coteData.Columns;
 
             bool needsAggregate = intent.HasAggregates;
@@ -559,6 +647,11 @@ internal static class CompoundQueryExecutor
         return QueryPostProcessor.Materialize(reader);
     }
 
+    /// <summary>
+    /// Executes a single (non-compound) query intent against the database.
+    /// Delegates to <see cref="Execution.JoinExecutor"/> if the intent has JOINs,
+    /// otherwise creates a reader directly and applies post-processing (ORDER BY, LIMIT, etc.).
+    /// </summary>
     internal static SharcDataReader ExecuteIntent(
         SharcDatabase db,
         QueryIntent intent,

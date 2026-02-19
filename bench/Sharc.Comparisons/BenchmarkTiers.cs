@@ -46,7 +46,7 @@ internal static class BenchmarkTiers
         "*CoreBenchmarks.*SequentialScan*",
     ];
 
-    // ── Mini: ~12 benchmarks, ~4 min ──
+    // ── Mini: ~14 benchmarks, ~4 min ──
     private static readonly string[] Mini =
     [
         "*CoreBenchmarks.*EngineLoad*",
@@ -58,10 +58,12 @@ internal static class BenchmarkTiers
         "*SharQlParser*Parse_Simple*",
         "*SharQlParser*Parse_Medium*",
         "*JoinEfficiencyBenchmarks*",
+        "*ViewBenchmarks.DirectTable*",
+        "*ViewBenchmarks.RegisteredView*",
     ];
 
-    // ── Standard: ~38 benchmarks, ~12 min ──
-    // All core + graph scan + graph seek + write benchmarks
+    // ── Standard: ~50 benchmarks, ~15 min ──
+    // All core + graph scan + graph seek + write + view benchmarks
     private static readonly string[] Standard =
     [
         "*CoreBenchmarks.*EngineLoad*",
@@ -76,6 +78,7 @@ internal static class BenchmarkTiers
         "*GraphSeekBenchmarks*",
         "*WriteBenchmarks*",
         "*SharQlParser*",
+        "*ViewBenchmarks*",
     ];
 
     // Mega/Full: null (no filter) — runs everything

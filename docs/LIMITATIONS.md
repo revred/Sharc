@@ -14,13 +14,13 @@ This document summarizes what is **missing**, **experimental**, or **intentional
 ## 2. Querying Capabilities
 *   **Status**: `Sharq` parser + `JIT` filter + streaming query pipeline.
 *   **Supported (via Query API)**:
-    *   `SELECT`, `WHERE`, `ORDER BY`, `LIMIT`, `OFFSET`
+    *   `SELECT`, `WHERE`, `JOIN` (INNER/LEFT/CROSS), `ORDER BY`, `LIMIT`, `OFFSET`
     *   `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
     *   `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`
     *   Common Table Expressions (`WITH ... AS`)
     *   Parameterized queries (`$param`)
 *   **Missing Features**:
-    *   **No SQL JOINs**: Standard `JOIN` syntax is not supported. Use `UNION`/Cote for multi-table workflows or the Graph API for relationship traversal.
+    *   **Limited JOINs**: `INNER JOIN`, `LEFT JOIN`, and `CROSS JOIN` are supported via hash join. `RIGHT JOIN` and `FULL OUTER JOIN` are not yet supported.
     *   **No Virtual Tables**: `FTS5`, `R*Tree`, `json_each` are not supported.
     *   **No CASE execution**: `CASE` expressions are parsed but not yet executable.
     *   **No Window Functions**: `OVER`, `PARTITION BY` are parsed but not yet executable.
