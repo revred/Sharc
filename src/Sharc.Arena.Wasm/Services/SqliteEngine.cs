@@ -72,7 +72,7 @@ public sealed class SqliteEngine : IDisposable
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds * 1000.0, 1),
             Allocation = $"{allocKb:F1} KB",
             Note = "Microsoft.Data.Sqlite — in-process P/Invoke",
         };

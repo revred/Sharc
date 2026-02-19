@@ -61,6 +61,9 @@ public sealed class SharcEngine : IDisposable
         // For the arena, we re-time just the OpenMemory() call.
         if (_dbBytes is null) return new EngineBaseResult { Value = 0, Note = "No data" };
 
+        // Dispose graph FIRST — it shares _db's BTreeReader
+        _graph?.Dispose();
+        _graph = null;
         _db?.Dispose();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
@@ -72,9 +75,13 @@ public sealed class SharcEngine : IDisposable
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
         var allocKb = (allocAfter - allocBefore) / 1024.0;
 
+        // Re-initialize graph with the new BTreeReader
+        _graph = new SharcContextGraph(_db.BTreeReader, new NativeSchemaAdapter());
+        _graph.Initialize();
+
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 3),
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 1),
             Allocation = $"{allocKb:F1} KB",
             Note = "In-process \u2014 no WASM download",
         };
