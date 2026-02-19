@@ -419,14 +419,17 @@ else
                 {
                     var scale = GetScaleForSlide(slide);
                     IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
+                    Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] Running {slide.Id} (scale={scale:F3}, live={_isLive})");
+                    var slideSw = Stopwatch.StartNew();
                     var data = await engine.RunSlideAsync(slide, scale, token);
+                    Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] {slide.Id} done in {slideSw.ElapsedMilliseconds}ms");
 
                     _results[slide.Id] = data;
                     _doneSlides.Add(slide.Id);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.Message}");
+                    Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.GetType().Name}: {ex.Message}");
                     _doneSlides.Add(slide.Id);
                 }
 
