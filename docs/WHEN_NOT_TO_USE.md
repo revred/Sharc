@@ -35,7 +35,7 @@ Sharc is a row-store. It reads row-by-row. If you need to scan 10GB of data to c
 
 | Capability | Why Sharc Wins |
 | :--- | :--- |
-| **Graph Traversal** | `node |> edge |> target` syntax is **13.5x faster** than SQLite recursive CTEs. |
+| **Graph Traversal** | Two-phase BFS with zero-alloc cursors is **31x faster** than SQLite recursive CTEs. |
 | **Point Lookups** | **392ns** vs 24,011ns (61x faster). If you do thousands of lookups per request, Sharc is the only choice. |
 | **Agent Context** | Precision retrieval allows you to fit **100% relevant context** into small token windows. |
 | **Trust & Audit** | Built-in cryptographic ledger (`_sharc_ledger`) proves *who* wrote *what*. |

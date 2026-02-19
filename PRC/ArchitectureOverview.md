@@ -274,7 +274,10 @@ new SharcOpenOptions
 
 - `Sharc.Graph` layers concept/relation graph model over B-tree storage
 - `ConceptStore` and `RelationStore` with O(log N) index seeks
-- `SeekFirst(key)` on `IndexBTreeCursor` for graph traversal (12.5x faster than SQLite)
+- Two-phase BFS in `Traverse()`: edge-only discovery then batch node lookup (31x faster than SQLite)
+- Zero-allocation `IEdgeCursor` with `GetEdgeCursor()` + `Reset()` for multi-hop traversal
+- `TraversalPolicy` enforcement: TargetTypeFilter, MaxTokens, Timeout, StopAtKey, IncludePaths
+- `GetEdges()`/`GetIncomingEdges()` marked `[Obsolete]` in favor of cursor/Traverse APIs
 - Schema adapter resolves table root pages dynamically
 
 ### Write Engine (Phase 3 — IN PROGRESS)
@@ -299,4 +302,4 @@ new SharcOpenOptions
 
 ### Current Test Status
 
-**2,038 tests passing** across 6 projects (unit + integration + query + graph + index + context).
+**2,216 tests passing** across 6 projects (unit + integration + query + graph + index + context).

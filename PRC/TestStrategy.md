@@ -103,7 +103,7 @@ Examples:
 
 ## 5. CI Requirements
 
-- All unit tests must pass on every commit (currently 2,038 tests across 6 projects)
+- All unit tests must pass on every commit (currently 2,216 tests across 6 projects)
 - Integration tests run on PR merge
 - Benchmarks run nightly, results tracked
 - Code coverage target: 90%+ for Sharc.Core

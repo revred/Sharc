@@ -199,10 +199,10 @@ sharc/
 │   ├── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
 │   └── Sharc.Scene/                   ← Trust Playground (agent simulation & visualization)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (1,229 tests: core + trust + write + crypto + GUID)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (293 tests)
-│   ├── Sharc.Query.Tests/             ← Query pipeline tests (425 tests)
-│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (55 tests)
+│   ├── Sharc.Tests/                   ← Unit tests (1,321 tests: core + trust + write + crypto + GUID)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests (353 tests)
+│   ├── Sharc.Query.Tests/             ← Query pipeline tests (446 tests)
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (60 tests)
 │   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
 │   └── Sharc.Index.Tests/             ← Index CLI tests (22 tests)
 ├── bench/
@@ -215,9 +215,9 @@ sharc/
 
 ## Current Status
 
-**2,038 tests passing** across 6 test projects (unit + integration + query + graph + index + context).
+**2,216 tests passing** across 6 test projects (unit + integration + query + graph + index + context).
 
-All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage (SeekFirst O(log N)), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (INSERT with B-tree splits, ACID transactions), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring). See README.md for benchmark results.
+All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (INSERT/UPDATE/DELETE with B-tree splits, ACID transactions), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring). See README.md for benchmark results.
 
 ## What NOT To Do
 
