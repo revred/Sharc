@@ -3,7 +3,7 @@
 Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 
 > BenchmarkDotNet v0.15.8 | .NET 10.0.2 | Windows 11 | Intel i7-11800H (8C/16T)
-> All numbers are **measured**, not estimated. Last run: February 18, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
+> All numbers are **measured**, not estimated. Last run: February 19, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
 
 ---
 
@@ -41,9 +41,9 @@ Sharc's built-in graph layer (`Sharc.Graph`) maps concept/relation tables to a t
 | Edge Scan (Pushdown) | **561 us** | 2,529 us | **4.5x** | **736 B** | **696 B** |
 | Incoming Edge Scan | **1.75 us** | 27.65 us | **15.8x** | 2,968 B | 728 B |
 | Bidirectional BFS | **23.9 us** | 34.9 us | **1.4x** | 10,900 B | 2,808 B |
-| 2-Hop BFS Traversal | **6.04 us** | 81.56 us | **13.5x** | 10,150 B | 2,740 B |
+| 2-Hop BFS Traversal | **2.60 us** | 81.55 us | **31x** | 928 B | 2,808 B |
 
-> **Graph seeks are the sweet spot:** 14.5x-41.4x faster. BFS traversal achieves 13.5x through `SeekFirst(key)` -- O(log N) binary search on the index B-tree.
+> **Graph seeks are the sweet spot:** 14.5x-41.4x faster. BFS traversal achieves **31x** through zero-allocation cursor BFS with edge-only 2-hop traversal and cursor Reset() — 928 B total allocation.
 
 ---
 
@@ -234,7 +234,7 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | B-tree point lookup | **7-61x faster** | Baseline |
 | Single UPDATE | **39x faster** | Baseline |
 | Single DELETE | **7x faster** | Baseline |
-| Graph 2-hop BFS | **13.5x faster** | Baseline |
+| Graph 2-hop BFS | **31x faster** | Baseline |
 | Encryption | **AES-256-GCM** (Argon2id KDF) | Via SQLCipher |
 | Agent Trust Layer | **Yes** -- ECDSA attestation, hash-chain ledger | No |
 | GC pressure | **0 B per-row** | Allocates per call |

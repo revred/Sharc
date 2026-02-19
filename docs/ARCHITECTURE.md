@@ -60,7 +60,7 @@ Sharc eliminates the "General Purpose Tax" of SQLite:
 | **JIT Filtering** | `FilterStarCompiler` emits dynamic IL delegates for predicates, beating interpreted bytecode. |
 | **Zero Allocation** | `RecordDecoder` uses `ref struct` and `Span<T>` to read directly from page buffers. |
 | **O(1) Column Access** | `ComputeColumnOffsets()` precomputes all column byte offsets once per row in O(K), then each column access is O(1) via precomputed offset — eliminates O(K²) per-row overhead. |
-| **Graph Indexing** | `RelationStore` uses O(log N) B-tree seeks instead of recursive SQL joins (13.5x speedup). |
+| **Graph Indexing** | `RelationStore` uses O(log N) B-tree seeks instead of recursive SQL joins. Two-phase BFS + zero-alloc cursor achieves 31x speedup. |
 
 ## Key Design Decisions
 
@@ -80,7 +80,7 @@ src/Sharc.Query/              Sharq Parser & JIT Compiler
 src/Sharc.Graph/              Graph Logic & Stores
 src/Sharc.Graph.Surface/      Graph Interfaces
 src/Sharc.Crypto/             Encryption
-tests/                        2,000+ Unit & Integration Tests
+tests/                        2,216 Unit & Integration Tests
 bench/                        BenchmarkDotNet Suite
 tools/                        CLI & Context Tools
 ```

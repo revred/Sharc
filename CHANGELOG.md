@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Graph Storage (Sharc.Graph)
 - **ConceptStore** and **RelationStore** with B-tree backing
 - **SeekFirst** O(log N) cursor for graph traversal
-- **2-hop BFS** in 6 us (13.5x faster than SQLite-based traversal)
+- **2-hop BFS** in 2.6 us (31x faster than SQLite-based traversal via zero-alloc cursor BFS)
 - **Node seek** in 1,475 ns (14.5x faster)
 
 ### Trust Layer
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Governance** — configurable trust policies
 
 ### Infrastructure
-- **2,038 tests** across 6 test projects (unit, integration, query, graph, index, context)
+- **2,216 tests** across 6 test projects (unit, integration, query, graph, index, context)
 - **Live Arena** — Blazor WASM benchmark app at [revred.github.io/Sharc](https://revred.github.io/Sharc/)
 - **BenchmarkDotNet suite** — Sharc vs SQLite comparisons
 - **MCP Context Server** — Model Context Protocol integration

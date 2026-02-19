@@ -31,12 +31,16 @@ public interface IContextGraph
 
     /// <summary>
     /// Retrieves edges originating from the specified node.
+    /// Allocates a <see cref="GraphEdge"/> per row — prefer <see cref="GetEdgeCursor"/> or <see cref="Traverse"/> instead.
     /// </summary>
+    [Obsolete("Allocates per edge. Use GetEdgeCursor() for zero-alloc access or Traverse() for BFS.")]
     IEnumerable<GraphEdge> GetEdges(NodeKey origin, RelationKind? kind = null);
 
     /// <summary>
     /// Retrieves edges targeting the specified node (Incoming).
+    /// Allocates a <see cref="GraphEdge"/> per row — prefer <see cref="Traverse"/> with Direction=Incoming instead.
     /// </summary>
+    [Obsolete("Allocates per edge. Use Traverse() with Direction=Incoming for zero-alloc BFS.")]
     IEnumerable<GraphEdge> GetIncomingEdges(NodeKey target, RelationKind? kind = null);
 
     /// <summary>

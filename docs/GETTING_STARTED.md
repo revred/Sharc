@@ -135,25 +135,33 @@ ledger.Append(payload, signer);
 
 ## Pattern 8: Graph Traversal
 
-Traverse relationships with the `Sharc.Graph` extension.
+Traverse relationships with the `Sharc.Graph` extension. Uses two-phase BFS: edge-only discovery then batch node lookup (31x faster than SQLite).
 
 ```csharp
 using Sharc.Graph;
+using Sharc.Graph.Model;
+using Sharc.Graph.Schema;
 
 // Initialize graph engine
-var graph = new SharcContextGraph(db);
+using var graph = new SharcContextGraph(db.BTreeReader, new NativeSchemaAdapter());
+graph.Initialize();
 
-// Traverse: Find all "papers" cited by "paper:123" (1 hop)
-var citedPapers = graph.Traverse(
-    startNode: "papers:123",
-    edgeLabel: "cites",
-    direction: ArrowDirection.Forward
-);
-
-foreach (var node in citedPapers)
+// BFS traversal: expand 2-hop neighborhood from node 1
+var policy = new TraversalPolicy
 {
-    Console.WriteLine($"Cited: {node.Id}");
-}
+    Direction = TraversalDirection.Outgoing,
+    MaxDepth = 2,
+    MaxFanOut = 20,
+};
+
+var result = graph.Traverse(new NodeKey(1), policy);
+foreach (var node in result.Nodes)
+    Console.WriteLine($"Node {node.Record.Id} at depth {node.Depth}");
+
+// Zero-allocation edge cursor (fastest path)
+using var cursor = graph.GetEdgeCursor(new NodeKey(1));
+while (cursor.MoveNext())
+    Console.WriteLine($"  -> {cursor.TargetKey} (kind={cursor.Kind})");
 ```
 
 ## Next Steps
