@@ -6,7 +6,7 @@ High-performance graph storage and cryptographic trust for AI context space engi
 
 ## Features
 
-- **13.5x Faster Traversal**: 2-hop BFS in 6 us vs SQLite's 82 us.
+- **31x Faster Traversal**: 2-hop BFS in 2.6 us vs SQLite's 82 us via zero-alloc cursor BFS.
 - **O(log N) Seeks**: B-tree backed node and edge stores with SeekFirst cursors.
 - **Trust Ledger**: Hash-chained, ECDSA-signed audit trails for data provenance.
 - **Agent Identity**: Cryptographic registry for attributing every mutation to a specific agent.

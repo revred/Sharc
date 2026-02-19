@@ -171,31 +171,39 @@ if (node != null)
     Console.WriteLine($"Node 42: {node.Value.JsonData}");
 ```
 
-### 13. Edge Enumeration
+### 13. Zero-Allocation Edge Cursor
 
 ```csharp
-// Outgoing edges
-foreach (var edge in graph.GetEdges(new NodeKey(1)))
-    Console.WriteLine($"  -> {edge.TargetKey} (kind={edge.Kind})");
+// Outgoing edges — zero-allocation cursor (preferred over deprecated GetEdges)
+using var cursor = graph.GetEdgeCursor(new NodeKey(1));
+while (cursor.MoveNext())
+    Console.WriteLine($"  -> {cursor.TargetKey} (kind={cursor.Kind}, weight={cursor.Weight})");
 
-// Incoming edges
-foreach (var edge in graph.GetIncomingEdges(new NodeKey(1)))
-    Console.WriteLine($"  <- {edge.SourceKey} (kind={edge.Kind})");
+// Multi-hop: reuse cursor with Reset() — no new allocation
+cursor.Reset(42);
+while (cursor.MoveNext())
+    Console.WriteLine($"  -> {cursor.TargetKey}");
 ```
 
-### 14. BFS Traversal (2-Hop)
+### 14. BFS Traversal with TraversalPolicy
 
 ```csharp
 var policy = new TraversalPolicy
 {
     Direction = TraversalDirection.Both,
-    MaxDepth = 2
+    MaxDepth = 2,
+    MaxFanOut = 20,          // Hub capping
+    MaxTokens = 4096,        // Stop when token budget exhausted
+    IncludePaths = true,     // Track paths from start to each node
 };
 
 var result = graph.Traverse(new NodeKey(1), policy);
 Console.WriteLine($"Reached {result.Nodes.Count} nodes:");
 foreach (var n in result.Nodes)
-    Console.WriteLine($"  Key={n.Record.Key}, Depth={n.Depth}");
+{
+    string path = n.Path != null ? string.Join("->", n.Path.Select(k => k.Value)) : "";
+    Console.WriteLine($"  Key={n.Record.Key}, Depth={n.Depth}, Path={path}");
+}
 ```
 
 ---

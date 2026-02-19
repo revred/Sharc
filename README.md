@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-2%2C038_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-2%2C216_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -13,7 +13,7 @@
 | :--- | :--- | :--- |
 | **61x faster** B-tree seeks | **~52 KB** engine footprint | **ECDSA** agent attestation |
 | **39x faster** single UPDATE | **Zero** native dependencies | **AES-256-GCM** encryption |
-| **13.5x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
+| **31x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
 | **~0 B** per-row read allocation | SQL query pipeline built-in | UNION / INTERSECT / EXCEPT / Cote |
 
 ---
@@ -120,7 +120,7 @@ writer.Insert("entities",
 | | Batch 6 Seeks | **1,940 ns** | 127,526 ns | **66x** |
 | **Scans** | Sequential (5K rows) | **1.54 ms** | 6.22 ms | **4x** |
 | | WHERE Filter | **315 us** | 587 us | **1.9x** |
-| **Graph** | 2-Hop BFS | **6.04 us** | 81.56 us | **13.5x** |
+| **Graph** | 2-Hop BFS | **2.60 us** | 81.55 us | **31x** |
 | | Node Seek | **1,475 ns** | 21,349 ns | **14.5x** |
 | **Memory** | GC Pressure (sustained) | **648 B** | 688 B | Parity |
 | | Primitives | **0 B** | N/A | Zero-alloc |
@@ -195,12 +195,13 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 | [When NOT to Use](docs/WHEN_NOT_TO_USE.md) | Honest limitations |
 | [FAQ](docs/FAQ.md) | Common questions answered |
 | [Migration Guide](docs/MIGRATION.md) | Switching from Microsoft.Data.Sqlite |
+| [API Wiki](wiki/Home.md) | Full API reference with copy-paste patterns |
 
 ## Build & Test
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 2,038 tests
+dotnet test                                             # Run all 2,216 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -216,10 +217,10 @@ src/
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
-  Sharc.Tests/              1,229 unit tests
-  Sharc.IntegrationTests/   293 end-to-end tests
-  Sharc.Query.Tests/        425 query pipeline tests
-  Sharc.Graph.Tests.Unit/   55 graph tests
+  Sharc.Tests/              1,321 unit tests
+  Sharc.IntegrationTests/   353 end-to-end tests
+  Sharc.Query.Tests/        446 query pipeline tests
+  Sharc.Graph.Tests.Unit/   60 graph tests
   Sharc.Index.Tests/        22 index CLI tests
   Sharc.Context.Tests/      14 MCP context tests
 bench/
