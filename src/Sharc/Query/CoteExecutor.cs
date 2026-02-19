@@ -68,7 +68,7 @@ internal static class CoteExecutor
             if (!needsFilter && !needsAggregate && !needsDistinct && !needsSort && !needsLimit)
                 return new SharcDataReader(coteData.Rows, coteData.Columns);
 
-            var rows = new RowSet(coteData.Rows);
+            RowSet rows = coteData.Rows;
             var columnNames = coteData.Columns;
 
             // Apply outer WHERE filter to Cote data
@@ -88,7 +88,12 @@ internal static class CoteExecutor
                 rows = SetOperationProcessor.ApplyDistinct(rows, columnNames.Length);
 
             if (needsSort)
+            {
+                // OrderBy sorts in-place — copy only if rows still references the shared Cote data
+                if (ReferenceEquals(rows, coteData.Rows))
+                    rows = new RowSet(rows);
                 QueryPostProcessor.ApplyOrderBy(rows, intent.OrderBy!, columnNames);
+            }
 
             if (needsLimit)
                 rows = QueryPostProcessor.ApplyLimitOffset(rows, intent.Limit, intent.Offset);
