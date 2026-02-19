@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Runtime.CompilerServices;
+
 using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
@@ -1032,7 +1033,7 @@ public sealed class SharcDataReader : IDisposable
                     hasher.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
                 case QueryValueType.Text:
                     hasher.AddTypeTag(i, 3);
-                    hasher.Append(System.Text.Encoding.UTF8.GetBytes(val.AsString())); break;
+                    hasher.AppendString(val.AsString()); break;
                 default:
                     hasher.AddTypeTag(i, 4);
                     hasher.AppendLong(val.ObjectValue?.GetHashCode() ?? 0); break;
@@ -1066,7 +1067,7 @@ public sealed class SharcDataReader : IDisposable
                     h.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
                 case QueryValueType.Text:
                     h.AddTypeTag(0, 3);
-                    h.Append(System.Text.Encoding.UTF8.GetBytes(val.AsString())); break;
+                    h.AppendString(val.AsString()); break;
                 default:
                     h.AddTypeTag(0, 0);
                     h.AppendLong(0); break;
@@ -1138,6 +1139,26 @@ public sealed class SharcDataReader : IDisposable
             {
                 _hashLo ^= data[i]; _hashLo *= FnvPrime;
                 _hashHi ^= data[i]; _hashHi *= FnvPrime2;
+            }
+        }
+
+        /// <summary>
+        /// Hashes a string's UTF-16 character data directly — two bytes per char,
+        /// zero allocation. Equivalent to Append(MemoryMarshal.AsBytes(s.AsSpan()))
+        /// without requiring System.Runtime.InteropServices.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AppendString(string s)
+        {
+            _byteCount += s.Length * 2;
+            for (int i = 0; i < s.Length; i++)
+            {
+                ulong lo = (byte)s[i];
+                ulong hi = (byte)(s[i] >> 8);
+                _hashLo ^= lo; _hashLo *= FnvPrime;
+                _hashHi ^= lo; _hashHi *= FnvPrime2;
+                _hashLo ^= hi; _hashLo *= FnvPrime;
+                _hashHi ^= hi; _hashHi *= FnvPrime2;
             }
         }
 
