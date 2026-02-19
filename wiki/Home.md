@@ -31,7 +31,7 @@ while (reader.Read())
 | [Graph Traversal](Graph-Traversal) | `SharcContextGraph`, BFS, edge cursors, `TraversalPolicy` |
 | [Encryption](Encryption) | AES-256-GCM, Argon2id KDF, encrypted databases |
 | [Trust Layer](Trust-Layer) | Agent registry, ledger, ECDSA attestation, entitlements |
-| [Views](Views) | Programmatic views, `ViewBuilder`, `IViewCursor` |
+| [Views](Views) | Programmatic views, SubViews, SQLite view auto-promotion, SQL integration |
 | [Performance Guide](Performance-Guide) | Zero-allocation patterns, benchmarks, best practices |
 | [AI Agent Reference](AI-Agent-Reference) | Complete copy-paste patterns for LLM coding assistants |
 
