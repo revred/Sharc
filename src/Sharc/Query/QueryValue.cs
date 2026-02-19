@@ -89,4 +89,23 @@ internal struct QueryValue
         QueryValueType.Blob => AsBlob(),
         _ => DBNull.Value,
     };
+
+    /// <summary>
+    /// Converts a boxed parameter value to a typed <see cref="QueryValue"/>.
+    /// Used at the query-engine boundary to eliminate <c>object</c> type-dispatch
+    /// deeper in the pipeline.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static QueryValue FromObject(object? value) => value switch
+    {
+        null => Null,
+        long l => FromInt64(l),
+        int i => FromInt64(i),
+        double d => FromDouble(d),
+        float f => FromDouble(f),
+        string s => FromString(s),
+        byte[] b => FromBlob(b),
+        DBNull => Null,
+        _ => Null,
+    };
 }

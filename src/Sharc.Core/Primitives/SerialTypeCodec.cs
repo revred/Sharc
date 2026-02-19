@@ -11,6 +11,12 @@ namespace Sharc.Core.Primitives;
 /// </summary>
 public static class SerialTypeCodec
 {
+    /// <summary>Serial type code for NULL values.</summary>
+    public const long NullSerialType = 0;
+    /// <summary>Serial type code for the integer constant 0 (zero-byte storage).</summary>
+    public const long ZeroSerialType = 8;
+    /// <summary>Serial type code for the integer constant 1 (zero-byte storage).</summary>
+    public const long OneSerialType = 9;
     /// <summary>
     /// Gets the number of bytes in the content area for the given serial type.
     /// </summary>
@@ -108,8 +114,8 @@ public static class SerialTypeCodec
             case ColumnStorageClass.Integral:
             {
                 long v = value.AsInt64();
-                if (v == 0) return 8;
-                if (v == 1) return 9;
+                if (v == 0) return ZeroSerialType;
+                if (v == 1) return OneSerialType;
                 if (v >= -128 && v <= 127) return 1;
                 if (v >= -32768 && v <= 32767) return 2;
                 if (v >= -8388608 && v <= 8388607) return 3;

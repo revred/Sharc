@@ -171,6 +171,7 @@ public sealed class IndexColumnInfo
 
 /// <summary>
 /// Metadata for a single view.
+/// Extended with structural metadata parsed from CREATE VIEW SQL.
 /// </summary>
 public sealed class ViewInfo
 {
@@ -179,4 +180,30 @@ public sealed class ViewInfo
 
     /// <summary>Original CREATE VIEW SQL statement.</summary>
     public required string Sql { get; init; }
+
+    /// <summary>Source table name(s) referenced in FROM clause.</summary>
+    public IReadOnlyList<string> SourceTables { get; init; } = [];
+
+    /// <summary>Column names/aliases in the SELECT list. Empty if SELECT *.</summary>
+    public IReadOnlyList<ViewColumnInfo> Columns { get; init; } = [];
+
+    /// <summary>True if the view uses SELECT *.</summary>
+    public bool IsSelectAll { get; init; }
+
+    /// <summary>True if the view's SQL contains JOIN.</summary>
+    public bool HasJoin { get; init; }
+
+    /// <summary>True if the view's SQL contains WHERE.</summary>
+    public bool HasFilter { get; init; }
+
+    /// <summary>True if structural metadata was successfully parsed from the SQL.</summary>
+    public bool ParseSucceeded { get; init; }
+
+    /// <summary>
+    /// Whether Sharc can natively execute this view as a zero-allocation cursor.
+    /// True when: single source table, no JOIN, no WHERE, no subqueries.
+    /// These views can be auto-promoted to a SharcView.
+    /// </summary>
+    public bool IsSharcExecutable =>
+        ParseSucceeded && SourceTables.Count == 1 && !HasJoin && !HasFilter;
 }

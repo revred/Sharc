@@ -1,388 +1,287 @@
-# Views.md — Sharc View Layer Specification
+# Views.md — Sharc View Layer
 
-> **Version:** 0.1-draft  
-> **Status:** Spec for fast implementation  
-> **Prerequisites:** SchemaReader (✅ done), RecordDecoder (✅ done), Index B-tree reads (P1), Joins (see Joins.md)  
-> **Estimated effort:** 1.5–2 weeks  
+> **Version:** 1.0
+> **Status:** Implemented and tested (65+ dedicated tests)
 > **Namespace:** `Sharc.Views`
 
 ---
 
-## 1. Design Philosophy
+## 1. Overview
 
-SQLite views are stored as `CREATE VIEW` SQL statements in `sqlite_schema`. SQLite executes them by parsing the SQL, building a query plan, and running the VDBE. Sharc has no SQL parser and no VDBE.
+Sharc views are **pre-compiled read lenses** — named, reusable, immutable cursor configurations that project, filter, and compose data from tables or other views. Opening a view returns a zero-allocation forward-only cursor.
 
-Sharc views are **pre-compiled read lenses** — metadata objects that describe a data projection (which tables, which columns, which joins, which filters) and produce a cursor when opened. They are the declarative complement to the imperative `JoinBuilder` API.
+A `SharcView` is conceptually: **a saved cursor configuration that can be opened repeatedly.**
 
-A Sharc view is conceptually: **a saved cursor configuration that can be opened repeatedly.**
+Views in Sharc have three tiers of capability:
 
-### What Sharc Views Are
-
-- Schema-aware column projections over single tables
-- Pre-configured join pipelines (wrapping `JoinBuilder` configurations)
-- Named, reusable access patterns stored in code or configuration
-- SQLite view metadata readers (parse `CREATE VIEW` from `sqlite_schema` for column/table inference)
-
-### What Sharc Views Are Not
-
-- SQL query executors (no `SELECT ... FROM ... WHERE` evaluation)
-- Materialised views (no cached result sets)
-- Updatable views
+| Tier | Feature | API |
+|------|---------|-----|
+| **Cursor** | Open a view, iterate rows | `view.Open(db)` → `IViewCursor` |
+| **Registration** | Register views by name, open by name | `db.RegisterView(view)` / `db.OpenView("name")` |
+| **SQL Integration** | Query registered views with SQL | `db.Query("SELECT ... FROM view_name")` |
 
 ---
 
-## 2. Two-Tier Architecture
+## 2. Defining Views
 
-### Tier 1: SQLite View Metadata (Schema Layer — read what SQLite stored)
+### 2.1 ViewBuilder Fluent API
 
-Sharc already reads `sqlite_schema` and knows that rows with `type = 'view'` exist. The `ViewInfo` model already captures `name`, `tbl_name`, and `sql`. This tier extends `ViewInfo` to extract useful structural metadata from the `CREATE VIEW` SQL without building a full SQL parser.
+All views are constructed through `ViewBuilder`:
 
-### Tier 2: Sharc Native Views (Runtime Layer — programmable read lenses)
+```csharp
+// Simple projection
+var view = ViewBuilder
+    .From("users")
+    .Select("name", "age")
+    .Named("user_basics")
+    .Build();
 
-A `SharcView` is a reusable, named cursor factory. It encapsulates a table source, optional column projection, optional join pipeline, and optional row filter predicate. Opening a view returns a cursor.
+// With row filter
+var seniors = ViewBuilder
+    .From("users")
+    .Select("name", "age", "dept")
+    .Where(row => row.GetInt64(1) >= 30)
+    .Named("seniors")
+    .Build();
+
+// SELECT * (all columns)
+var allUsers = ViewBuilder
+    .From("users")
+    .Named("all_users")
+    .Build();
+```
+
+### 2.2 Subviews — Views on Views
+
+A view can source from another view. There is no distinction between a "view" and a "subview" — a subview IS a `SharcView` with the same type and the same features. The only difference is the source: a table name vs. a parent `SharcView`.
+
+```csharp
+// Parent view: 3 columns from users
+var parent = ViewBuilder
+    .From("users")
+    .Select("name", "age", "dept")
+    .Named("v_parent")
+    .Build();
+
+// Subview: narrow to 2 columns, add filter
+var sub = ViewBuilder
+    .From(parent)
+    .Select("name", "age")
+    .Where(row => row.GetInt64(1) >= 30)
+    .Named("v_seniors")
+    .Build();
+
+// Deep chain: view → view → view
+var leaf = ViewBuilder
+    .From(sub)
+    .Select("name")
+    .Named("v_senior_names")
+    .Build();
+```
+
+Subview cursors compose by wrapping the parent cursor with `ProjectedViewCursor` (ordinal remapping) and optionally `FilteredViewCursor` (predicate filtering). Each level is zero-allocation per row.
+
+### 2.3 SharcView Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Name` | `string` | View name (used for registration and SQL queries) |
+| `SourceTable` | `string?` | Table name, or null if sourced from a view |
+| `SourceView` | `SharcView?` | Parent view, or null if sourced from a table |
+| `ProjectedColumnNames` | `IReadOnlyList<string>?` | Column projection, or null for all columns |
+| `Filter` | `Func<IRowAccessor, bool>?` | Row predicate, or null for no filtering |
+
+Exactly one of `SourceTable` and `SourceView` is non-null.
 
 ---
 
-## 3. Tier 1: SQLite View Metadata Parsing
+## 3. Opening Views
 
-### 3.1 What We Extract
-
-From `CREATE VIEW view_name AS SELECT col1, col2 FROM table_name ...` we extract:
-
-| Field | Extraction Method | Difficulty |
-|-------|------------------|------------|
-| View name | Already in `sqlite_schema.name` | ✅ Done |
-| Source table(s) | Regex/token scan for `FROM table_name` | Simple |
-| Column names | Regex/token scan for `SELECT col1, col2, ...` or `SELECT *` | Simple |
-| Column aliases | `AS alias` detection | Simple |
-| Is SELECT * | Check if first token after SELECT is `*` | Trivial |
-| Has WHERE clause | Token scan for `WHERE` keyword | Trivial |
-| Has JOIN | Token scan for `JOIN` keyword | Trivial |
-| Raw SQL | Already in `sqlite_schema.sql` | ✅ Done |
-
-### 3.2 ViewInfo Extension
+### 3.1 Direct Open
 
 ```csharp
-namespace Sharc.Schema;
-
-/// <summary>
-/// Extended metadata for a SQLite view, parsed from CREATE VIEW SQL.
-/// This is structural metadata only — Sharc does not execute the view's SQL.
-/// </summary>
-public sealed class ViewInfo
+using var cursor = view.Open(db);
+while (cursor.MoveNext())
 {
-    /// <summary>View name from sqlite_schema.</summary>
-    public required string Name { get; init; }
-
-    /// <summary>Raw CREATE VIEW SQL from sqlite_schema.</summary>
-    public required string Sql { get; init; }
-
-    /// <summary>Source table name(s) referenced in FROM clause.</summary>
-    public required IReadOnlyList<string> SourceTables { get; init; }
-
-    /// <summary>Column names/aliases in the SELECT list. Empty if SELECT *.</summary>
-    public required IReadOnlyList<ViewColumnInfo> Columns { get; init; }
-
-    /// <summary>True if the view uses SELECT *.</summary>
-    public required bool IsSelectAll { get; init; }
-
-    /// <summary>True if the view's SQL contains JOIN.</summary>
-    public required bool HasJoin { get; init; }
-
-    /// <summary>True if the view's SQL contains WHERE.</summary>
-    public required bool HasFilter { get; init; }
-
-    /// <summary>
-    /// Whether Sharc can natively execute this view.
-    /// True when: single source table, no JOIN, no WHERE, no subqueries, no aggregation.
-    /// These views can be opened as a SharcView automatically.
-    /// </summary>
-    public bool IsSharcExecutable =>
-        SourceTables.Count == 1 && !HasJoin && !HasFilter;
-}
-
-/// <summary>
-/// A column reference within a view definition.
-/// </summary>
-public sealed class ViewColumnInfo
-{
-    /// <summary>Original column name from the source table.</summary>
-    public required string SourceName { get; init; }
-
-    /// <summary>Alias if AS was used, otherwise same as SourceName.</summary>
-    public required string DisplayName { get; init; }
-
-    /// <summary>Column ordinal in the view's SELECT list (0-based).</summary>
-    public required int Ordinal { get; init; }
+    string name = cursor.GetString(0);
+    long age = cursor.GetInt64(1);
 }
 ```
 
-### 3.3 Lightweight SQL Token Scanner
+### 3.2 Open by Name (Registration)
 
-**This is NOT a SQL parser.** It is a forward-only token scanner that extracts the structural elements listed above. It handles ~85% of real-world `CREATE VIEW` statements — the simple projections and single-table views that dominate SQLite databases in practice.
+Register a view by name, then open it:
 
 ```csharp
-namespace Sharc.Core.Schema;
+using var db = SharcDatabase.Open("mydata.db");
 
-/// <summary>
-/// Extracts structural metadata from CREATE VIEW SQL.
-/// Forward-only, allocation-minimal. Not a SQL parser.
-/// </summary>
-internal static class ViewSqlScanner
-{
-    /// <summary>
-    /// Scan CREATE VIEW SQL and return structural metadata.
-    /// </summary>
-    /// <param name="sql">The raw CREATE VIEW statement from sqlite_schema.</param>
-    /// <returns>Parsed view metadata, or a fallback with just the raw SQL if unparseable.</returns>
-    public static ViewParseResult Scan(ReadOnlySpan<char> sql);
-}
+var view = ViewBuilder
+    .From("users")
+    .Select("name", "age")
+    .Where(row => row.GetInt64(1) >= 18)
+    .Named("adults")
+    .Build();
 
-internal readonly struct ViewParseResult
+db.RegisterView(view);
+
+// Later...
+using var cursor = db.OpenView("adults");
+while (cursor.MoveNext())
 {
-    public readonly string[] SourceTables;
-    public readonly ViewColumnInfo[] Columns;
-    public readonly bool IsSelectAll;
-    public readonly bool HasJoin;
-    public readonly bool HasFilter;
-    public readonly bool ParseSucceeded;
+    Console.WriteLine(cursor.GetString(0));
 }
 ```
 
-**Implementation constraints:**
+`OpenView` lookup order:
+1. Registered programmatic views (added via `RegisterView`)
+2. SQLite schema views (auto-promoted from `CREATE VIEW` statements)
 
-- Span-based scanning — no string splits, no regex on hot path
-- Keywords detected by ordinal comparison (`FROM`, `WHERE`, `JOIN`, `SELECT`, `AS`)
-- Identifiers extracted between keyword boundaries
-- Quoted identifiers (`"name"`, `` `name` ``, `[name]`) handled
-- Nested subqueries detected (presence of inner `SELECT`) → sets `ParseSucceeded = false` for the subquery portion, but still extracts outer metadata
-- **Total implementation: ~150–200 lines of C#**
+Registered views take priority — they override SQLite views with the same name.
+
+### 3.3 Registration API
+
+```csharp
+// Register (last registration wins for duplicate names)
+db.RegisterView(view);
+
+// Unregister
+bool removed = db.UnregisterView("adults"); // true if found and removed
+
+// OpenView throws KeyNotFoundException if the name isn't registered
+// and isn't an auto-promotable SQLite view
+```
 
 ---
 
-## 4. Tier 2: SharcView — Native Read Lens
+## 4. SQL Queries on Views
 
-### 4.1 SharcView Definition
+Registered views participate in the Sharc SQL query pipeline. Use `db.Query()` to query them with standard SQL:
 
 ```csharp
-namespace Sharc.Views;
+db.RegisterView(view);
 
-/// <summary>
-/// A named, reusable cursor configuration. Opening a view returns a forward-only
-/// cursor over the projected columns. Views compose with joins and entitlements.
-/// </summary>
-public sealed class SharcView
-{
-    /// <summary>Human-readable name for this view.</summary>
-    public string Name { get; }
+// SELECT specific columns
+using var r1 = db.Query("SELECT name FROM adults");
 
-    /// <summary>The root table this view reads from.</summary>
-    public string SourceTable { get; }
+// WHERE filtering on top of view's built-in filter
+using var r2 = db.Query("SELECT name FROM adults WHERE age > 30");
 
-    /// <summary>
-    /// Column projection. If null, all columns are returned.
-    /// Ordinals reference the source table's column positions.
-    /// </summary>
-    public IReadOnlyList<int>? ProjectedColumns { get; }
+// ORDER BY + LIMIT
+using var r3 = db.Query("SELECT name FROM adults ORDER BY age DESC LIMIT 10");
 
-    /// <summary>
-    /// Optional join pipeline. If set, the view opens a join cursor
-    /// instead of a simple table scan.
-    /// </summary>
-    public JoinPipeline? Joins { get; }
+// COUNT
+using var r4 = db.Query("SELECT COUNT(*) FROM adults");
 
-    /// <summary>
-    /// Optional row filter predicate. Applied during cursor iteration.
-    /// Signature: (IRowAccessor row) → bool (true = include).
-    /// </summary>
-    public Func<IRowAccessor, bool>? Filter { get; }
-
-    /// <summary>
-    /// Open this view and return a cursor. The cursor respects
-    /// the active entitlement context on the database.
-    /// </summary>
-    public IViewCursor Open(SharcDatabase db);
-}
+// JOIN with other tables
+using var r5 = db.Query(
+    "SELECT adults.name, orders.amount " +
+    "FROM adults JOIN orders ON adults.id = orders.user_id");
 ```
 
-### 4.2 IViewCursor
+### 4.1 Resolution Mechanism
+
+When `db.Query()` encounters a table name that matches a registered view:
+
+1. **Filter-free views** (no `Where` predicate in the view chain) — converted to a Cote (Common Table Expression) with synthetic SQL targeting the root table.
+
+2. **Filtered views** (any `Where` predicate in the chain) — pre-materialized by opening the view cursor and collecting rows into `QueryValue[][]`. The pre-materialized data overrides the Cote, preserving the Func filter semantics that cannot be expressed as SQL.
+
+In both cases, the materialization path is used (not lazy Cote resolution), ensuring correct behavior for ORDER BY, LIMIT, JOIN, and qualified column references.
+
+### 4.2 Composed Filters
+
+When a view has a programmatic filter and the SQL query adds a WHERE clause, both filters apply:
 
 ```csharp
-/// <summary>
-/// Forward-only cursor over a view's projected rows.
-/// Implements IRowAccessor for column access — column ordinals
-/// are remapped to the view's projection.
-/// </summary>
+// View filter: dept == "eng"
+var engView = ViewBuilder
+    .From("users")
+    .Select("name", "age", "dept")
+    .Where(row => row.GetString(2) == "eng")
+    .Named("v_eng")
+    .Build();
+db.RegisterView(engView);
+
+// SQL adds: age > 28
+// Result: rows where dept=="eng" AND age>28
+using var reader = db.Query("SELECT name FROM v_eng WHERE age > 28");
+```
+
+---
+
+## 5. SQLite View Auto-Promotion
+
+Sharc automatically converts simple `CREATE VIEW` statements from `sqlite_schema` into `SharcView` instances via `ViewPromoter`. Promoted views are accessible through `OpenView()` without manual registration.
+
+A SQLite view is promotable when:
+- Single source table (no JOIN)
+- No WHERE clause
+- No subqueries or aggregations
+- Column list is parseable
+
+```csharp
+// If the SQLite file has:
+//   CREATE VIEW v_user_emails AS SELECT name, email FROM users
+// Then:
+using var cursor = db.OpenView("v_user_emails");
+// Works automatically — no registration needed
+```
+
+### 5.1 ViewSqlScanner
+
+The `ViewSqlScanner` extracts structural metadata from `CREATE VIEW` SQL using a lightweight forward-only token scanner (not a full SQL parser). It identifies source tables, column names/aliases, and presence of JOIN/WHERE/subqueries.
+
+Enriched metadata is available on `ViewInfo` objects in `db.Schema.Views`.
+
+---
+
+## 6. Cursor Architecture
+
+### 6.1 Cursor Types
+
+| Cursor | Wraps | Purpose |
+|--------|-------|---------|
+| `SimpleViewCursor` | `SharcDataReader` | Table → view (ordinal remapping via `int[]`) |
+| `ProjectedViewCursor` | `IViewCursor` | View → subview (ordinal remapping via `int[]`) |
+| `FilteredViewCursor` | `IViewCursor` | Decorator adding `Func<IRowAccessor, bool>` predicate |
+
+### 6.2 IViewCursor Interface
+
+```csharp
 public interface IViewCursor : IRowAccessor, IDisposable
 {
-    /// <summary>Advance to the next row. Returns false when exhausted.</summary>
     bool MoveNext();
-
-    /// <summary>
-    /// Number of rows read so far. Useful for progress reporting.
-    /// </summary>
     long RowsRead { get; }
 }
-```
 
-### 4.3 ViewBuilder (Fluent API)
-
-```csharp
-/// <summary>
-/// Fluent builder for defining SharcView instances.
-/// </summary>
-public sealed class ViewBuilder
+public interface IRowAccessor
 {
-    public static ViewBuilder From(string tableName);
-
-    /// <summary>Project specific columns by ordinal.</summary>
-    public ViewBuilder Select(params int[] columnOrdinals);
-
-    /// <summary>Project specific columns by name (resolved via SharcSchema).</summary>
-    public ViewBuilder Select(params string[] columnNames);
-
-    /// <summary>Add a join to the view's cursor pipeline.</summary>
-    public ViewBuilder Join(Action<JoinBuilder> configure);
-
-    /// <summary>Add a row filter predicate.</summary>
-    public ViewBuilder Where(Func<IRowAccessor, bool> predicate);
-
-    /// <summary>Name the view.</summary>
-    public ViewBuilder Named(string name);
-
-    /// <summary>Build the immutable view definition.</summary>
-    public SharcView Build();
+    int FieldCount { get; }
+    long GetInt64(int ordinal);
+    double GetDouble(int ordinal);
+    string GetString(int ordinal);
+    byte[] GetBlob(int ordinal);
+    bool IsNull(int ordinal);
+    string GetColumnName(int ordinal);
+    SharcColumnType GetColumnType(int ordinal);
 }
 ```
 
----
+### 6.3 Cursor Chain Example
 
-## 5. Auto-Promotion: SQLite Views → SharcViews
+For a 3-deep subview with filters at each level:
 
-When `ViewInfo.IsSharcExecutable` is true (single table, no joins, no filters, no subqueries), Sharc can automatically create a `SharcView` from the SQLite view metadata.
-
-```csharp
-/// <summary>
-/// Attempts to create a SharcView from a SQLite VIEW definition.
-/// Returns null if the view's SQL is too complex for Sharc to execute.
-/// </summary>
-public static class ViewPromoter
-{
-    public static SharcView? TryPromote(ViewInfo viewInfo, SharcSchema schema)
-    {
-        if (!viewInfo.IsSharcExecutable)
-            return null;
-
-        var table = schema.GetTable(viewInfo.SourceTables[0]);
-
-        int[]? projection = null;
-        if (!viewInfo.IsSelectAll)
-        {
-            projection = viewInfo.Columns
-                .Select(vc => table.GetColumnOrdinal(vc.SourceName))
-                .ToArray();
-        }
-
-        return ViewBuilder
-            .From(viewInfo.SourceTables[0])
-            .Select(projection ?? Array.Empty<int>())
-            .Named(viewInfo.Name)
-            .Build();
-    }
-}
+```
+SharcDataReader (B-tree scan)
+  └─ SimpleViewCursor (table → Level 1 projection)
+       └─ FilteredViewCursor (Level 1 filter)
+            └─ ProjectedViewCursor (Level 1 → Level 2 projection)
+                 └─ FilteredViewCursor (Level 2 filter)
+                      └─ ProjectedViewCursor (Level 2 → Level 3 projection)
+                           └─ FilteredViewCursor (Level 3 filter)
 ```
 
-**Coverage estimate:** Based on analysis of real-world SQLite databases, ~60–70% of views are simple single-table projections (SELECT subset of columns FROM one table). These auto-promote. The remaining 30–40% have JOINs, WHERE clauses, or aggregations — they remain as metadata-only `ViewInfo` objects that consumers can inspect and manually build equivalent `SharcView` + `JoinBuilder` pipelines for.
-
----
-
-## 6. Implementation Plan
-
-### Phase 1: ViewInfo Extension + ViewSqlScanner (Week 1)
-
-**Files to create:**
-
-| File | Responsibility |
-|------|---------------|
-| `Sharc.Core/Schema/ViewInfo.cs` | Extended view metadata model |
-| `Sharc.Core/Schema/ViewColumnInfo.cs` | Column reference model |
-| `Sharc.Core/Schema/ViewSqlScanner.cs` | Lightweight CREATE VIEW token scanner |
-| `Sharc.Tests/Schema/ViewSqlScannerTests.cs` | Comprehensive parsing tests |
-
-**Test matrix (TDD):**
-
-- `CREATE VIEW v AS SELECT * FROM t` → `IsSelectAll=true`, `SourceTables=["t"]`
-- `CREATE VIEW v AS SELECT a, b, c FROM t` → columns parsed, ordinals assigned
-- `CREATE VIEW v AS SELECT a AS x, b AS y FROM t` → aliases captured
-- `CREATE VIEW v AS SELECT a FROM t WHERE a > 5` → `HasFilter=true`
-- `CREATE VIEW v AS SELECT a, b FROM t1 JOIN t2 ON t1.id = t2.fk` → `HasJoin=true`, `SourceTables=["t1","t2"]`
-- `CREATE VIEW v AS SELECT a FROM (SELECT ...)` → `ParseSucceeded=false` for inner
-- `CREATE VIEW v AS SELECT "quoted col" FROM [bracketed table]` → identifiers unquoted
-- `CREATE TEMP VIEW v AS SELECT ...` → TEMP keyword handled
-- `CREATE VIEW IF NOT EXISTS v AS SELECT ...` → IF NOT EXISTS skipped
-- Empty SQL / malformed SQL → graceful fallback, `ParseSucceeded=false`
-
-### Phase 2: SharcView + ViewBuilder + IViewCursor (Week 1–2)
-
-**Files to create:**
-
-| File | Responsibility |
-|------|---------------|
-| `Sharc.Views/SharcView.cs` | View definition |
-| `Sharc.Views/ViewBuilder.cs` | Fluent API |
-| `Sharc.Views/IViewCursor.cs` | Cursor interface |
-| `Sharc.Views/SimpleViewCursor.cs` | Single-table projected cursor |
-| `Sharc.Views/JoinedViewCursor.cs` | View cursor wrapping IJoinCursor |
-| `Sharc.Views/FilteredViewCursor.cs` | Decorator adding predicate filtering |
-
-**SimpleViewCursor implementation sketch:**
-
-```csharp
-internal sealed class SimpleViewCursor : IViewCursor
-{
-    private readonly SharcDataReader _reader;
-    private readonly int[]? _projection;     // column ordinal remapping
-
-    public bool MoveNext() => _reader.Read();
-
-    public long GetInt64(int ordinal)
-    {
-        int mapped = _projection != null ? _projection[ordinal] : ordinal;
-        return _reader.GetInt64(mapped);
-    }
-
-    // Same pattern for GetText, GetDouble, GetBlob, IsNull
-}
-```
-
-**FilteredViewCursor — decorator pattern:**
-
-```csharp
-internal sealed class FilteredViewCursor : IViewCursor
-{
-    private readonly IViewCursor _inner;
-    private readonly Func<IRowAccessor, bool> _predicate;
-
-    public bool MoveNext()
-    {
-        while (_inner.MoveNext())
-        {
-            if (_predicate(_inner))
-                return true;
-        }
-        return false;
-    }
-
-    // All IRowAccessor methods delegate to _inner
-}
-```
-
-### Phase 3: ViewPromoter + Integration (Week 2)
-
-- Wire `ViewPromoter.TryPromote()` into `SharcSchema` loading
-- Add `SharcSchema.Views` enrichment: each `ViewInfo` gains an optional `SharcView? NativeView` property
-- Add `SharcDatabase.OpenView(string name)` convenience method
-- Integration tests with real SQLite databases containing views
+Each layer is O(1) per row — a single array index lookup for projection, a delegate call for filtering.
 
 ---
 
@@ -390,104 +289,58 @@ internal sealed class FilteredViewCursor : IViewCursor
 
 | Operation | Allocations | Notes |
 |-----------|------------|-------|
-| ViewSqlScanner.Scan() | 1 `ViewParseResult` + string arrays | Cold path (schema load), acceptable |
-| SharcView construction | 1 object | Immutable, reusable |
-| SimpleViewCursor iteration | **ZERO per row** | Delegates to SharcDataReader (already zero-alloc) |
-| FilteredViewCursor iteration | **ZERO per row** | Predicate is a delegate, no boxing |
-| JoinedViewCursor iteration | Same as IJoinCursor | See Joins.md memory contract |
-| Column ordinal remapping | **ZERO** | Array index lookup, no allocation |
+| `SharcView` construction | 1 object | Immutable, reusable across opens |
+| `ViewBuilder.Build()` | 1 `SharcView` + optional `string[]` | Cold path |
+| `view.Open(db)` | Cursor objects + `int[]` projection | Cold path per open |
+| `cursor.MoveNext()` | **ZERO per row** | All cursor types |
+| `cursor.Get*(ordinal)` | **ZERO per row** | Array index → delegate to inner |
+| `ProjectedViewCursor` remapping | **ZERO per row** | `_projection[ordinal]` — one array index |
+| `FilteredViewCursor` predicate | **ZERO per row** | Delegate call, no boxing |
+| SQL query materialization | `QueryValue[]` per row | Required for filtered views in SQL queries |
 
 ---
 
-## 8. GCD Integration Patterns
+## 8. File Map
 
-### Pattern 1: Simple Projection View
-
-```csharp
-// Define a view that shows only file paths and sizes from the files table
-var fileListView = ViewBuilder
-    .From("files")
-    .Select("path", "size_bytes", "language")
-    .Named("file_list")
-    .Build();
-
-using var cursor = fileListView.Open(db);
-while (cursor.MoveNext())
-{
-    var path = cursor.GetText(0);      // projected ordinal 0 → "path"
-    var size = cursor.GetInt64(1);     // projected ordinal 1 → "size_bytes"
-}
-```
-
-### Pattern 2: Filtered View for Context Window Budgeting
-
-```csharp
-// Only files under 10KB — suitable for inlining into LLM context
-var smallFilesView = ViewBuilder
-    .From("files")
-    .Select("path", "content", "language")
-    .Where(row => row.GetInt64(1) < 10_240)  // size_bytes < 10KB
-    .Named("small_files")
-    .Build();
-```
-
-### Pattern 3: Joined View — Commit History with Files
-
-```csharp
-// Pre-configured view that joins commits → commit_files → files
-var commitFilesView = ViewBuilder
-    .From("commits")
-    .Join(j => j
-        .IndexJoin("commit_files", "idx_cf_commit_id", outerColumn: 0)
-        .RowidJoin("files", outerRowidColumn: 3))
-    .Named("commit_files_resolved")
-    .Build();
-
-// Open returns a joined cursor — same zero-alloc guarantees
-using var cursor = commitFilesView.Open(db);
-```
-
-### Pattern 4: Auto-Promoted SQLite View
-
-```csharp
-using var db = SharcDatabase.Open("project.gcd");
-
-// If the SQLite file has: CREATE VIEW active_contributors AS 
-//   SELECT name, email FROM contributors
-// Sharc auto-promotes it:
-var view = db.Schema.GetView("active_contributors").NativeView;
-if (view != null)
-{
-    using var cursor = view.Open(db);
-    // Works natively — no SQL execution needed
-}
-```
-
-### Pattern 5: Entitlement-Scoped Views
-
-```csharp
-// Same view definition, different entitlement context → different data
-var sensitiveView = ViewBuilder
-    .From("_records")
-    .Select("id", "data")
-    .Where(row => row.GetText(0).StartsWith("secret:"))
-    .Named("secrets")
-    .Build();
-
-// User A (role:admin) sees all matching rows
-// User B (role:viewer) sees only rows their entitlement tag unlocks
-// The view definition is identical — entitlements are enforced below the cursor
-```
+| File | Purpose |
+|------|---------|
+| `src/Sharc/Views/SharcView.cs` | View definition, `Open()` logic |
+| `src/Sharc/Views/ViewBuilder.cs` | Fluent construction API |
+| `src/Sharc/Views/IViewCursor.cs` | Cursor interface |
+| `src/Sharc/Views/IRowAccessor.cs` | Typed column access interface |
+| `src/Sharc/Views/SimpleViewCursor.cs` | Table → view cursor |
+| `src/Sharc/Views/ProjectedViewCursor.cs` | View → subview cursor |
+| `src/Sharc/Views/FilteredViewCursor.cs` | Filter decorator |
+| `src/Sharc/Views/ViewPromoter.cs` | SQLite view → SharcView promotion |
+| `src/Sharc/SharcDatabase.cs` | `RegisterView`, `UnregisterView`, `OpenView`, SQL integration |
+| `src/Sharc/Query/Sharq/ViewSqlScanner.cs` | CREATE VIEW SQL metadata extraction |
 
 ---
 
-## 9. Decision Log
+## 9. Test Coverage
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `Sharc.Tests/Views/ViewBuilderTests.cs` | ~18 | Builder API, validation, edge cases |
+| `Sharc.Tests/Views/SubviewTests.cs` | ~15 | View-on-view composition, deep chains, filters |
+| `Sharc.Tests/Views/ViewRegistrationTests.cs` | 8 | Register/unregister, OpenView, priority |
+| `Sharc.Tests/Views/ViewCursorTests.cs` | ~10 | SimpleViewCursor, FilteredViewCursor, ProjectedViewCursor |
+| `Sharc.IntegrationTests/ViewQueryIntegrationTests.cs` | 11 | SQL queries on registered views with real DB |
+| `Sharc.IntegrationTests/ViewIntegrationTests.cs` | ~10 | End-to-end with SQLite databases |
+
+---
+
+## 10. Decision Log
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Lightweight token scanner, not SQL parser | Deliberate | A full SQL parser (even a subset) would be 500+ lines and require grammar maintenance. Token scanning covers ~85% of real views in ~150 lines. |
-| Auto-promotion only for simple views | Deliberate | Complex views (JOINs, WHERE, subqueries) require the caller to build equivalent SharcView + JoinBuilder pipelines. This keeps the view layer thin and honest about what it can do. |
-| `IViewCursor` extends `IRowAccessor` | Deliberate | Views ARE row sources. Making them implement `IRowAccessor` means they compose directly into JoinBuilder as outer sources. |
-| Decorator pattern for filtering | Deliberate | `FilteredViewCursor` wraps any `IViewCursor`. This means filters compose with projections, joins, and further filters without combinatorial cursor types. |
-| No materialised views | Deliberate | Materialisation requires write support + cache invalidation. Both are out of scope for read-only Sharc. If you need cached results, materialise in SQLite and read with Sharc. |
-| Column remapping via int array | Deliberate | `_projection[viewOrdinal] → tableOrdinal` is a single array index — zero allocation, zero branching, O(1). No dictionary, no hash map. |
+| Lightweight token scanner, not SQL parser | `ViewSqlScanner` | A full SQL parser would be 500+ lines. Token scanning covers ~85% of real views in ~150 lines. |
+| Auto-promotion only for simple views | `ViewPromoter` | Complex views (JOINs, WHERE) require the caller to build equivalent SharcView pipelines. Keeps the view layer honest about what it can do. |
+| `IViewCursor` extends `IRowAccessor` | Composition | Views ARE row sources. They compose into any pipeline expecting `IRowAccessor`. |
+| Decorator pattern for filtering | `FilteredViewCursor` | Wraps any `IViewCursor`. Filters compose with projections and further filters without combinatorial cursor types. |
+| Column remapping via `int[]` | Zero-alloc | `_projection[viewOrdinal] → parentOrdinal` is one array index — O(1), no dictionary, no hash. |
+| No distinction between view and subview | Uniform type | A subview IS a `SharcView`. Same constructor, same features, same `Open()` method. The only difference is `SourceView != null` instead of `SourceTable != null`. |
+| `GetColumnType(int)` on `IRowAccessor` | Typed discriminant | Avoids `object? GetValue()` (type erasure). Named enum `SharcColumnType` gives callers a proper typed switch over `{Integral, Real, Text, Blob, Null}`. |
+| Force materialization path for registered views | Correctness | The lazy Cote resolution path doesn't handle ORDER BY on non-projected columns, qualified column references in JOINs, or filtered views. The materialization fallback handles all cases correctly. |
+| Registered views override SQLite views | Explicit wins | When a programmatic view has the same name as a SQLite view, the registered view takes priority. User intent is explicit and should win over implicit schema views. |
+| Pre-materialize filtered views | Func can't be SQL | `Func<IRowAccessor, bool>` predicates can't be expressed as SQL. The view cursor is opened, rows are collected into `QueryValue[][]`, and injected into the query pipeline as pre-materialized Cote data. |

@@ -236,7 +236,7 @@ PRC/                        Architecture decisions, specs, execution plans
 
 - **Query pipeline materializes results** -- Cotes allocate managed arrays. Set operations (UNION/INTERSECT/EXCEPT) use pooled IndexSet with ArrayPool storage (~1.4 KB). Streaming top-N and streaming aggregation reduce memory for ORDER BY + LIMIT and GROUP BY queries
 - **Single-writer** -- one writer at a time; no WAL-mode concurrent writes
-- **No JOIN support** -- single-table queries only; use UNION/Cote for multi-table workflows
+- **JOIN support** -- INNER, LEFT, and CROSS joins via hash join strategy; no RIGHT or FULL OUTER joins yet
 - **No virtual tables** -- FTS5, R-Tree not supported
 
 Sharc is a **complement** to SQLite, not a replacement. See [When NOT to Use Sharc](docs/WHEN_NOT_TO_USE.md).

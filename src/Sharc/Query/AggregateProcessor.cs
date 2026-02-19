@@ -16,7 +16,7 @@ internal static class AggregateProcessor
     /// Returns materialized result rows with the output column layout from the query.
     /// </summary>
     internal static MaterializedResultSet Apply(
-        List<QueryValue[]> sourceRows,
+        RowSet sourceRows,
         string[] sourceColumnNames,
         IReadOnlyList<AggregateIntent> aggregates,
         IReadOnlyList<string>? groupByColumns,
@@ -49,7 +49,7 @@ internal static class AggregateProcessor
 
         var groups = GroupRows(sourceRows, groupOrdinals);
 
-        var result = new List<QueryValue[]>(groups.Count);
+        var result = new RowSet(groups.Count);
         foreach (var groupRows in groups.Values)
         {
             var row = new QueryValue[outColumns.Length];
@@ -77,7 +77,7 @@ internal static class AggregateProcessor
     }
 
     private static QueryValue[] ComputeAggregateRow(
-        List<QueryValue[]> rows,
+        RowSet rows,
         IReadOnlyList<AggregateIntent> aggregates,
         int[] sourceOrdinals,
         int outputWidth)
@@ -92,7 +92,7 @@ internal static class AggregateProcessor
     }
 
     private static QueryValue ComputeAggregate(
-        AggregateFunction func, List<QueryValue[]> rows, int columnOrdinal)
+        AggregateFunction func, RowSet rows, int columnOrdinal)
     {
         if (func == AggregateFunction.CountStar) return QueryValue.FromInt64(rows.Count);
         if (func == AggregateFunction.Count) return QueryValue.FromInt64(CountNonNull(rows, columnOrdinal));
@@ -110,7 +110,7 @@ internal static class AggregateProcessor
         throw new NotSupportedException($"Unsupported aggregate function: {func}");
     }
 
-    private static long CountNonNull(List<QueryValue[]> rows, int ordinal)
+    private static long CountNonNull(RowSet rows, int ordinal)
     {
         long count = 0;
         foreach (var row in rows)
@@ -121,7 +121,7 @@ internal static class AggregateProcessor
         return count;
     }
 
-    private static long SumColumnInt(List<QueryValue[]> rows, int ordinal)
+    private static long SumColumnInt(RowSet rows, int ordinal)
     {
         long sum = 0;
         foreach (var row in rows)
@@ -132,7 +132,7 @@ internal static class AggregateProcessor
         return sum;
     }
 
-    private static double SumColumnDouble(List<QueryValue[]> rows, int ordinal)
+    private static double SumColumnDouble(RowSet rows, int ordinal)
     {
         double sum = 0;
         foreach (var row in rows)
@@ -146,7 +146,7 @@ internal static class AggregateProcessor
         return sum;
     }
 
-    private static bool HasDoubleValues(List<QueryValue[]> rows, int ordinal)
+    private static bool HasDoubleValues(RowSet rows, int ordinal)
     {
         foreach (var row in rows)
         {
@@ -156,7 +156,7 @@ internal static class AggregateProcessor
         return false;
     }
 
-    private static double AvgColumn(List<QueryValue[]> rows, int ordinal)
+    private static double AvgColumn(RowSet rows, int ordinal)
     {
         double sum = 0;
         long count = 0;
@@ -171,7 +171,7 @@ internal static class AggregateProcessor
         return count > 0 ? sum / count : 0.0;
     }
 
-    private static QueryValue MinColumn(List<QueryValue[]> rows, int ordinal)
+    private static QueryValue MinColumn(RowSet rows, int ordinal)
     {
         QueryValue min = QueryValue.Null;
         bool hasValue = false;
@@ -188,7 +188,7 @@ internal static class AggregateProcessor
         return hasValue ? min : QueryValue.Null;
     }
 
-    private static QueryValue MaxColumn(List<QueryValue[]> rows, int ordinal)
+    private static QueryValue MaxColumn(RowSet rows, int ordinal)
     {
         QueryValue max = QueryValue.Null;
         bool hasValue = false;
@@ -205,11 +205,11 @@ internal static class AggregateProcessor
         return hasValue ? max : QueryValue.Null;
     }
 
-    private static Dictionary<GroupKey, List<QueryValue[]>> GroupRows(
-        List<QueryValue[]> rows, int[] groupOrdinals)
+    private static Dictionary<GroupKey, RowSet> GroupRows(
+        RowSet rows, int[] groupOrdinals)
     {
         var comparer = new GroupKeyComparer(groupOrdinals);
-        var groups = new Dictionary<GroupKey, List<QueryValue[]>>(comparer);
+        var groups = new Dictionary<GroupKey, RowSet>(comparer);
 
         foreach (var row in rows)
         {

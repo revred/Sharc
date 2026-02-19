@@ -62,7 +62,16 @@ internal static class JoinExecutor
         }
     }
 
-    public static SharcDataReader Execute(SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters)
+    /// <summary>
+    /// Executes a JOIN query using a Hash Join strategy.
+    /// Builds an execution plan that pushes filters down to individual tables,
+    /// materializes the primary table, then probes each joined table using a
+    /// hash map on the join key. Residual cross-table predicates are evaluated
+    /// post-join. Returns a streaming reader over the matched rows.
+    /// </summary>
+    public static SharcDataReader Execute(
+        SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters,
+        CoteMap? coteResults = null)
     {
         // 1. Plan the execution: identify required columns and pushable filters
         var plan = BuildPlan(intent);
@@ -71,10 +80,17 @@ internal static class JoinExecutor
         var primaryAlias = intent.TableAlias ?? intent.TableName;
         var primaryNode = plan.Nodes[primaryAlias];
         var baseIntent = CloneWithPushdown(intent, primaryNode);
-        
+
         // We use MaterializeRows to get an IEnumerable for the primary table
-        var (leftRows, leftSchema) = MaterializeRows(db, baseIntent, parameters, primaryAlias);
+        var (leftRows, leftSchema) = MaterializeRows(db, baseIntent, parameters, primaryAlias, coteResults);
         IEnumerable<QueryValue[]> probeStream = leftRows;
+
+        // When the downstream path will project (creating new arrays from merged rows),
+        // the merged arrays are consumed as scratch buffers and can be reused — one
+        // allocation per join stage instead of one per result row.
+        bool willProject = intent.Columns != null;
+        bool willMaterialize = intent.OrderBy is { Count: > 0 };
+        bool canReuseJoinBuffer = willProject && !willMaterialize;
 
         // 3. Chain joins sequentially
         if (intent.Joins != null)
@@ -84,8 +100,8 @@ internal static class JoinExecutor
                 var joinAlias = join.TableAlias ?? join.TableName;
                 var joinNode = plan.Nodes[joinAlias];
                 var rightIntent = CloneWithPushdown(new QueryIntent { TableName = join.TableName, TableAlias = join.TableAlias }, joinNode);
-                
-                var (rightRows, rightSchema) = MaterializeRows(db, rightIntent, parameters, joinAlias);
+
+                var (rightRows, rightSchema) = MaterializeRows(db, rightIntent, parameters, joinAlias, coteResults);
 
                 // Merge schemas (always [left, right]) — pre-sized to avoid rehashing
                 var mergedSchema = new Dictionary<string, int>(leftSchema.Count + rightSchema.Count, StringComparer.OrdinalIgnoreCase);
@@ -101,7 +117,7 @@ internal static class JoinExecutor
                 }
 
                 //perform the streaming join
-                probeStream = HashJoin(probeStream, leftSchema, rightRows, rightSchema, join);
+                probeStream = HashJoin(probeStream, leftSchema, rightRows, rightSchema, join, canReuseJoinBuffer);
                 leftSchema = mergedSchema;
             }
         }
@@ -159,7 +175,7 @@ internal static class JoinExecutor
     private static IEnumerable<QueryValue[]> HashJoin(
         IEnumerable<QueryValue[]> leftRows, Dictionary<string, int> leftSchema,
         IEnumerable<QueryValue[]> rightRows, Dictionary<string, int> rightSchema,
-        JoinIntent join)
+        JoinIntent join, bool reuseBuffer = false)
     {
         int rightColumnCount = rightSchema.Count;
         int leftColumnCount = leftSchema.Count;
@@ -167,13 +183,13 @@ internal static class JoinExecutor
 
         // For now, always build on Right side to support streaming Left.
         // In the future, a cost-based optimizer could swap these if Kind == Inner.
-        var buildRows = (rightRows as List<QueryValue[]>) ?? rightRows.ToList();
+        var buildRows = (rightRows as RowSet) ?? rightRows.ToList();
         var buildSchema = rightSchema;
         var buildCol = join.RightColumn;
         var probeCol = join.LeftColumn;
 
         // Build Hash Table
-        var hashTable = new Dictionary<QueryValue, List<QueryValue[]>>(buildRows.Count);
+        var hashTable = new Dictionary<QueryValue, RowSet>(buildRows.Count);
         if (join.Kind != JoinType.Cross)
         {
             if (!buildSchema.TryGetValue(buildCol!, out int buildColIdx))
@@ -186,7 +202,7 @@ internal static class JoinExecutor
 
                 if (!hashTable.TryGetValue(key, out var list))
                 {
-                    list = new List<QueryValue[]>(4); // Most buckets are small
+                    list = new RowSet(4); // Most buckets are small
                     hashTable[key] = list;
                 }
                 list.Add(row);
@@ -210,12 +226,19 @@ internal static class JoinExecutor
             Array.Fill(leftJoinNullRow, QueryValue.Null);
         }
 
+        // When reuseBuffer is true, the downstream will project (copy needed columns
+        // into a new narrower array) before exposing the row. This makes the merged
+        // array a scratch buffer: we allocate ONE and overwrite it on every yield.
+        // Safe because yield return pauses until the consumer calls MoveNext(), and
+        // ProjectRows reads the buffer BEFORE advancing the source iterator.
+        QueryValue[]? scratch = reuseBuffer ? new QueryValue[mergedWidth] : null;
+
         foreach (var probeRow in leftRows)
         {
             if (join.Kind == JoinType.Cross)
             {
                 foreach (var buildRow in buildRows)
-                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount);
+                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
                 continue;
             }
 
@@ -224,21 +247,21 @@ internal static class JoinExecutor
             {
                 foreach (var buildRow in matches)
                 {
-                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount);
+                    yield return MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
                 }
             }
             else if (join.Kind == JoinType.Left)
             {
-                yield return MergeRows(probeRow, leftJoinNullRow!, mergedWidth, leftColumnCount);
+                yield return MergeRows(probeRow, leftJoinNullRow!, mergedWidth, leftColumnCount, scratch);
             }
         }
     }
 
-    private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right, int mergedWidth, int leftLen)
+    private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right, int mergedWidth, int leftLen, QueryValue[]? scratch = null)
     {
-        var combined = new QueryValue[mergedWidth];
-        Array.Copy(left, 0, combined, 0, leftLen);
-        Array.Copy(right, 0, combined, leftLen, right.Length);
+        var combined = scratch ?? new QueryValue[mergedWidth];
+        left.AsSpan(0, leftLen).CopyTo(combined);
+        right.AsSpan().CopyTo(combined.AsSpan(leftLen));
         return combined;
     }
 
@@ -262,16 +285,27 @@ internal static class JoinExecutor
     }
 
     private static (IEnumerable<QueryValue[]> Rows, Dictionary<string, int> Schema) MaterializeRows(
-        SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters, string prefix)
+        SharcDatabase db, QueryIntent intent, IReadOnlyDictionary<string, object>? parameters, string prefix,
+        CoteMap? coteResults = null)
     {
+        // Pre-materialized Cote data: use it directly instead of reading from disk
+        if (coteResults != null && coteResults.TryGetValue(intent.TableName, out var coteData))
+        {
+            var schema = new Dictionary<string, int>(coteData.Columns.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < coteData.Columns.Length; i++)
+                schema[string.Concat(prefix, ".", coteData.Columns[i])] = i;
+
+            return (coteData.Rows, schema);
+        }
+
         var reader = db.CreateReaderFromIntent(intent, parameters);
         var fieldCount = reader.FieldCount;
-        
-        var schema = new Dictionary<string, int>(fieldCount, StringComparer.OrdinalIgnoreCase);
+
+        var schema2 = new Dictionary<string, int>(fieldCount, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < fieldCount; i++)
         {
             string name = reader.GetColumnName(i);
-            schema[string.Concat(prefix, ".", name)] = i;
+            schema2[string.Concat(prefix, ".", name)] = i;
         }
 
         IEnumerable<QueryValue[]> Iterator()
@@ -290,7 +324,7 @@ internal static class JoinExecutor
             }
         }
 
-        return (Iterator(), schema);
+        return (Iterator(), schema2);
     }
 
     private static QueryValue ReadValue(SharcDataReader reader, int ordinal)
@@ -406,6 +440,12 @@ internal static class JoinExecutor
         }
     }
 
+    /// <summary>
+    /// Decomposes a WHERE predicate into per-table push-down filters.
+    /// Walks the AND tree and, for each leaf or sub-tree that references only a single
+    /// table alias, pushes it down to that table's node in the execution plan.
+    /// Predicates that span multiple tables remain as post-join residual filters.
+    /// </summary>
     private static void SplitFilters(PredicateIntent filter, JoinExecutionPlan plan)
     {
         var nodes = filter.Nodes;

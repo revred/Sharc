@@ -49,9 +49,9 @@ The Graph API already achieves ~13.5x faster traversal than SQLite recursive CTE
 See [Sharq Reference](ParsingTsql.md).
 
 ### Can I just use regular SQL?
-Yes! Sharq supports `SELECT`, `FROM`, `WHERE`, `ORDER BY`, `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, Cotes (`WITH ... AS`), and parameterized queries (`$param`). You only need the arrow syntax for Graph Engine features.
+Yes! Sharq supports `SELECT`, `FROM`, `WHERE`, `JOIN` (INNER/LEFT/CROSS), `ORDER BY`, `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, Cotes (`WITH ... AS`), and parameterized queries (`$param`). You only need the arrow syntax for Graph Engine features.
 
-> **Note:** `CASE` expressions and window functions (`OVER`, `PARTITION BY`) are parsed but not yet executable. `JOIN` is not supported — use `UNION`/Cote for multi-table workflows.
+> **Note:** `CASE` expressions and window functions (`OVER`, `PARTITION BY`) are parsed but not yet executable. `INNER JOIN`, `LEFT JOIN`, and `CROSS JOIN` are supported; `RIGHT JOIN` and `FULL OUTER JOIN` are not.
 
 ---
 

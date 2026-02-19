@@ -42,4 +42,10 @@ public sealed class QueryPlan
     /// and topological sorts for shared views.
     /// </summary>
     internal QueryPlan? ResolvedViewPlan { get; set; }
+
+    /// <summary>
+    /// The registered-view generation counter at the time <see cref="ResolvedViewPlan"/>
+    /// was computed. Allows invalidation when views are registered or unregistered.
+    /// </summary>
+    internal int ResolvedViewGeneration { get; set; }
 }
