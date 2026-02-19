@@ -525,26 +525,22 @@ public sealed class SharcEngine : IDisposable
     {
         if (_graph == null) return (0, 0);
 
-        // Use zero-allocation cursor — avoids string materialization in GetEdges/MapToEdge.
-        // GetEdgeCursor returns the raw IEdgeCursor with TargetKey property directly.
+        // Zero-allocation cursor: edge-only 2-hop traversal.
+        // GetEdgeCursor returns raw IEdgeCursor — no GraphEdge allocation, no concept B-tree lookups.
         using var cursor = _graph.GetEdgeCursor(new NodeKey(startKey));
 
         // Hop 1: collect unique target keys via index seek (O(log N + M))
         var hop1Targets = new HashSet<long>(32);
         while (cursor.MoveNext())
-        {
             hop1Targets.Add(cursor.TargetKey);
-        }
 
         // Hop 2: count edges from each hop-1 target — reuse cursor via Reset
-        var hop2Count = 0;
+        int hop2Count = 0;
         foreach (var target in hop1Targets)
         {
             cursor.Reset(target);
             while (cursor.MoveNext())
-            {
                 hop2Count++;
-            }
         }
 
         return (hop1Targets.Count, hop2Count);

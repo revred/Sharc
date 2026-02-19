@@ -78,15 +78,15 @@
     "sectionId": "graph-ops",
     "scaleMode": "fixed",
     "defaultDensity": "md",
-    "methodology": "Expanding the local knowledge graph for an agent. Sharc uses context-aware SeekFirst. Measured: 6.27\u03bcs vs 78.49\u03bcs.",
-    "whyItMatters": "Graph traversal is how agents expand context - from one fact to related concepts. 12.5x faster traversal unlocks real-time knowledge exploration.",
+    "methodology": "Expanding the local knowledge graph for an agent. Sharc uses zero-allocation cursor BFS: edge-only 2-hop traversal with cursor Reset(). Measured: 2.60\u03bcs vs 81.55\u03bcs.",
+    "whyItMatters": "Graph traversal is how agents expand context - from one fact to related concepts. 31x faster traversal unlocks real-time knowledge exploration.",
     "densityTiers": [
       { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 78.49, "allocation": "2.7 KB", "note": "SQL JOIN/WHERE overhead" },
+      "sqlite":    { "value": 81.55, "allocation": "2.8 KB", "note": "SQL JOIN/WHERE overhead" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 6.27,  "allocation": "10.9 KB", "note": "12.5x - native graph seek" }
+      "sharc":     { "value": 2.60,  "allocation": "928 B", "note": "31x - zero-alloc cursor BFS" }
     }
   }
 ]
