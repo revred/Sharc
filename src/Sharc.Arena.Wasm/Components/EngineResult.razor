@@ -54,7 +54,7 @@ else
             }
         </div>
         <AllocationBar Allocation="@Result.Allocation" WidthPercent="@AllocBarWidth" Color="@(Engine.Color + "40")" />
-        @if (IsWinner && WinnerValue.HasValue && MaxValue > 0)
+        @if (IsWinner && WinnerValue.HasValue && WinnerValue.Value > 0 && MaxValue > 0)
         {
             var speedup = MaxValue / WinnerValue.Value;
             <SpeedupBadge Speedup="@speedup" Color="@Engine.Color" />
@@ -101,7 +101,8 @@ else
             "ns" when val < 10     => $"{val:F1} ns",
             "ns"                   => $"{Math.Round(val)} ns",
 
-            "\u03BCs" when val >= 1000 => $"{val / 1000.0:F1} ms",
+            "\u03BCs" when val >= 1000  => $"{val / 1000.0:F1} ms",
+            "\u03BCs" when val < 0.1   => $"{val * 1000:F0} ns",
             "\u03BCs" when val < 10    => $"{val:F1} \u03BCs",
             "\u03BCs"                  => $"{Math.Round(val)} \u03BCs",
 
