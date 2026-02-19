@@ -15,11 +15,11 @@ internal static class SetOperationProcessor
     /// Removes duplicate rows using structural equality (element-by-element comparison).
     /// Preserves first-occurrence ordering.
     /// </summary>
-    internal static List<QueryValue[]> ApplyDistinct(List<QueryValue[]> rows, int columnCount)
+    internal static RowSet ApplyDistinct(RowSet rows, int columnCount)
     {
         var comparer = new QueryValueOps.QvRowEqualityComparer(columnCount);
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>(rows.Count);
+        var result = new RowSet(rows.Count);
 
         foreach (var row in rows)
         {
@@ -33,10 +33,10 @@ internal static class SetOperationProcessor
     /// <summary>
     /// Applies the specified compound set operation (UNION ALL, UNION, INTERSECT, EXCEPT).
     /// </summary>
-    internal static List<QueryValue[]> Apply(
+    internal static RowSet Apply(
         CompoundOperator op,
-        List<QueryValue[]> left,
-        List<QueryValue[]> right,
+        RowSet left,
+        RowSet right,
         int columnCount)
     {
         return op switch
@@ -49,19 +49,19 @@ internal static class SetOperationProcessor
         };
     }
 
-    private static List<QueryValue[]> UnionAll(List<QueryValue[]> left, List<QueryValue[]> right)
+    private static RowSet UnionAll(RowSet left, RowSet right)
     {
-        var result = new List<QueryValue[]>(left.Count + right.Count);
+        var result = new RowSet(left.Count + right.Count);
         result.AddRange(left);
         result.AddRange(right);
         return result;
     }
 
-    private static List<QueryValue[]> Union(List<QueryValue[]> left, List<QueryValue[]> right, int colCount)
+    private static RowSet Union(RowSet left, RowSet right, int colCount)
     {
         var comparer = new QueryValueOps.QvRowEqualityComparer(colCount);
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>(left.Count + right.Count);
+        var result = new RowSet(left.Count + right.Count);
 
         foreach (var row in left)
         {
@@ -76,12 +76,12 @@ internal static class SetOperationProcessor
         return result;
     }
 
-    private static List<QueryValue[]> Intersect(List<QueryValue[]> left, List<QueryValue[]> right, int colCount)
+    private static RowSet Intersect(RowSet left, RowSet right, int colCount)
     {
         var comparer = new QueryValueOps.QvRowEqualityComparer(colCount);
         var rightSet = new HashSet<QueryValue[]>(right, comparer);
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>();
+        var result = new RowSet();
 
         foreach (var row in left)
         {
@@ -91,12 +91,12 @@ internal static class SetOperationProcessor
         return result;
     }
 
-    private static List<QueryValue[]> Except(List<QueryValue[]> left, List<QueryValue[]> right, int colCount)
+    private static RowSet Except(RowSet left, RowSet right, int colCount)
     {
         var comparer = new QueryValueOps.QvRowEqualityComparer(colCount);
         var rightSet = new HashSet<QueryValue[]>(right, comparer);
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>();
+        var result = new RowSet();
 
         foreach (var row in left)
         {

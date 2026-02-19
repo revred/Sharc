@@ -24,7 +24,7 @@ internal static class StreamingSetOpProcessor
         var columnNames = leftReader.GetColumnNames();
         var comparer = new QueryValueOps.QvRowEqualityComparer(fieldCount);
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>();
+        var result = new RowSet();
         QueryValue[]? spare = null;
 
         StreamInto(leftReader, fieldCount, seen, result, ref spare);
@@ -50,7 +50,7 @@ internal static class StreamingSetOpProcessor
 
         // Stream left side — only keep rows that exist in rightSet
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>();
+        var result = new RowSet();
         QueryValue[]? spare = null;
 
         while (leftReader.Read())
@@ -85,7 +85,7 @@ internal static class StreamingSetOpProcessor
 
         // Stream left side — only keep rows that do NOT exist in rightSet
         var seen = new HashSet<QueryValue[]>(comparer);
-        var result = new List<QueryValue[]>();
+        var result = new RowSet();
         QueryValue[]? spare = null;
 
         while (leftReader.Read())
@@ -113,7 +113,7 @@ internal static class StreamingSetOpProcessor
         SharcDataReader reader,
         int fieldCount,
         HashSet<QueryValue[]> seen,
-        List<QueryValue[]> result,
+        RowSet result,
         ref QueryValue[]? spare)
     {
         while (reader.Read())

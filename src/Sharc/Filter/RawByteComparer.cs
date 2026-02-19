@@ -55,6 +55,17 @@ internal static class RawByteComparer
     }
 
     /// <summary>
+    /// Decodes an integral column, casts to double, and compares with a double filter value.
+    /// Used for cross-type comparisons (INTEGER column vs REAL filter).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int CompareIntAsDouble(ReadOnlySpan<byte> data, long serialType, double filterValue)
+    {
+        double columnValue = (double)DecodeInt64(data, serialType);
+        return columnValue.CompareTo(filterValue);
+    }
+
+    /// <summary>
     /// Decodes a double from raw bytes (serial type 7).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

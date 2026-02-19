@@ -15,6 +15,7 @@ internal static class JitMethodRegistry
     // RawByteComparer methods
     public static readonly MethodInfo CompareInt64 = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.CompareInt64), typeof(ReadOnlySpan<byte>), typeof(long), typeof(long));
     public static readonly MethodInfo CompareDouble = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.CompareDouble), typeof(ReadOnlySpan<byte>), typeof(double));
+    public static readonly MethodInfo CompareIntAsDouble = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.CompareIntAsDouble), typeof(ReadOnlySpan<byte>), typeof(long), typeof(double));
     public static readonly MethodInfo Utf8Compare = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.Utf8Compare), typeof(ReadOnlySpan<byte>), typeof(byte[]));
     public static readonly MethodInfo Utf8StartsWith = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.Utf8StartsWith), typeof(ReadOnlySpan<byte>), typeof(byte[]));
     public static readonly MethodInfo Utf8EndsWith = GetMethod(typeof(RawByteComparer), nameof(RawByteComparer.Utf8EndsWith), typeof(ReadOnlySpan<byte>), typeof(byte[]));

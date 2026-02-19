@@ -7,6 +7,7 @@ using Sharc.Core;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 using Sharc.Core.Query;
+using Sharc.Query;
 
 namespace Sharc;
 
@@ -70,9 +71,9 @@ public sealed class SharcDataReader : IDisposable
     private string[]? _cachedColumnNames;
 
     // Unboxed materialized mode — QueryValue stores int/double inline without boxing
-    private readonly Query.QueryValue[][]? _queryValueRows;
-    private readonly List<Query.QueryValue[]>? _queryValueList;
-    private IEnumerator<Query.QueryValue[]>? _queryValueEnumerator;
+    private readonly QueryValue[][]? _queryValueRows;
+    private readonly RowSet? _queryValueList;
+    private IEnumerator<QueryValue[]>? _queryValueEnumerator;
 
     // Concatenating mode — streams two readers sequentially for UNION ALL
     private readonly SharcDataReader? _concatFirst;
@@ -190,11 +191,11 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
-    /// Creates an unboxed materialized reader from <see cref="Query.QueryValue"/> rows.
+    /// Creates an unboxed materialized reader from <see cref="QueryValue"/> rows.
     /// Typed accessors (GetInt64, GetDouble, GetString) read values without boxing.
     /// Boxing only occurs when the caller invokes <see cref="GetValue(int)"/>.
     /// </summary>
-    internal SharcDataReader(Query.QueryValue[][] rows, string[] columnNames)
+    internal SharcDataReader(QueryValue[][] rows, string[] columnNames)
     {
         _queryValueRows = rows;
         _materializedColumnNames = columnNames;
@@ -203,10 +204,10 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
-    /// Creates an unboxed materialized reader from a List of <see cref="Query.QueryValue"/> rows.
+    /// Creates an unboxed materialized reader from a List of <see cref="QueryValue"/> rows.
     /// Eliminates the <c>.ToArray()</c> copy that the array constructor requires.
     /// </summary>
-    internal SharcDataReader(List<Query.QueryValue[]> rows, string[] columnNames)
+    internal SharcDataReader(RowSet rows, string[] columnNames)
     {
         _queryValueList = rows;
         _materializedColumnNames = columnNames;
@@ -218,7 +219,7 @@ public sealed class SharcDataReader : IDisposable
     /// Creates a streaming reader from an <see cref="IEnumerable{T}"/> of rows.
     /// Used for low-allocation JOIN and filtered streaming.
     /// </summary>
-    internal SharcDataReader(IEnumerable<Query.QueryValue[]> rows, string[] columnNames)
+    internal SharcDataReader(IEnumerable<QueryValue[]> rows, string[] columnNames)
     {
         _queryValueEnumerator = rows.GetEnumerator();
         _materializedColumnNames = columnNames;
@@ -263,11 +264,11 @@ public sealed class SharcDataReader : IDisposable
         ?? _projection?.Length
         ?? _columns!.Count;
 
-    /// <summary>Returns true when the reader is in unboxed <see cref="Query.QueryValue"/> mode.</summary>
+    /// <summary>Returns true when the reader is in unboxed <see cref="QueryValue"/> mode.</summary>
     private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null || _queryValueEnumerator != null;
 
     /// <summary>Gets the current row in materialized mode (array or list).</summary>
-    private Query.QueryValue[] CurrentMaterializedRow
+    private QueryValue[] CurrentMaterializedRow
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
@@ -655,7 +656,7 @@ public sealed class SharcDataReader : IDisposable
         if (IsQueryValueMode)
         {
             var qv = CurrentMaterializedRow[ordinal];
-            return qv.Type == Query.QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
+            return qv.Type == QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
         }
 
         // Fast path: decode directly from page span using precomputed O(1) offset
@@ -784,11 +785,11 @@ public sealed class SharcDataReader : IDisposable
         {
             return CurrentMaterializedRow[ordinal].Type switch
             {
-                Query.QueryValueType.Null => SharcColumnType.Null,
-                Query.QueryValueType.Int64 => SharcColumnType.Integral,
-                Query.QueryValueType.Double => SharcColumnType.Real,
-                Query.QueryValueType.Text => SharcColumnType.Text,
-                Query.QueryValueType.Blob => SharcColumnType.Blob,
+                QueryValueType.Null => SharcColumnType.Null,
+                QueryValueType.Int64 => SharcColumnType.Integral,
+                QueryValueType.Double => SharcColumnType.Real,
+                QueryValueType.Text => SharcColumnType.Text,
+                QueryValueType.Blob => SharcColumnType.Blob,
                 _ => SharcColumnType.Null,
             };
         }
@@ -1020,16 +1021,16 @@ public sealed class SharcDataReader : IDisposable
             ref var val = ref row[i];
             switch (val.Type)
             {
-                case Query.QueryValueType.Null:
+                case QueryValueType.Null:
                     hasher.AddTypeTag(i, 0);
                     hasher.AppendLong(0); break;
-                case Query.QueryValueType.Int64:
+                case QueryValueType.Int64:
                     hasher.AddTypeTag(i, 1);
                     hasher.AppendLong(val.AsInt64()); break;
-                case Query.QueryValueType.Double:
+                case QueryValueType.Double:
                     hasher.AddTypeTag(i, 2);
                     hasher.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
-                case Query.QueryValueType.Text:
+                case QueryValueType.Text:
                     hasher.AddTypeTag(i, 3);
                     hasher.Append(System.Text.Encoding.UTF8.GetBytes(val.AsString())); break;
                 default:
@@ -1057,13 +1058,13 @@ public sealed class SharcDataReader : IDisposable
             var h = new Fnv1aHasher();
             switch (val.Type)
             {
-                case Query.QueryValueType.Int64:
+                case QueryValueType.Int64:
                     h.AddTypeTag(0, 1);
                     h.AppendLong(val.AsInt64()); break;
-                case Query.QueryValueType.Double:
+                case QueryValueType.Double:
                     h.AddTypeTag(0, 2);
                     h.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
-                case Query.QueryValueType.Text:
+                case QueryValueType.Text:
                     h.AddTypeTag(0, 3);
                     h.Append(System.Text.Encoding.UTF8.GetBytes(val.AsString())); break;
                 default:

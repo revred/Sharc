@@ -9,6 +9,10 @@ using Sharc.Core.Schema;
 using Sharc.Crypto;
 using Sharc.Exceptions;
 using global::Sharc.Core.Query;
+using Sharc.Query;
+using Sharc.Query.Execution;
+using Sharc.Query.Sharq;
+using Intent = global::Sharc.Query.Intent;
 
 namespace Sharc;
 
@@ -16,6 +20,11 @@ namespace Sharc;
 /// Primary entry point for reading SQLite databases.
 /// Supports file-backed and in-memory databases with optional encryption.
 /// </summary>
+/// <remarks>
+/// <b>Thread safety:</b> This class is NOT thread-safe. All operations — including
+/// <see cref="Query(string)"/>, <see cref="RegisterView"/>, and <see cref="CreateReader(string, string[])"/> —
+/// must be called from a single thread or externally synchronized.
+/// </remarks>
 /// <example>
 /// <code>
 /// // File-backed
@@ -51,14 +60,17 @@ public sealed class SharcDatabase : IDisposable
     private readonly ISharcBufferPool _bufferPool = SharcBufferPool.Shared;
     private SharcSchema? _schema;
     private bool _disposed;
-    private global::Sharc.Query.QueryPlanCache? _queryCache;
+    private QueryPlanCache? _queryCache;
+
+    // ─── Registered programmatic views ────────────────────────────
+    private readonly Views.ViewResolver _viewResolver;
 
     // ─── Compiled-query cache ─────────────────────────────────────
     // Eliminates per-invocation Expression.Lambda().Compile() overhead
     // by caching the JIT-compiled filter delegate, projection array,
     // and table metadata for each unique (intent, parameters) pair.
     private System.Collections.Concurrent.ConcurrentDictionary<
-        global::Sharc.Query.Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
+        Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
     private System.Collections.Concurrent.ConcurrentDictionary<long, IFilterNode>? _paramFilterCache;
 
     private sealed class CachedReaderInfo
@@ -158,6 +170,7 @@ public sealed class SharcDatabase : IDisposable
         _info = info;
         FilePath = filePath;
         _keyHandle = keyHandle;
+        _viewResolver = new Views.ViewResolver(this);
 
         // Register default extensions
         if (_recordDecoder is ISharcExtension ext)
@@ -170,9 +183,75 @@ public sealed class SharcDatabase : IDisposable
     /// <summary>
     /// Lazily loads the schema on first access. Avoids ~15-28 KB allocation on
     /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
+    /// Enriches ViewInfo objects with structural metadata from CREATE VIEW SQL.
     /// </summary>
     private SharcSchema GetSchema() =>
-        _schema ??= new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema();
+        _schema ??= EnrichViewMetadata(new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema());
+
+    /// <summary>
+    /// Exposes the schema for internal consumers (e.g. <see cref="Views.ViewResolver"/>)
+    /// that need access without the <see cref="ObjectDisposedException"/> guard.
+    /// </summary>
+    internal SharcSchema GetSchemaInternal() => GetSchema();
+
+    /// <summary>
+    /// Enriches ViewInfo objects with structural metadata parsed from CREATE VIEW SQL.
+    /// Cold path — runs once per schema load.
+    /// </summary>
+    private static SharcSchema EnrichViewMetadata(SharcSchema schema)
+    {
+        if (schema.Views.Count == 0) return schema;
+
+        var enrichedViews = new ViewInfo[schema.Views.Count];
+        bool anyEnriched = false;
+
+        for (int i = 0; i < schema.Views.Count; i++)
+        {
+            var view = schema.Views[i];
+            var result = ViewSqlScanner.Scan(view.Sql);
+
+            if (result.ParseSucceeded)
+            {
+                var columns = new ViewColumnInfo[result.Columns.Length];
+                for (int c = 0; c < result.Columns.Length; c++)
+                {
+                    ref var col = ref result.Columns[c];
+                    columns[c] = new ViewColumnInfo
+                    {
+                        SourceName = col.SourceName,
+                        DisplayName = col.DisplayName,
+                        Ordinal = col.Ordinal
+                    };
+                }
+
+                enrichedViews[i] = new ViewInfo
+                {
+                    Name = view.Name,
+                    Sql = view.Sql,
+                    SourceTables = result.SourceTables,
+                    Columns = columns,
+                    IsSelectAll = result.IsSelectAll,
+                    HasJoin = result.HasJoin,
+                    HasFilter = result.HasFilter,
+                    ParseSucceeded = true
+                };
+                anyEnriched = true;
+            }
+            else
+            {
+                enrichedViews[i] = view;
+            }
+        }
+
+        if (!anyEnriched) return schema;
+
+        return new SharcSchema
+        {
+            Tables = schema.Tables,
+            Indexes = schema.Indexes,
+            Views = enrichedViews
+        };
+    }
         
     internal void InvalidateSchema()
     {
@@ -229,6 +308,53 @@ public sealed class SharcDatabase : IDisposable
     /// <returns>An open database instance.</returns>
     public static SharcDatabase OpenMemory(ReadOnlyMemory<byte> data, SharcOpenOptions? options = null) =>
         SharcDatabaseFactory.OpenMemory(data, options);
+
+    /// <summary>
+    /// Registers a programmatic <see cref="Views.SharcView"/> by name.
+    /// Registered views are accessible via <see cref="OpenView"/> and
+    /// resolvable in <see cref="Query(string)"/> SQL statements.
+    /// If a view with the same name already exists, it is overwritten.
+    /// </summary>
+    /// <param name="view">The view to register. Must not be null.</param>
+    public void RegisterView(Views.SharcView view)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _viewResolver.RegisterView(view);
+    }
+
+    /// <summary>
+    /// Returns the names of all currently registered programmatic views.
+    /// </summary>
+    public IReadOnlyCollection<string> ListRegisteredViews()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.ListRegisteredViews();
+    }
+
+    /// <summary>
+    /// Removes a previously registered programmatic view by name.
+    /// </summary>
+    /// <param name="viewName">The name of the view to remove.</param>
+    /// <returns>True if the view was found and removed; false otherwise.</returns>
+    public bool UnregisterView(string viewName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.UnregisterView(viewName);
+    }
+
+    /// <summary>
+    /// Opens a named view as a zero-allocation <see cref="Views.IViewCursor"/>.
+    /// Checks registered programmatic views first, then falls back to
+    /// auto-promotable SQLite views in <c>sqlite_schema</c>.
+    /// </summary>
+    /// <param name="viewName">Name of the view to open.</param>
+    /// <returns>A forward-only cursor over the view's projected rows.</returns>
+    /// <exception cref="KeyNotFoundException">The view does not exist or is not auto-promotable.</exception>
+    public Views.IViewCursor OpenView(string viewName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.OpenView(viewName);
+    }
 
     /// <summary>
     /// Creates a forward-only reader for the specified table with optional column projection and filtering.
@@ -341,6 +467,12 @@ public sealed class SharcDatabase : IDisposable
         Core.Trust.AgentInfo agent)
         => QueryCore(parameters, sharqQuery, agent);
 
+    /// <summary>
+    /// Core query execution pipeline: parse/cache → resolve views → enforce entitlements → dispatch.
+    /// Simple queries go through the compiled-query cache for zero-overhead repeats.
+    /// Compound/Cote queries are dispatched to <see cref="CompoundQueryExecutor"/>.
+    /// JOIN queries are dispatched to <see cref="JoinExecutor"/>.
+    /// </summary>
     private SharcDataReader QueryCore(
         IReadOnlyDictionary<string, object>? parameters,
         string sharqQuery,
@@ -349,160 +481,71 @@ public sealed class SharcDatabase : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         EnsureSchemaUpToDate();
 
-        var cache = _queryCache ??= new global::Sharc.Query.QueryPlanCache();
+        var cache = _queryCache ??= new QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
         // Resolve views (recursively rewrites view tables as Cotes)
-        if (plan.ResolvedViewPlan != null)
+        // Note: registered views with filters are NOT cacheable in the plan
+        // because they require pre-materialization on every call.
+        CoteMap? preMaterialized = null;
+
+        // DECISION: effectiveGen = -1 sentinel when no views are registered.
+        // This ensures that a cached plan resolved WITH views is invalidated
+        // when all views are unregistered, since -1 != any real generation counter.
+        int effectiveGen = _viewResolver.EffectiveGeneration;
+
+        if (plan.ResolvedViewPlan != null && plan.ResolvedViewGeneration == effectiveGen)
         {
             plan = plan.ResolvedViewPlan;
         }
         else
         {
-            var resolved = ResolveViews(plan);
+            var resolved = _viewResolver.ResolveViews(plan);
             plan.ResolvedViewPlan = resolved;
+            plan.ResolvedViewGeneration = effectiveGen;
             plan = resolved;
         }
+
+        // Pre-materialize only views with Func filters (not expressible as SQL).
+        // Filter-free views stay as null, enabling the lazy Cote resolution path
+        // in CompoundQueryExecutor — ORDER BY column merging and HasJoins guards
+        // ensure correctness without forcing full materialization.
+        if (_viewResolver.HasRegisteredViews)
+            preMaterialized = _viewResolver.PreMaterializeFilteredViews(plan);
 
         // Enforce entitlements when an agent is specified
         if (agent is not null)
         {
-            // We use global::Sharc.Query.TableReferenceCollector which recursively visits 
-            // Cotes, Joins, and scans Filters/Ordering for all referenced columns.
-            var tables = global::Sharc.Query.TableReferenceCollector.Collect(plan);
+            var tables = TableReferenceCollector.Collect(plan);
             Trust.EntitlementEnforcer.EnforceAll(agent, tables);
         }
 
         // Compound or Cote queries go through the compound executor
         if (plan.IsCompound || plan.HasCotes)
-            return global::Sharc.Query.CompoundQueryExecutor.Execute(this, plan, parameters);
+            return CompoundQueryExecutor.Execute(this, plan, parameters, preMaterialized);
 
         // Simple query — direct execution with compiled-query cache
         var intent = plan.Simple!;
 
         if (intent.HasJoins)
-            return global::Sharc.Query.Execution.JoinExecutor.Execute(this, intent, parameters);
+            return JoinExecutor.Execute(this, intent, parameters);
 
         var reader = CreateReaderFromIntent(intent, parameters);
-        return global::Sharc.Query.QueryPostProcessor.Apply(reader, intent);
-    }
-
-    private global::Sharc.Query.Intent.QueryPlan ResolveViews(global::Sharc.Query.Intent.QueryPlan plan)
-    {
-        var resolvedViews = new Dictionary<string, global::Sharc.Query.Intent.QueryPlan>(StringComparer.OrdinalIgnoreCase);
-        
-        if (plan.Cotes != null)
-        {
-            foreach (var c in plan.Cotes)
-                resolvedViews[c.Name] = c.Query;
-        }
-
-        bool changed = true;
-        int iterations = 0;
-        while (changed && iterations++ < 10)
-        {
-            changed = false;
-            var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            CollectTableRefs(plan, references);
-            foreach (var viewPlan in resolvedViews.Values)
-                CollectTableRefs(viewPlan, references);
-            
-            foreach (var table in references)
-            {
-                if (resolvedViews.ContainsKey(table)) continue;
-                
-                var view = GetSchema().GetView(table);
-                if (view != null)
-                {
-                    string viewSql = global::Sharc.Query.Sharq.ViewSqlScanner.ExtractQuery(view.Sql);
-                    var viewPlan = global::Sharc.Query.Intent.IntentCompiler.CompilePlan(viewSql);
-                    
-                    resolvedViews[table] = viewPlan;
-                    changed = true;
-                }
-            }
-        }
-        
-        if (iterations >= 10 && changed)
-            throw new InvalidOperationException("Recursive view definition depth exceeded limit (10).");
-
-        if (resolvedViews.Count > (plan.Cotes?.Count ?? 0))
-        {
-            // Topological sort of views/cotes to ensure dependencies are returned first.
-            var sortedCotes = new List<global::Sharc.Query.Intent.CoteIntent>();
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var processing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            void Visit(string name, global::Sharc.Query.Intent.QueryPlan p)
-            {
-                if (visited.Contains(name)) return;
-                if (processing.Contains(name)) 
-                    throw new InvalidOperationException($"Cyclic view dependency detected: {name}");
-
-                processing.Add(name);
-
-                var deps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                CollectTableRefs(p, deps);
-
-                foreach (var dep in deps)
-                {
-                    if (resolvedViews.TryGetValue(dep, out var depPlan))
-                    {
-                        Visit(dep, depPlan);
-                    }
-                }
-
-                processing.Remove(name);
-                visited.Add(name);
-                sortedCotes.Add(new global::Sharc.Query.Intent.CoteIntent { Name = name, Query = p });
-            }
-
-            // Ensure we visit all resolved views
-            foreach (var kvp in resolvedViews)
-            {
-                Visit(kvp.Key, kvp.Value);
-            }
-
-            return new global::Sharc.Query.Intent.QueryPlan 
-            {
-                 Simple = plan.Simple,
-                 Compound = plan.Compound,
-                 Cotes = sortedCotes
-            };
-        }
-        return plan;
-    }
-
-    private static void CollectTableRefs(global::Sharc.Query.Intent.QueryPlan plan, HashSet<string> references)
-    {
-        if (plan.Simple != null)
-        {
-            references.Add(plan.Simple.TableName);
-            if (plan.Simple.Joins != null)
-                foreach (var j in plan.Simple.Joins) references.Add(j.TableName);
-        }
-        if (plan.Compound != null)
-        {
-            CollectTableRefs(plan.Compound, references);
-        }
-    }
-
-    private static void CollectTableRefs(global::Sharc.Query.Intent.CompoundQueryPlan compound, HashSet<string> references)
-    {
-        if (compound.Left != null) references.Add(compound.Left.TableName);
-        if (compound.RightSimple != null) references.Add(compound.RightSimple.TableName);
-        if (compound.RightCompound != null) CollectTableRefs(compound.RightCompound, references);
+        return QueryPostProcessor.Apply(reader, intent);
     }
 
     /// <summary>
+    /// Creates a <see cref="SharcDataReader"/> from a parsed <see cref="Intent.QueryIntent"/>.
+    /// Resolves columns, applies filters, and handles column projection before returning
+    /// a cursor positioned at the start of the result set.
     /// </summary>
     internal SharcDataReader CreateReaderFromIntent(
-        global::Sharc.Query.Intent.QueryIntent intent,
+        Intent.QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters)
     {
         var readerCache = _readerInfoCache ??=
             new System.Collections.Concurrent.ConcurrentDictionary<
-                global::Sharc.Query.Intent.QueryIntent, CachedReaderInfo>();
+                Intent.QueryIntent, CachedReaderInfo>();
 
         // Build or retrieve cached reader info (projection, table, filter for non-parameterized)
         if (!readerCache.TryGetValue(intent, out var info))
@@ -512,7 +555,7 @@ public sealed class SharcDatabase : IDisposable
                 ?? throw new KeyNotFoundException($"Table '{intent.TableName}' not found.");
 
             string[]? columns = intent.HasAggregates
-                ? global::Sharc.Query.AggregateProjection.Compute(intent)
+                ? AggregateProjection.Compute(intent)
                 : intent.ColumnsArray;
 
             int[]? projection = null;
@@ -543,7 +586,7 @@ public sealed class SharcDatabase : IDisposable
             IFilterNode? filterNode = null;
             if (intent.Filter.HasValue && !HasParameterNodes(intent.Filter.Value))
             {
-                var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
+                var filterStar = IntentToFilterBridge.Build(
                     intent.Filter.Value, null, intent.TableAlias);
                 filterNode = FilterTreeCompiler.CompileBaked(filterStar, table.Columns, rowidAlias);
             }
@@ -568,7 +611,7 @@ public sealed class SharcDatabase : IDisposable
             long paramKey = ComputeParamCacheKey(intent, parameters);
             node = paramCache.GetOrAdd(paramKey, _ =>
             {
-                var filterStar = global::Sharc.Query.IntentToFilterBridge.Build(
+                var filterStar = IntentToFilterBridge.Build(
                     intent.Filter.Value, parameters, intent.TableAlias);
                 return FilterTreeCompiler.CompileBaked(
                     filterStar, info.Table.Columns, info.RowidAliasOrdinal);
@@ -586,18 +629,18 @@ public sealed class SharcDatabase : IDisposable
         });
     }
 
-    private static bool HasParameterNodes(global::Sharc.Query.Intent.PredicateIntent predicate)
+    private static bool HasParameterNodes(Intent.PredicateIntent predicate)
     {
         foreach (ref readonly var node in predicate.Nodes.AsSpan())
         {
-            if (node.Value.Kind == global::Sharc.Query.Intent.IntentValueKind.Parameter)
+            if (node.Value.Kind == Intent.IntentValueKind.Parameter)
                 return true;
         }
         return false;
     }
 
     private static long ComputeParamCacheKey(
-        global::Sharc.Query.Intent.QueryIntent intent,
+        Intent.QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters)
     {
         var hc = new HashCode();
@@ -709,9 +752,9 @@ public sealed class SharcDatabase : IDisposable
         return -1;
     }
 
-    private static List<IndexInfo> GetTableIndexes(SharcSchema schema, string tableName)
+    private static IReadOnlyList<IndexInfo> GetTableIndexes(SharcSchema schema, string tableName)
     {
-        return schema.GetTable(tableName).Indexes.ToList();
+        return schema.GetTable(tableName).Indexes;
     }
 
 

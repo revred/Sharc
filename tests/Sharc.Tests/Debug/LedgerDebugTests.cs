@@ -92,10 +92,6 @@ public class LedgerDebugTests : IDisposable
         registry.RegisterAgent(agentInfo);
 
         _ledger = new LedgerManager(_db);
-        _ledger.SecurityAudit += (sender, args) => 
-        {
-             File.AppendAllText("C:\\Code\\Sharc\\debug_trace.log", $"[AUDIT] {args.EventType}: {args.Details}\n");
-        };
 
         // Seed some data
         using var tx = _db.BeginTransaction();
@@ -108,9 +104,10 @@ public class LedgerDebugTests : IDisposable
 
     public void Dispose()
     {
+        _ledger = null!;
         _db?.Dispose();
         _signer?.Dispose();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { /* best-effort cleanup */ }
         GC.SuppressFinalize(this);
     }
 

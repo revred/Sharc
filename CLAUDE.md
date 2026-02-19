@@ -19,21 +19,30 @@ dotnet test tests/Sharc.IntegrationTests
 # Run all tests
 dotnet test
 
-# Run benchmarks — ALWAYS use targeted runs, never the full suite
-# Preferred: run by tier (micro ~1.5min, mini ~4min, standard ~20min)
-dotnet run -c Release --project bench/Sharc.Benchmarks -- --tier micro
-dotnet run -c Release --project bench/Sharc.Benchmarks -- --tier mini
+# ─── Benchmarks ───
+# NEVER run the full suite. ALWAYS use small chunks (2-6 benchmarks).
+# See PRC/BenchmarkWorkflow.md for the full profiling protocol.
 
-# Run by specific benchmark name (fastest feedback loop)
-dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter '*TableScanBenchmarks*'
-dotnet run -c Release --project bench/Sharc.Benchmarks -- --filter '*VarintBenchmarks.Read_1Byte'
+# Default profiling technique: run small chunks in background, analyze as results arrive
+# Step 1: Verify what a filter matches
+dotnet run -c Release --project bench/Sharc.Comparisons -- --list flat --filter '*CoreBenchmarks*SequentialScan*'
 
-# Comparisons project (graph + core + write + query benchmarks)
-dotnet run -c Release --project bench/Sharc.Comparisons -- --tier micro
-dotnet run -c Release --project bench/Sharc.Comparisons -- --filter '*WriteBenchmarks*'
+# Step 2: Run a chunk (2-6 benchmarks, ~2-4 min each)
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter '*CoreBenchmarks*SequentialScan*'
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter '*QueryRoundtrip*Aggregate*'
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter '*JoinEfficiency*'
 
-# List available benchmarks without running them
+# Multiple filters for mixed chunks
+dotnet run -c Release --project bench/Sharc.Comparisons -- \
+  --filter '*CoreBenchmarks*FilterStar*' '*CoreBenchmarks*WhereFilter*'
+
+# Tier shortcuts (when chunk-level targeting isn't needed)
+dotnet run -c Release --project bench/Sharc.Benchmarks -- --tier micro   # ~6 benchmarks, ~1.5 min
+dotnet run -c Release --project bench/Sharc.Comparisons -- --tier mini   # ~14 benchmarks, ~4 min
+
+# List all available benchmarks
 dotnet run -c Release --project bench/Sharc.Benchmarks -- --list flat
+dotnet run -c Release --project bench/Sharc.Comparisons -- --list flat
 
 # Run a specific test class
 dotnet test tests/Sharc.Tests --filter "FullyQualifiedName~VarintDecoderTests"
@@ -161,6 +170,17 @@ Sharc.Crypto                 — Encryption (KDF, ciphers, key handles)
 - Column projection: when a reader requests specific columns, skip decoding unwanted columns
 - Overflow page assembly: use `ArrayPool<byte>.Shared` for temporary buffers, return after use
 
+### Benchmark Profiling — Default Technique
+
+When profiling or instrumenting performance, follow the **Run-Analyze-Communicate loop** (see `PRC/BenchmarkWorkflow.md` for full details):
+
+1. **Small chunks**: Run 2-6 benchmarks per batch using `--filter` (not tiers or full suite)
+2. **Background execution**: Launch each chunk in background, analyze previous results while waiting
+3. **Immediate feedback**: Present allocation tables and findings after each chunk completes — never accumulate results in silence
+4. **Source-code tracing**: For any unexpected allocation, trace through the source to build a component-level breakdown
+5. **Tier classification**: Organize results into allocation tiers (Tier 0: zero-GC ≤888 B, Tier 1: +96-296 B per feature, Tier 2: streaming 1.6-5.4 KB, Tier 3: moderate materialization 31-98 KB, Tier 4: heavy materialization 400 KB+, Tier 5: join 1.2-6.2 MB)
+6. **Baseline reference**: Compare against `PRC/PerformanceBaseline.md` for known allocation budgets
+
 ## Project Structure
 
 ```
@@ -222,6 +242,8 @@ All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap
 | Ledger features | `PRC/LedgerFeatures.md` |
 | What to build next | `PRC/ExecutionPlan.md` |
 | How to test | `PRC/TestStrategy.md` |
+| How to benchmark | `PRC/BenchmarkWorkflow.md` |
+| Performance baselines | `PRC/PerformanceBaseline.md` |
 | All decisions made | `PRC/DecisionLog.md` |
 
 ## Asking Questions
