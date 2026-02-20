@@ -592,7 +592,15 @@ public sealed class SharcEngine : IDisposable
     {
         if (_dbBytes is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        EnsureEncryptedDb();
+        try { EnsureEncryptedDb(); }
+        catch (Exception ex) when (ex is PlatformNotSupportedException or System.Security.Cryptography.CryptographicException)
+        {
+            return new EngineBaseResult
+            {
+                NotSupported = true,
+                Note = "AES-GCM not available in browser WASM",
+            };
+        }
         if (_encryptedDbPath is null) return new EngineBaseResult { Value = null, Note = "Encryption setup failed" };
 
         var encOptions = new SharcOpenOptions

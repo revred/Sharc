@@ -2,6 +2,7 @@
 @using System.Diagnostics
 @inject BenchmarkDataLoader DataLoader
 @inject IJSRuntime JS
+@implements IDisposable
 
 <div class="arena-bg-gradient"></div>
 <div class="arena-bg-grid"></div>
@@ -56,7 +57,7 @@
                 @if (_sqliteError is null)
                 {
                     var ratio = _sqliteInitMs / Math.Max(0.001, _sharcInitMs);
-                    <span>Sharc loaded <strong>@($"{ratio:F0}x faster")</strong></span>
+                    <span>Sharc initialized <strong>@($"{ratio:F1}x faster")</strong></span>
                 }
                 else
                 {
@@ -207,6 +208,7 @@ else
     private CancellationTokenSource? _cts;
     private bool _isMobile;
     private bool _showSidebar;
+    private DotNetObjectReference<Arena>? _dotNetRef;
 
     protected override async Task OnInitializedAsync()
     {
@@ -273,6 +275,10 @@ else
                 var width = await JS.InvokeAsync<int>("viewportHelper.getWidth");
                 _isMobile = width < 768;
                 _showSidebar = !_isMobile;
+                
+                _dotNetRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("viewportHelper.observePages", _dotNetRef);
+                
                 StateHasChanged();
             }
             catch
@@ -280,6 +286,13 @@ else
                 // JS not available during prerender
             }
         }
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
+        _cts?.Cancel();
+        _cts?.Dispose();
     }
 
     [JSInvokable]
@@ -304,8 +317,8 @@ else
 
     private void UpdateLayout()
     {
-        _isMobile = false;
-        _showSidebar = true;
+        // Responsive state is now handled in OnAfterRenderAsync via JS interop.
+        // This method remains as a hook for future layout logic.
     }
 
     private void ApplyPreset(string presetId)

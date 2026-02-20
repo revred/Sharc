@@ -111,7 +111,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     /// </summary>
     public record ColdStartResult(double GenerateMs, double SharcMs, long SharcAlloc, double SqliteMs, long SqliteAlloc);
 
-    public ColdStartResult TimeColdStart(int userCount = 500, int nodeCount = 100)
+    public ColdStartResult TimeColdStart(int userCount = 100, int nodeCount = 100)
     {
         var sw = Stopwatch.StartNew();
         byte[] dbBytes;
@@ -274,6 +274,6 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             }
             return Math.Max(50, (int)(5000 * scale));
         }
-        return Math.Max(50, (int)(1000 * scale));
+        return Math.Max(50, (int)(100 * scale));
     }
 }
