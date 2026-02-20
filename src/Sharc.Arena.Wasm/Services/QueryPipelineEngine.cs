@@ -52,7 +52,7 @@ public sealed class QueryPipelineEngine
             foreach (var spec in Queries)
             {
                 results.Add(RunSingleQuery(db, conn, spec));
-                await Task.Yield(); // Yield to WASM UI thread between queries
+                await Task.Delay(1); // setTimeout(1) — yields to browser event loop, not just .NET scheduler
             }
             IsLive = true;
             return results;
@@ -75,43 +75,49 @@ public sealed class QueryPipelineEngine
         return _fallbackResults;
     }
 
-    private const int WarmupIterations = 3;
+    private const int WarmupIterations = 5;
     private const int MeasuredIterations = 5;
 
     private static QueryResult RunSingleQuery(SharcDatabase db, SqliteConnection conn, QuerySpec spec)
     {
-        // --- Warm-up: 3 iterations of each (stabilize WASM JIT + page cache) ---
+        // --- Warm-up: run each engine's warmup separately to stabilize page cache ---
+        // Sequential (not interleaved) prevents cache thrashing between engines.
         for (int i = 0; i < WarmupIterations; i++)
-        {
             DrainSharc(db, spec);
+        for (int i = 0; i < WarmupIterations; i++)
             DrainSqlite(conn, spec);
-        }
 
-        // --- Measure: 5 iterations of each, interleaved to level GC pressure ---
-        // Use heap arrays (not stackalloc) — WASM interpreter can mishandle stackalloc + Span.Sort.
+        // --- Measure: run all Sharc iterations, then all SQLite iterations ---
+        // Sequential blocks ensure each engine operates on a warm, stable page cache.
+        // Interleaving causes systematic Sharc cold-cache bias (Sharc always runs first
+        // with pages evicted by prior SQLite run, while SQLite always runs with warm OS cache).
         var sharcTimes = new double[MeasuredIterations];
         var sqliteTimes = new double[MeasuredIterations];
         var sw = Stopwatch.StartNew();
 
+        // Track allocation on iteration 1 (not 0) — first measured run may still have JIT costs
         long sharcAllocBefore = 0, sharcAllocAfter = 0;
         long sqliteAllocBefore = 0, sqliteAllocAfter = 0;
 
+        // Sharc: all measured iterations in one block
         for (int i = 0; i < MeasuredIterations; i++)
         {
-            // Measure Sharc
-            if (i == 0) sharcAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+            if (i == 1) sharcAllocBefore = GC.GetAllocatedBytesForCurrentThread();
             sw.Restart();
             DrainSharc(db, spec);
             sw.Stop();
-            if (i == 0) sharcAllocAfter = GC.GetAllocatedBytesForCurrentThread();
+            if (i == 1) sharcAllocAfter = GC.GetAllocatedBytesForCurrentThread();
             sharcTimes[i] = sw.Elapsed.TotalMicroseconds();
+        }
 
-            // Measure SQLite
-            if (i == 0) sqliteAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+        // SQLite: all measured iterations in one block
+        for (int i = 0; i < MeasuredIterations; i++)
+        {
+            if (i == 1) sqliteAllocBefore = GC.GetAllocatedBytesForCurrentThread();
             sw.Restart();
             DrainSqlite(conn, spec);
             sw.Stop();
-            if (i == 0) sqliteAllocAfter = GC.GetAllocatedBytesForCurrentThread();
+            if (i == 1) sqliteAllocAfter = GC.GetAllocatedBytesForCurrentThread();
             sqliteTimes[i] = sw.Elapsed.TotalMicroseconds();
         }
 
