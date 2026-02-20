@@ -376,19 +376,14 @@ else
 
         var sw = Stopwatch.StartNew();
         var activePreset = _presets.FirstOrDefault(p => p.Id == _preset);
-        if (activePreset is null) { Stop(); return; }
+        if (activePreset is null) { await Stop(); return; }
 
-        // Periodic timer to keep stopwatch ticking during sync operations.
-        // In single-threaded WASM, this fires only when the thread yields.
-        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
-        var tickTask = Task.Run(async () =>
-        {
-            while (await ticker.WaitForNextTickAsync(token))
-            {
-                _elapsedMs = sw.Elapsed.TotalMilliseconds;
-                await InvokeAsync(StateHasChanged);
-            }
-        }, token);
+        // JS-based timer for smooth stopwatch display.
+        // Runs on the browser event loop — zero contention with .NET sync context.
+        // The Task.Run + PeriodicTimer pattern caused intermittent stalls in WASM
+        // because InvokeAsync(StateHasChanged) posted to the dispatcher queue,
+        // competing with the main loop's continuations on the single thread.
+        try { await JS.InvokeVoidAsync("arenaTimer.start"); } catch { }
 
         try
         {
@@ -400,7 +395,7 @@ else
                 _currentIndex = i;
                 _elapsedMs = sw.Elapsed.TotalMilliseconds;
                 StateHasChanged();
-                await Task.Yield();
+                await Task.Delay(1); // setTimeout(1) — yields to browser event loop, not just .NET scheduler
 
                 try
                 {
@@ -412,21 +407,39 @@ else
                 // Update timer right before heavy work starts
                 _elapsedMs = sw.Elapsed.TotalMilliseconds;
                 StateHasChanged();
-                await Task.Yield();
+                await Task.Delay(1);
 
-                // Run benchmark
+                // Run benchmark with 30s timeout to prevent indefinite hangs
+                // (JS interop calls to IndexedDB can hang if the browser event loop is congested)
                 try
                 {
                     var scale = GetScaleForSlide(slide);
                     IBenchmarkEngine engine = _isLive ? LiveEngine : StaticEngine;
-                    var data = await engine.RunSlideAsync(slide, scale, token);
+                    Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] Running {slide.Id} (scale={scale:F3}, live={_isLive})");
+
+                    var slideTask = engine.RunSlideAsync(slide, scale, token);
+                    var timeoutTask = Task.Delay(30_000);
+                    var completed = await Task.WhenAny(slideTask, timeoutTask);
+
+                    if (completed != slideTask)
+                    {
+                        Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] {slide.Id} TIMED OUT after 30s — skipping");
+                        _doneSlides.Add(slide.Id);
+                        _elapsedMs = sw.Elapsed.TotalMilliseconds;
+                        StateHasChanged();
+                        continue;
+                    }
+
+                    var data = await slideTask;
+                    Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] {slide.Id} done");
 
                     _results[slide.Id] = data;
                     _doneSlides.Add(slide.Id);
                 }
+                catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.Message}");
+                    Console.WriteLine($"[Arena] Slide {slide.Id} failed: {ex.GetType().Name}: {ex.Message}");
                     _doneSlides.Add(slide.Id);
                 }
 
@@ -446,8 +459,7 @@ else
         }
 
         sw.Stop();
-        ticker.Dispose();
-        try { await tickTask; } catch (OperationCanceledException) { }
+        try { await JS.InvokeVoidAsync("arenaTimer.stop"); } catch { }
 
         _elapsedMs = sw.Elapsed.TotalMilliseconds;
         _currentIndex = -1;
@@ -455,9 +467,10 @@ else
         StateHasChanged();
     }
 
-    private void Stop()
+    private async Task Stop()
     {
         _cts?.Cancel();
+        try { await JS.InvokeVoidAsync("arenaTimer.stop"); } catch { }
         _currentIndex = -1;
         _state = BenchmarkState.Done;
         StateHasChanged();
