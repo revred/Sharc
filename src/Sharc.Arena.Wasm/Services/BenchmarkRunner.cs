@@ -57,10 +57,10 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
         Console.WriteLine($"[Runner] Initializing engines with {userCount} users, {nodeCount} nodes");
         await EnsureAllEnginesInitialized(userCount, nodeCount);
-        await Task.Yield(); // Yield after init to let UI update stopwatch
+        await Task.Delay(1, CancellationToken.None); // setTimeout(1) — yields to browser event loop, not just .NET scheduler
 
         // Run Tier 1 engines (sync, same .NET runtime)
-        // Yield between each to prevent WASM UI thread starvation
+        // Delay(1) between each to yield to browser event loop and prevent WASM UI starvation
         EngineBaseResult sharcResult, sqliteResult, indexedDbResult;
 
         try { sharcResult = RunSharcSlide(slide.Id, scale); }
@@ -70,7 +70,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             sharcResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
         }
 
-        await Task.Yield(); // Yield after Sharc to let UI breathe
+        await Task.Delay(1, CancellationToken.None); // yield to browser after Sharc
 
         try { sqliteResult = RunSqliteSlide(slide.Id, scale); }
         catch (Exception ex)
@@ -79,7 +79,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             sqliteResult = new EngineBaseResult { Note = $"Error: {ex.Message}" };
         }
 
-        await Task.Yield(); // Yield after SQLite
+        await Task.Delay(1, CancellationToken.None); // yield to browser after SQLite
 
         // Run Tier 2 engine (async, JS interop)
         try { indexedDbResult = await _indexedDbEngine.RunSlide(slide.Id, scale); }
