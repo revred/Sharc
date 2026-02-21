@@ -6,6 +6,9 @@ using System.Runtime.CompilerServices;
 
 namespace Sharc.Core.Primitives;
 
+// Note: System.Runtime.CompilerServices.Unsafe is used for managed ref arithmetic
+// (Unsafe.Add<byte>(ref byte, int)) — NOT the C# 'unsafe' keyword. No pointers involved.
+
 /// <summary>
 /// High-performance SQLite varint decoder operating on spans.
 /// SQLite varints are 1Ã¢â‚¬â€œ9 bytes, big-endian, MSB continuation flag.
@@ -51,6 +54,44 @@ public static class VarintDecoder
         result = (result << 8) | b;
         value = result;
         return 9;
+    }
+
+    /// <summary>
+    /// Decodes a varint using managed ref arithmetic (no span slicing overhead).
+    /// Uses Unsafe.Add(ref byte) for pointer-like access without the 'unsafe' keyword.
+    /// </summary>
+    /// <param name="data">Reference to the first byte of varint data.</param>
+    /// <param name="available">Number of bytes available from the reference point.</param>
+    /// <param name="value">The decoded 64-bit value.</param>
+    /// <returns>Number of bytes consumed (1-9).</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int ReadFromRef(ref byte data, int available, out long value)
+    {
+        byte b = data;
+        if (b < 0x80)
+        {
+            value = b;
+            return 1;
+        }
+
+        long result = b & 0x7F;
+        int limit = Math.Min(8, available);
+        for (int i = 1; i < limit; i++)
+        {
+            b = Unsafe.Add(ref data, i);
+            result = (result << 7) | (b & 0x7FL);
+            if (b < 0x80)
+            {
+                value = result;
+                return i + 1;
+            }
+        }
+
+        // 9th byte: all 8 bits are data
+        if (available >= 9)
+            result = (result << 8) | Unsafe.Add(ref data, 8);
+        value = result;
+        return Math.Min(9, available);
     }
 
     /// <summary>

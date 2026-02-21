@@ -12,6 +12,9 @@ namespace Sharc.Arena.Wasm.Services;
 /// Tier 1 live engine: runs Microsoft.Data.Sqlite directly in .NET WASM.
 /// Same runtime as Sharc — identical timing (Stopwatch + GC alloc tracking).
 /// SQLitePCLRaw bundles e_sqlite3 compiled to WASM via Emscripten, accessed via P/Invoke.
+///
+/// Methodology: matches SharcEngine exactly — same warmup counts, iteration counts,
+/// column projections, and typed column reads for a fair comparison.
 /// </summary>
 public sealed class SqliteEngine : IDisposable
 {
@@ -78,51 +81,63 @@ public sealed class SqliteEngine : IDisposable
         };
     }
 
+    // ── SchemaRead: 50 warmup, 100 measured (matches Sharc) ──
+
     public EngineBaseResult RunSchemaRead()
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunSchemaQuery();
+        // Warmup: 50 iterations (matches Sharc's WASM JIT warmup)
+        for (int i = 0; i < 50; i++) RunSchemaQuery();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var (tableCount, columnCount) = RunSchemaQuery();
+        const int iterations = 100;
+        var (tableCount, columnCount) = (0, 0);
+        for (int i = 0; i < iterations; i++)
+            (tableCount, columnCount) = RunSchemaQuery();
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 1),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{tableCount} tables, {columnCount} columns",
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 1),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"{tableCount} tables (avg of {iterations})",
         };
     }
+
+    // ── SequentialScan: 1 warmup, 2 measured, 7 typed columns (matches Sharc) ──
 
     public EngineBaseResult RunSequentialScan(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunFullScan("users");
+        // Warmup with typed column reads
+        RunProjectedScan();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var rowCount = RunFullScan("users");
+        long rowCount = 0;
+        const int iterations = 2;
+        for (int run = 0; run < iterations; run++)
+            rowCount = RunProjectedScan();
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{rowCount} rows decoded (SELECT *)",
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"{rowCount} rows (column projection, avg of {iterations})",
         };
     }
+
+    // ── PointLookup: 100 warmup, 1000 measured, 2 typed columns (matches Sharc) ──
 
     public EngineBaseResult RunPointLookup()
     {
@@ -131,52 +146,33 @@ public sealed class SqliteEngine : IDisposable
         var rowCount = GetRowCount("users");
         var targetId = Math.Max(1, rowCount / 2);
 
-        // Warm-up
-        RunSeek("users", targetId);
-
-        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
-        var sw = Stopwatch.StartNew();
-
-        var found = RunSeek("users", targetId);
-
-        sw.Stop();
-        var allocAfter = GC.GetAllocatedBytesForCurrentThread();
-
-        return new EngineBaseResult
-        {
-            Value = Math.Round(sw.Elapsed.TotalNanoseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"rowid={targetId}, found={found}",
-        };
-    }
-
-    public EngineBaseResult RunBatchLookup(double scale)
-    {
-        if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
-
-        var rowCount = GetRowCount("users");
-        var lookupCount = Math.Max(1, (int)(6 * scale));
-        var rng = new Random(42);
-
-        // Warm-up
-        RunSeek("users", 1);
-
-        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
-        var sw = Stopwatch.StartNew();
-
-        using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = "SELECT * FROM users WHERE rowid = $id";
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT id, name FROM users WHERE rowid = $id";
         var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
         cmd.Prepare();
 
-        for (int i = 0; i < lookupCount; i++)
+        // Warmup: 100 iterations
+        for (int i = 0; i < 100; i++)
         {
-            pId.Value = rng.NextInt64(1, rowCount + 1);
-            using var reader = cmd.ExecuteReader();
-            if (reader.Read())
+            pId.Value = targetId;
+            using var r = cmd.ExecuteReader();
+            if (r.Read()) { _ = r.GetInt64(0); _ = r.GetString(1); }
+        }
+
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        var sw = Stopwatch.StartNew();
+
+        const int iterations = 1000;
+        bool found = false;
+        for (int i = 0; i < iterations; i++)
+        {
+            pId.Value = targetId;
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
             {
-                _ = reader.GetInt64(0);
-                _ = reader.GetString(1);
+                _ = r.GetInt64(0);
+                _ = r.GetString(1);
+                found = true;
             }
         }
 
@@ -185,92 +181,161 @@ public sealed class SqliteEngine : IDisposable
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalNanoseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{lookupCount} seeks (prepared statement)",
+            Value = Math.Round(sw.Elapsed.TotalNanoseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"rowid={targetId}, found={found} (avg of {iterations})",
         };
     }
+
+    // ── BatchLookup: 100 warmup, 500 outer × batchSize inner (matches Sharc) ──
+
+    public EngineBaseResult RunBatchLookup(double scale)
+    {
+        if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+
+        var rowCount = GetRowCount("users");
+        var batchSize = Math.Max(1, (int)(6 * scale));
+        var rng = new Random(42); // same seed as Sharc
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT id, name FROM users WHERE rowid = $id";
+        var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
+        cmd.Prepare();
+
+        // Warmup: 100 seeks
+        for (int i = 0; i < 100; i++)
+        {
+            pId.Value = 1L;
+            using var r = cmd.ExecuteReader();
+            if (r.Read()) { _ = r.GetInt64(0); _ = r.GetString(1); }
+        }
+
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        var sw = Stopwatch.StartNew();
+
+        const int iterations = 500;
+        for (int j = 0; j < iterations; j++)
+        {
+            for (int i = 0; i < batchSize; i++)
+            {
+                pId.Value = rng.NextInt64(1, rowCount + 1);
+                using var r = cmd.ExecuteReader();
+                if (r.Read())
+                {
+                    _ = r.GetInt64(0);
+                    _ = r.GetString(1);
+                }
+            }
+        }
+
+        sw.Stop();
+        var allocAfter = GC.GetAllocatedBytesForCurrentThread();
+
+        return new EngineBaseResult
+        {
+            Value = Math.Round(sw.Elapsed.TotalNanoseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"Batch of {batchSize} seeks (avg of {iterations})",
+        };
+    }
+
+    // ── TypeDecode: 3 warmup, 3 measured (matches Sharc) ──
 
     public EngineBaseResult RunTypeDecode(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunColumnScan("users", "id");
+        // Warmup: 3 passes
+        for (int w = 0; w < 3; w++) RunTypedColumnScan("users", "id");
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var count = RunColumnScan("users", "id");
+        long count = 0;
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
+            count = RunTypedColumnScan("users", "id");
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{count} integers decoded (SELECT id)",
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"{count} integers decoded (avg of {iterations})",
         };
     }
+
+    // ── NullScan: 3 warmup, 3 measured (matches Sharc) ──
 
     public EngineBaseResult RunNullScan(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunNullCount("users", "bio");
+        // Warmup: 3 passes
+        for (int w = 0; w < 3; w++) RunNullCount("users", "bio");
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var (nullCount, totalCount) = RunNullCount("users", "bio");
+        long nullCount = 0, totalCount = 0;
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
+            (nullCount, totalCount) = RunNullCount("users", "bio");
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{nullCount}/{totalCount} nulls (bio column)",
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"{nullCount}/{totalCount} nulls (avg of {iterations})",
         };
     }
+
+    // ── WhereFilter: 3 warmup, 3 measured, projected id column (matches Sharc) ──
 
     public EngineBaseResult RunWhereFilter(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunFilteredQuery("SELECT * FROM users WHERE age > 30 AND score < 50");
+        // Warmup: 3 passes
+        for (int w = 0; w < 3; w++) RunProjectedFilter();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var matchCount = RunFilteredQuery("SELECT * FROM users WHERE age > 30 AND score < 50");
+        long matchCount = 0;
+        const int iterations = 3;
+        for (int run = 0; run < iterations; run++)
+            matchCount = RunProjectedFilter();
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMilliseconds, 2),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{matchCount} matches (age>30 AND score<50)",
+            Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"{matchCount} matches (avg of {iterations})",
         };
     }
+
+    // ── GraphNodeScan: 1 warmup, 1 measured, 4 typed columns (matches Sharc) ──
 
     public EngineBaseResult RunGraphNodeScan(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunFullScan("_concepts");
+        // Warmup
+        RunProjectedNodeScan();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var count = RunFullScan("_concepts");
+        var count = RunProjectedNodeScan();
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
@@ -283,17 +348,19 @@ public sealed class SqliteEngine : IDisposable
         };
     }
 
+    // ── GraphEdgeScan: 1 warmup, 1 measured, 4 typed columns (matches Sharc) ──
+
     public EngineBaseResult RunGraphEdgeScan(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunFullScan("_relations");
+        // Warmup
+        RunProjectedEdgeScan();
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var count = RunFullScan("_relations");
+        var count = RunProjectedEdgeScan();
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
@@ -306,6 +373,8 @@ public sealed class SqliteEngine : IDisposable
         };
     }
 
+    // ── GraphSeek: 100 warmup, 1000 measured, 3 typed columns (matches Sharc) ──
+
     public EngineBaseResult RunGraphSeek()
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
@@ -313,59 +382,87 @@ public sealed class SqliteEngine : IDisposable
         var rowCount = GetRowCount("_concepts");
         var targetRowId = Math.Max(1, rowCount / 2);
 
-        // Warm-up
-        RunSeek("_concepts", targetRowId);
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT id, key, data FROM _concepts WHERE rowid = $id";
+        var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
+        cmd.Prepare();
+
+        // Warmup: 100 iterations
+        for (int i = 0; i < 100; i++)
+        {
+            pId.Value = targetRowId;
+            using var r = cmd.ExecuteReader();
+            if (r.Read()) { _ = r.GetString(0); _ = r.GetInt64(1); _ = r.GetString(2); }
+        }
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        RunSeek("_concepts", targetRowId);
+        const int iterations = 1000;
+        for (int i = 0; i < iterations; i++)
+        {
+            pId.Value = targetRowId;
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                _ = r.GetString(0);  // id
+                _ = r.GetInt64(1);   // key
+                _ = r.GetString(2);  // data
+            }
+        }
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalNanoseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"Seek to rowid {targetRowId}",
+            Value = Math.Round(sw.Elapsed.TotalNanoseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"Seek to rowid {targetRowId} (avg of {iterations})",
         };
     }
+
+    // ── GraphTraverse: 5 warmup, 5 measured (matches Sharc) ──
 
     public EngineBaseResult RunGraphTraverse()
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunBfs(1);
+        // Warmup: 5 passes
+        for (int w = 0; w < 5; w++) RunBfs(1);
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var (hop1Count, hop2Count) = RunBfs(1);
+        const int iterations = 5;
+        int hop1Count = 0, hop2Count = 0;
+        for (int run = 0; run < iterations; run++)
+            (hop1Count, hop2Count) = RunBfs(1);
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
         return new EngineBaseResult
         {
-            Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
-            Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"2-hop BFS: {hop1Count} + {hop2Count} nodes (SQL WHERE)",
+            Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 0),
+            Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
+            Note = $"2-hop BFS: {hop1Count} + {hop2Count} nodes (avg of {iterations})",
         };
     }
+
+    // ── GcPressure: 1 warmup, 1 measured (already matches Sharc) ──
 
     public EngineBaseResult RunGcPressure(double scale)
     {
         if (_connection is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        RunColumnScan("users", "id");
+        // Warmup
+        RunTypedColumnScan("users", "id");
 
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        var count = RunColumnScan("users", "id");
+        var count = RunTypedColumnScan("users", "id");
 
         sw.Stop();
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
@@ -391,8 +488,6 @@ public sealed class SqliteEngine : IDisposable
     {
         if (_dbBytes is null) return new EngineBaseResult { Value = null, Note = "No data" };
 
-        // SQLite memory footprint in WASM is dominated by the 1.5MB binary itself,
-        // plus the managed SQLiteConnection overhead.
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         using (var probe = new SqliteConnection($"Data Source={_tempPath};Mode=ReadOnly"))
         {
@@ -403,7 +498,7 @@ public sealed class SqliteEngine : IDisposable
         }
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
         var managedOverheadKb = (allocAfter - allocBefore) / 1024.0;
-        
+
         var baseSizeKb = _dbBytes.Length / 1024.0;
         var totalKb = baseSizeKb + managedOverheadKb;
 
@@ -436,7 +531,7 @@ public sealed class SqliteEngine : IDisposable
         Cleanup();
     }
 
-    // -- Internal query helpers --
+    // ── Query helpers (typed reads, matching Sharc's column projections) ──
 
     private (int TableCount, int ColumnCount) RunSchemaQuery()
     {
@@ -449,46 +544,34 @@ public sealed class SqliteEngine : IDisposable
         {
             tableCount++;
             var sql = reader.GetString(1);
-            // Count commas in CREATE TABLE as rough column count
             columnCount += sql.Split(',').Length;
         }
         return (tableCount, columnCount);
     }
 
-    private long RunFullScan(string table)
+    /// <summary>Projected scan: SELECT id,name,email,age,score,active,dept with typed reads.</summary>
+    private long RunProjectedScan()
     {
         using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM [{table}]";
+        cmd.CommandText = "SELECT id, name, email, age, score, active, dept FROM users";
         using var reader = cmd.ExecuteReader();
         long count = 0;
-        var fieldCount = reader.FieldCount;
         while (reader.Read())
         {
-            for (int i = 0; i < fieldCount; i++)
-            {
-                if (!reader.IsDBNull(i))
-                    _ = reader.GetValue(i);
-            }
+            _ = reader.GetInt64(0);     // id
+            _ = reader.GetString(1);    // name
+            _ = reader.GetString(2);    // email
+            _ = reader.GetInt64(3);     // age
+            _ = reader.GetDouble(4);    // score
+            _ = reader.GetInt64(5);     // active
+            _ = reader.GetString(6);    // dept
             count++;
         }
         return count;
     }
 
-    private bool RunSeek(string table, long rowId)
-    {
-        using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM [{table}] WHERE rowid = $id";
-        cmd.Parameters.AddWithValue("$id", rowId);
-        using var reader = cmd.ExecuteReader();
-        if (reader.Read())
-        {
-            _ = reader.GetValue(0);
-            return true;
-        }
-        return false;
-    }
-
-    private long RunColumnScan(string table, string column)
+    /// <summary>Typed column scan: SELECT [column] with GetInt64.</summary>
+    private long RunTypedColumnScan(string table, string column)
     {
         using var cmd = _connection!.CreateCommand();
         cmd.CommandText = $"SELECT [{column}] FROM [{table}]";
@@ -496,7 +579,7 @@ public sealed class SqliteEngine : IDisposable
         long count = 0;
         while (reader.Read())
         {
-            _ = reader.GetValue(0);
+            _ = reader.GetInt64(0);
             count++;
         }
         return count;
@@ -517,15 +600,52 @@ public sealed class SqliteEngine : IDisposable
         return (nullCount, totalCount);
     }
 
-    private long RunFilteredQuery(string sql)
+    /// <summary>WHERE filter with projected id column and typed read.</summary>
+    private long RunProjectedFilter()
     {
         using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = sql;
+        cmd.CommandText = "SELECT id FROM users WHERE age > 30 AND score < 50";
         using var reader = cmd.ExecuteReader();
         long count = 0;
         while (reader.Read())
         {
-            _ = reader.GetValue(0);
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>4 typed columns: id, key, kind, data (matches Sharc's _concepts scan).</summary>
+    private long RunProjectedNodeScan()
+    {
+        using var cmd = _connection!.CreateCommand();
+        cmd.CommandText = "SELECT id, key, kind, data FROM _concepts";
+        using var reader = cmd.ExecuteReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetString(0);  // id
+            _ = reader.GetInt64(1);   // key
+            _ = reader.GetInt64(2);   // kind
+            _ = reader.GetString(3);  // data
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>4 typed columns: source_key, target_key, kind, data (matches Sharc's _relations scan).</summary>
+    private long RunProjectedEdgeScan()
+    {
+        using var cmd = _connection!.CreateCommand();
+        cmd.CommandText = "SELECT source_key, target_key, kind, data FROM _relations";
+        using var reader = cmd.ExecuteReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);   // source_key
+            _ = reader.GetInt64(1);   // target_key
+            _ = reader.GetInt64(2);   // kind
+            _ = reader.GetString(3);  // data
             count++;
         }
         return count;
@@ -533,7 +653,6 @@ public sealed class SqliteEngine : IDisposable
 
     private (int Hop1, int Hop2) RunBfs(long startKey)
     {
-        // Hop 1: edges from startKey
         var hop1Targets = new HashSet<long>();
         using (var cmd = _connection!.CreateCommand())
         {
@@ -544,7 +663,6 @@ public sealed class SqliteEngine : IDisposable
                 hop1Targets.Add(reader.GetInt64(0));
         }
 
-        // Hop 2: edges from each hop-1 target
         var hop2Count = 0;
         using (var cmd = _connection!.CreateCommand())
         {

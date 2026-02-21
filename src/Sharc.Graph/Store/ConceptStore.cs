@@ -42,7 +42,9 @@ internal sealed class ConceptStore
 
     // Fixed buffers to avoid stackalloc in loops
     private readonly long[] _serialsBuffer = new long[64];
+    private readonly int[] _offsetsBuffer = new int[64];
     private readonly long[] _indexSerialsBuffer = new long[16];
+    private readonly int[] _indexOffsetsBuffer = new int[16];
 
     public ConceptStore(IBTreeReader reader, ISchemaAdapter schema)
     {
@@ -98,24 +100,25 @@ internal sealed class ConceptStore
     {
         _reusableIndexCursor ??= _reader.CreateIndexCursor((uint)indexRootPage);
         _reusableTableCursor ??= _reader.CreateCursor((uint)_tableRootPage);
-        
+
         var indexCursor = _reusableIndexCursor;
         var tableCursor = _reusableTableCursor;
 
         indexCursor.Reset();
-        if (!indexCursor.SeekFirst(key.Value)) 
+        if (!indexCursor.SeekFirst(key.Value))
             return null;
 
         do
         {
-            int indexBodyOffset;
-            _decoder.ReadSerialTypes(indexCursor.Payload, _indexSerialsBuffer, out indexBodyOffset);
+            var indexPayload = indexCursor.Payload;
+            int indexColCount = _decoder.ReadSerialTypes(indexPayload, _indexSerialsBuffer, out int indexBodyOffset);
+            _decoder.ComputeColumnOffsets(_indexSerialsBuffer, indexColCount, indexBodyOffset, _indexOffsetsBuffer);
 
-            long indexValue = _decoder.DecodeInt64Direct(indexCursor.Payload, 0, _indexSerialsBuffer, indexBodyOffset);
+            long indexValue = _decoder.DecodeInt64At(indexPayload, _indexSerialsBuffer[0], _indexOffsetsBuffer[0]);
             if (indexValue > key.Value) return null;
             if (indexValue != key.Value) continue;
 
-            long rowId = _decoder.DecodeInt64Direct(indexCursor.Payload, _decoder.GetColumnCount(indexCursor.Payload) - 1, _indexSerialsBuffer, indexBodyOffset);
+            long rowId = _decoder.DecodeInt64At(indexPayload, _indexSerialsBuffer[indexColCount - 1], _indexOffsetsBuffer[indexColCount - 1]);
             if (tableCursor.Seek(rowId))
             {
                 return MapToRecordSelective(tableCursor.Payload, includeData);
@@ -137,14 +140,15 @@ internal sealed class ConceptStore
         _reusableScanCursor ??= _reader.CreateCursor((uint)_tableRootPage);
         var cursor = _reusableScanCursor;
         cursor.Reset();
-        
+
         while (cursor.MoveNext())
         {
-            int bodyOffset;
-            _decoder.ReadSerialTypes(cursor.Payload, _serialsBuffer, out bodyOffset);
-            string rowIdStr = _colId >= 0 && _colId < _columnCount ? _decoder.DecodeStringDirect(cursor.Payload, _colId, _serialsBuffer, bodyOffset) : "";
+            var payload = cursor.Payload;
+            _decoder.ReadSerialTypes(payload, _serialsBuffer, out int bodyOffset);
+            _decoder.ComputeColumnOffsets(_serialsBuffer, _columnCount, bodyOffset, _offsetsBuffer);
+            string rowIdStr = _colId >= 0 && _colId < _columnCount ? _decoder.DecodeStringAt(payload, _serialsBuffer[_colId], _offsetsBuffer[_colId]) : "";
             if (!rowIdStr.Equals(id, StringComparison.OrdinalIgnoreCase)) continue;
-            return MapToRecordSelective(cursor.Payload, true);
+            return MapToRecordSelectiveWithOffsets(payload);
         }
         return null;
     }
@@ -154,53 +158,62 @@ internal sealed class ConceptStore
         _reusableScanCursor ??= _reader.CreateCursor((uint)_tableRootPage);
         var cursor = _reusableScanCursor;
         cursor.Reset();
-        
+
         while (cursor.MoveNext())
         {
-            int bodyOffset;
-            _decoder.ReadSerialTypes(cursor.Payload, _serialsBuffer, out bodyOffset);
-            long barId = _colKey >= 0 && _colKey < _columnCount ? _decoder.DecodeInt64Direct(cursor.Payload, _colKey, _serialsBuffer, bodyOffset) : 0;
+            var payload = cursor.Payload;
+            _decoder.ReadSerialTypes(payload, _serialsBuffer, out int bodyOffset);
+            _decoder.ComputeColumnOffsets(_serialsBuffer, _columnCount, bodyOffset, _offsetsBuffer);
+            long barId = _colKey >= 0 && _colKey < _columnCount ? _decoder.DecodeInt64At(payload, _serialsBuffer[_colKey], _offsetsBuffer[_colKey]) : 0;
             if (barId != key.Value) continue;
-            return MapToRecordSelective(cursor.Payload, includeData);
+            return MapToRecordSelectiveWithOffsets(payload, includeData);
         }
         return null;
     }
 
     private GraphRecord MapToRecordSelective(ReadOnlySpan<byte> payload, bool includeData)
     {
-        int bodyOffset;
-        _decoder.ReadSerialTypes(payload, _serialsBuffer, out bodyOffset);
+        _decoder.ReadSerialTypes(payload, _serialsBuffer, out int bodyOffset);
+        _decoder.ComputeColumnOffsets(_serialsBuffer, _columnCount, bodyOffset, _offsetsBuffer);
+        return MapToRecordSelectiveWithOffsets(payload, includeData);
+    }
 
-        long keyVal = _colKey >= 0 && _colKey < _columnCount ? _decoder.DecodeInt64Direct(payload, _colKey, _serialsBuffer, bodyOffset) : 0;
+    /// <summary>
+    /// Builds a GraphRecord using pre-computed offsets in _serialsBuffer/_offsetsBuffer.
+    /// Callers must have already called ReadSerialTypes + ComputeColumnOffsets.
+    /// </summary>
+    private GraphRecord MapToRecordSelectiveWithOffsets(ReadOnlySpan<byte> payload, bool includeData = true)
+    {
+        long keyVal = _colKey >= 0 && _colKey < _columnCount ? _decoder.DecodeInt64At(payload, _serialsBuffer[_colKey], _offsetsBuffer[_colKey]) : 0;
         NodeKey key = new NodeKey(keyVal);
 
-        int typeId = _colType >= 0 && _colType < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colType, _serialsBuffer, bodyOffset) : 0;
-        
+        int typeId = _colType >= 0 && _colType < _columnCount ? (int)_decoder.DecodeInt64At(payload, _serialsBuffer[_colType], _offsetsBuffer[_colType]) : 0;
+
         string? id = null;
         string? data = null;
 
         if (includeData)
         {
-            id = _colId >= 0 && _colId < _columnCount ? _decoder.DecodeStringDirect(payload, _colId, _serialsBuffer, bodyOffset) : null;
-            data = _colData >= 0 && _colData < _columnCount ? _decoder.DecodeStringDirect(payload, _colData, _serialsBuffer, bodyOffset) : "{}";
+            id = _colId >= 0 && _colId < _columnCount ? _decoder.DecodeStringAt(payload, _serialsBuffer[_colId], _offsetsBuffer[_colId]) : null;
+            data = _colData >= 0 && _colData < _columnCount ? _decoder.DecodeStringAt(payload, _serialsBuffer[_colData], _offsetsBuffer[_colData]) : "{}";
         }
-        
-        string typeStr = _schema.TypeNames.TryGetValue(typeId, out var name) 
-            ? name 
+
+        string typeStr = _schema.TypeNames.TryGetValue(typeId, out var name)
+            ? name
             : typeId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        long updatedUnix = _colUpdated >= 0 && _colUpdated < _columnCount ? _decoder.DecodeInt64Direct(payload, _colUpdated, _serialsBuffer, bodyOffset) : 0;
+        long updatedUnix = _colUpdated >= 0 && _colUpdated < _columnCount ? _decoder.DecodeInt64At(payload, _serialsBuffer[_colUpdated], _offsetsBuffer[_colUpdated]) : 0;
         var updatedAt = updatedUnix > 0 ? DateTimeOffset.FromUnixTimeSeconds(updatedUnix) : (DateTimeOffset?)null;
 
         var result = new GraphRecord(new RecordId(typeStr, id, key), key, typeId, data, updatedAt, updatedAt)
         {
-            CVN = _colCvn >= 0 && _colCvn < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colCvn, _serialsBuffer, bodyOffset) : 0,
-            LVN = _colLvn >= 0 && _colLvn < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colLvn, _serialsBuffer, bodyOffset) : 0,
-            SyncStatus = _colSync >= 0 && _colSync < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colSync, _serialsBuffer, bodyOffset) : 0,
-            Tokens = _colTokens >= 0 && _colTokens < _columnCount ? (int)_decoder.DecodeInt64Direct(payload, _colTokens, _serialsBuffer, bodyOffset) : 0,
-            Alias = (_colAlias >= 0 && _colAlias < _columnCount && _serialsBuffer[_colAlias] != 0) ? _decoder.DecodeStringDirect(payload, _colAlias, _serialsBuffer, bodyOffset) : null
+            CVN = _colCvn >= 0 && _colCvn < _columnCount ? (int)_decoder.DecodeInt64At(payload, _serialsBuffer[_colCvn], _offsetsBuffer[_colCvn]) : 0,
+            LVN = _colLvn >= 0 && _colLvn < _columnCount ? (int)_decoder.DecodeInt64At(payload, _serialsBuffer[_colLvn], _offsetsBuffer[_colLvn]) : 0,
+            SyncStatus = _colSync >= 0 && _colSync < _columnCount ? (int)_decoder.DecodeInt64At(payload, _serialsBuffer[_colSync], _offsetsBuffer[_colSync]) : 0,
+            Tokens = _colTokens >= 0 && _colTokens < _columnCount ? (int)_decoder.DecodeInt64At(payload, _serialsBuffer[_colTokens], _offsetsBuffer[_colTokens]) : 0,
+            Alias = (_colAlias >= 0 && _colAlias < _columnCount && _serialsBuffer[_colAlias] != 0) ? _decoder.DecodeStringAt(payload, _serialsBuffer[_colAlias], _offsetsBuffer[_colAlias]) : null
         };
-        
+
         return result;
     }
 

@@ -179,16 +179,21 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
 
         int colCount = 0;
         int capacity = serialTypes.Length;
+
+        // Use ReadFromRef with ref to indexed element — avoids span slice construction per iteration.
+        // On WASM Mono, span construction has nontrivial overhead vs. a single ref + offset arithmetic.
         while (offset < headerEnd && colCount < capacity)
         {
-            offset += VarintDecoder.Read(payload[offset..], out serialTypes[colCount]);
+            offset += VarintDecoder.ReadFromRef(
+                ref Unsafe.AsRef(in payload[offset]), headerEnd - offset, out serialTypes[colCount]);
             colCount++;
         }
 
         // Count remaining columns (if any beyond the destination array)
         while (offset < headerEnd)
         {
-            offset += VarintDecoder.Read(payload[offset..], out _);
+            offset += VarintDecoder.ReadFromRef(
+                ref Unsafe.AsRef(in payload[offset]), headerEnd - offset, out _);
             colCount++;
         }
 
