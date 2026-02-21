@@ -57,6 +57,16 @@ public sealed class MemoryPageSource : IWritablePageSource
         return _data.AsSpan(offset, PageSize);
     }
 
+    /// <summary>
+    /// Returns a zero-copy <see cref="ReadOnlyMemory{T}"/> view into the backing array.
+    /// </summary>
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ValidatePageNumber(pageNumber);
+        int offset = (int)(pageNumber - 1) * PageSize;
+        return _data.AsMemory(offset, PageSize);
+    }
+
     /// <inheritdoc />
     public void Invalidate(uint pageNumber)
     {

@@ -29,12 +29,15 @@ internal sealed class BTreeCursor : IBTreeCursor
     private bool _exhausted;
     private bool _disposed;
 
+    // Leaf page cache — avoids redundant GetPage() calls for cells on the same leaf
+    private ReadOnlyMemory<byte> _cachedLeafMemory;
+    private uint _cachedLeafPageNum;
+
     // Current cell data
     private long _rowId;
     private int _payloadSize;
     private byte[]? _assembledPayload;
     private int _inlinePayloadOffset;
-    private uint _inlinePayloadPage;
 
     // Reusable overflow cycle detection set - cleared between overflow assemblies
     private HashSet<uint>? _visitedOverflowPages;
@@ -62,9 +65,8 @@ internal sealed class BTreeCursor : IBTreeCursor
             if (_assembledPayload != null)
                 return _assembledPayload.AsSpan(0, _payloadSize);
 
-            // Return inline payload from the page
-            var page = _pageSource.GetPage(_inlinePayloadPage);
-            return page.Slice(_inlinePayloadOffset, _payloadSize);
+            // Return inline payload from cached leaf page
+            return GetCachedLeafPage().Slice(_inlinePayloadOffset, _payloadSize);
         }
     }
 
@@ -76,6 +78,8 @@ internal sealed class BTreeCursor : IBTreeCursor
         _initialized = false;
         _exhausted = false;
         _currentLeafPage = 0;
+        _cachedLeafPageNum = 0;
+        _cachedLeafMemory = default;
     }
 
     /// <inheritdoc />
@@ -339,7 +343,7 @@ internal sealed class BTreeCursor : IBTreeCursor
 
     private void ParseCurrentLeafCell()
     {
-        var page = _pageSource.GetPage(_currentLeafPage);
+        var page = GetCachedLeafPage();
         // Read cell pointer on-demand - zero allocation
         int cellOffset = _currentHeader.GetCellPointer(page[_currentHeaderOffset..], _currentCellIndex);
 
@@ -351,9 +355,8 @@ internal sealed class BTreeCursor : IBTreeCursor
 
         if (inlineSize >= _payloadSize)
         {
-            // All payload is inline - point directly at page data
+            // All payload is inline — offset into cached leaf memory
             _inlinePayloadOffset = payloadStart;
-            _inlinePayloadPage = _currentLeafPage;
             _assembledPayload = null;
         }
         else
@@ -361,6 +364,20 @@ internal sealed class BTreeCursor : IBTreeCursor
             // Overflow - assemble the full payload
             AssembleOverflowPayload(page, payloadStart, inlineSize);
         }
+    }
+
+    /// <summary>
+    /// Returns the current leaf page data, caching it to avoid redundant GetPage()/GetPageMemory() calls
+    /// when iterating multiple cells on the same leaf.
+    /// </summary>
+    private ReadOnlySpan<byte> GetCachedLeafPage()
+    {
+        if (_currentLeafPage != _cachedLeafPageNum)
+        {
+            _cachedLeafMemory = _pageSource.GetPageMemory(_currentLeafPage);
+            _cachedLeafPageNum = _currentLeafPage;
+        }
+        return _cachedLeafMemory.Span;
     }
 
     private void AssembleOverflowPayload(ReadOnlySpan<byte> page, int payloadStart, int inlineSize)
