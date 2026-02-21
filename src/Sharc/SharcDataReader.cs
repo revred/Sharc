@@ -292,6 +292,13 @@ public sealed class SharcDataReader : IDisposable
     public long RowId => _dedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
 
     /// <summary>
+    /// Returns true if the underlying page source has been mutated since this reader
+    /// was created or last refreshed. Useful for multi-agent scenarios where one agent
+    /// may have committed changes that invalidate this reader's cached state.
+    /// </summary>
+    public bool IsStale => _cursor?.IsStale ?? false;
+
+    /// <summary>
     /// Seeks directly to the row with the specified rowid using B-tree binary search.
     /// This is dramatically faster than sequential scan for point lookups.
     /// After a successful seek, use typed accessors (GetInt64, GetString, etc.) to read values.
