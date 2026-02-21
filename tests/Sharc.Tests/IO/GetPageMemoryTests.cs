@@ -9,8 +9,8 @@ using Xunit;
 namespace Sharc.Tests.IO;
 
 /// <summary>
-/// Tests for <see cref="IPageSource.GetPageMemory"/>, verifying the default interface
-/// method and optimized overrides in concrete page source implementations.
+/// Tests for <see cref="IPageSource.GetPageMemory"/>, verifying zero-copy behavior
+/// and correctness in concrete page source implementations.
 /// </summary>
 public class GetPageMemoryTests
 {
@@ -39,16 +39,15 @@ public class GetPageMemoryTests
         data[4096] = 0xCD; // page 2
 
         using var source = new MemoryPageSource(data);
-        IPageSource iface = source;
 
         var span = source.GetPage(1);
-        var memory = iface.GetPageMemory(1);
+        var memory = source.GetPageMemory(1);
 
         Assert.Equal(span.Length, memory.Length);
         Assert.Equal(0xAB, memory.Span[100]);
 
         var span2 = source.GetPage(2);
-        var memory2 = iface.GetPageMemory(2);
+        var memory2 = source.GetPageMemory(2);
         Assert.Equal(0xCD, memory2.Span[0]);
     }
 
@@ -59,9 +58,8 @@ public class GetPageMemoryTests
         data[200] = 0xEF;
 
         using var source = new MemoryPageSource(data);
-        IPageSource iface = source;
 
-        var memory = iface.GetPageMemory(1);
+        var memory = source.GetPageMemory(1);
 
         // Mutate the backing array — the memory should reflect the change
         // (proving it's zero-copy, not a snapshot)
@@ -77,10 +75,9 @@ public class GetPageMemoryTests
 
         using var inner = new MemoryPageSource(data);
         using var cached = new CachedPageSource(inner, 10);
-        IPageSource iface = cached;
 
         var span = cached.GetPage(1);
-        var memory = iface.GetPageMemory(1);
+        var memory = cached.GetPageMemory(1);
 
         Assert.Equal(span.Length, memory.Length);
         Assert.Equal(0xAB, memory.Span[100]);
@@ -105,31 +102,24 @@ public class GetPageMemoryTests
     }
 
     [Fact]
-    public void CachedPageSource_GetPageMemory_ViaInterface_IsZeroCopy()
+    public void CachedPageSource_GetPageMemory_AfterGetPage_IsZeroCopy()
     {
-        // Verifies that calling GetPageMemory through IPageSource interface
-        // dispatches to CachedPageSource override (not the default ToArray() DIM)
+        // Verifies that GetPageMemory returns the same cached buffer after GetPage
         var data = CreateMinimalDatabase();
         data[100] = 0xAB;
 
         using var inner = new MemoryPageSource(data);
         using var cached = new CachedPageSource(inner, 10);
-        IPageSource iface = cached; // typed as IPageSource — tests DIM dispatch
 
         // Populate cache via GetPage
         _ = cached.GetPage(1);
 
-        // Call GetPageMemory through IPageSource interface
-        var memory1 = iface.GetPageMemory(1);
-        var memory2 = iface.GetPageMemory(1);
+        // GetPageMemory should return the same underlying buffer (zero-copy from cache)
+        var memory1 = cached.GetPageMemory(1);
+        var memory2 = cached.GetPageMemory(1);
 
-        // Both calls should return the same underlying buffer (zero-copy from cache)
         Assert.True(memory1.Span == memory2.Span);
-
-        // Mutate via GetPage and verify memory reflects change (same buffer)
-        var span = cached.GetPage(1);
-        byte original = memory1.Span[100];
-        Assert.Equal(0xAB, original);
+        Assert.Equal(0xAB, memory1.Span[100]);
     }
 
 }
