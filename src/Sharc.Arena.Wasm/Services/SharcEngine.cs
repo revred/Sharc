@@ -33,10 +33,11 @@ public sealed class SharcEngine : IDisposable
     // Direct graph store access for O(log N + M) traversal via shared BTreeReader
     private SharcContextGraph? _graph;
 
-    // Pre-allocated serial type buffer for direct B-tree cursor scans.
+    // Pre-allocated buffers for direct B-tree cursor scans.
     // Matches ConceptStore/RelationStore internal optimization pattern:
     // avoids per-row allocation that SharcDataReader incurs.
     private readonly long[] _serialsBuffer = new long[64];
+    private readonly int[] _offsetsBuffer = new int[64];
 
     /// <summary>
     /// Ensures the database is generated and opened at the given scale.
@@ -421,13 +422,21 @@ public sealed class SharcEngine : IDisposable
         int colKind = table.GetColumnOrdinal("kind");
         int colData = table.GetColumnOrdinal("data");
 
-        // Warm-up — full cursor scan with column reads to trigger JIT
+        // Precompute max ordinal for batch offset computation
+        int maxOrdinal = Math.Max(Math.Max(colId, colKey), Math.Max(colKind, colData));
+        int offsetCount = maxOrdinal + 1;
+        var offsets = _offsetsBuffer;
+
+        // Warm-up — full cursor scan using the same ComputeColumnOffsets+DecodeAt path
+        // so JIT optimizes the exact code path we measure
         using (var warmup = _db.BTreeReader.CreateCursor(rootPage))
         {
             while (warmup.MoveNext())
             {
-                decoder.ReadSerialTypes(warmup.Payload, serials, out int bo);
-                _ = decoder.DecodeInt64Direct(warmup.Payload, colKey, serials, bo);
+                var wp = warmup.Payload;
+                decoder.ReadSerialTypes(wp, serials, out int bo);
+                decoder.ComputeColumnOffsets(serials, offsetCount, bo, offsets);
+                _ = decoder.DecodeInt64At(wp, serials[colKey], offsets[colKey]);
             }
         }
 
@@ -439,11 +448,15 @@ public sealed class SharcEngine : IDisposable
         {
             while (cursor.MoveNext())
             {
-                decoder.ReadSerialTypes(cursor.Payload, serials, out int bodyOffset);
-                _ = decoder.DecodeStringDirect(cursor.Payload, colId, serials, bodyOffset);     // id
-                _ = decoder.DecodeInt64Direct(cursor.Payload, colKey, serials, bodyOffset);      // key
-                _ = decoder.DecodeInt64Direct(cursor.Payload, colKind, serials, bodyOffset);     // kind
-                _ = decoder.DecodeStringDirect(cursor.Payload, colData, serials, bodyOffset);    // data
+                // Capture payload once — avoids 4 extra GetPage()+Slice() per row
+                var payload = cursor.Payload;
+                decoder.ReadSerialTypes(payload, serials, out int bodyOffset);
+                // Single O(N) pass to compute all offsets, then O(1) per column
+                decoder.ComputeColumnOffsets(serials, offsetCount, bodyOffset, offsets);
+                _ = decoder.DecodeStringAt(payload, serials[colId], offsets[colId]);       // id
+                _ = decoder.DecodeInt64At(payload, serials[colKey], offsets[colKey]);       // key
+                _ = decoder.DecodeInt64At(payload, serials[colKind], offsets[colKind]);     // kind
+                _ = decoder.DecodeStringAt(payload, serials[colData], offsets[colData]);    // data
                 count++;
             }
         }
@@ -455,7 +468,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
             Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{count} nodes (direct cursor)",
+            Note = $"{count} nodes (direct cursor, O(1) offsets)",
         };
     }
 
@@ -473,13 +486,19 @@ public sealed class SharcEngine : IDisposable
         int colKind = table.GetColumnOrdinal("kind");
         int colData = table.GetColumnOrdinal("data");
 
-        // Warm-up — full cursor scan with column reads to trigger JIT
+        int maxOrdinal = Math.Max(Math.Max(colSrc, colTgt), Math.Max(colKind, colData));
+        int offsetCount = maxOrdinal + 1;
+        var offsets = _offsetsBuffer;
+
+        // Warm-up — same ComputeColumnOffsets+DecodeAt path as measured loop
         using (var warmup = _db.BTreeReader.CreateCursor(rootPage))
         {
             while (warmup.MoveNext())
             {
-                decoder.ReadSerialTypes(warmup.Payload, serials, out int bo);
-                _ = decoder.DecodeInt64Direct(warmup.Payload, colSrc, serials, bo);
+                var wp = warmup.Payload;
+                decoder.ReadSerialTypes(wp, serials, out int bo);
+                decoder.ComputeColumnOffsets(serials, offsetCount, bo, offsets);
+                _ = decoder.DecodeInt64At(wp, serials[colSrc], offsets[colSrc]);
             }
         }
 
@@ -491,11 +510,13 @@ public sealed class SharcEngine : IDisposable
         {
             while (cursor.MoveNext())
             {
-                decoder.ReadSerialTypes(cursor.Payload, serials, out int bodyOffset);
-                _ = decoder.DecodeInt64Direct(cursor.Payload, colSrc, serials, bodyOffset);     // source_key
-                _ = decoder.DecodeInt64Direct(cursor.Payload, colTgt, serials, bodyOffset);     // target_key
-                _ = decoder.DecodeInt64Direct(cursor.Payload, colKind, serials, bodyOffset);    // kind
-                _ = decoder.DecodeStringDirect(cursor.Payload, colData, serials, bodyOffset);   // data
+                var payload = cursor.Payload;
+                decoder.ReadSerialTypes(payload, serials, out int bodyOffset);
+                decoder.ComputeColumnOffsets(serials, offsetCount, bodyOffset, offsets);
+                _ = decoder.DecodeInt64At(payload, serials[colSrc], offsets[colSrc]);       // source_key
+                _ = decoder.DecodeInt64At(payload, serials[colTgt], offsets[colTgt]);       // target_key
+                _ = decoder.DecodeInt64At(payload, serials[colKind], offsets[colKind]);     // kind
+                _ = decoder.DecodeStringAt(payload, serials[colData], offsets[colData]);    // data
                 count++;
             }
         }
@@ -507,7 +528,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMicroseconds(), 0),
             Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{count} edges (direct cursor)",
+            Note = $"{count} edges (direct cursor, O(1) offsets)",
         };
     }
 
