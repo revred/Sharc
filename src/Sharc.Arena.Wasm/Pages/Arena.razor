@@ -57,7 +57,14 @@
                 @if (_sqliteError is null)
                 {
                     var ratio = _sqliteInitMs / Math.Max(0.001, _sharcInitMs);
-                    <span>Sharc initialized <strong>@($"{ratio:F1}x faster")</strong></span>
+                    @if (ratio >= 1.0)
+                    {
+                        <span>Sharc initialized <strong>@($"{ratio:F1}x faster")</strong></span>
+                    }
+                    else
+                    {
+                        <span>Sharc <strong>@($"{_sharcInitMs:F1}ms")</strong> &middot; SQLite <strong>@($"{_sqliteInitMs:F1}ms")</strong> (incl. graph init)</span>
+                    }
                 }
                 else
                 {
