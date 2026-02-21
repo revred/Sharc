@@ -257,6 +257,7 @@ public class AcidProbingTests
         public int PageCount => _inner.PageCount;
 
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
+        public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
 
         public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)

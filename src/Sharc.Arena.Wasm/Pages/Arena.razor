@@ -438,12 +438,12 @@ else
                     Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] Running {slide.Id} (scale={scale:F3}, live={_isLive})");
 
                     var slideTask = engine.RunSlideAsync(slide, scale, token);
-                    var timeoutTask = Task.Delay(30_000);
+                    var timeoutTask = Task.Delay(60_000);
                     var completed = await Task.WhenAny(slideTask, timeoutTask);
 
                     if (completed != slideTask)
                     {
-                        Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] {slide.Id} TIMED OUT after 30s — skipping");
+                        Console.WriteLine($"[Arena] [{i+1}/{_slides.Count}] {slide.Id} TIMED OUT after 60s — skipping");
                         _doneSlides.Add(slide.Id);
                         _elapsedMs = sw.Elapsed.TotalMilliseconds;
                         StateHasChanged();

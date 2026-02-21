@@ -107,6 +107,12 @@ public sealed class FilePageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        return GetPage(pageNumber).ToArray();
+    }
+
+    /// <inheritdoc />
     public void Invalidate(uint pageNumber)
     {
         // No cache to invalidate

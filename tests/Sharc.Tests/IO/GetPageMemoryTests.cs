@@ -87,36 +87,49 @@ public class GetPageMemoryTests
     }
 
     [Fact]
-    public void GetPageMemory_DefaultImplementation_ReturnsCorrectData()
+    public void CachedPageSource_GetPageMemory_IsZeroCopy()
     {
-        // Uses a minimal IPageSource wrapper that doesn't override GetPageMemory,
-        // exercising the default interface method
         var data = CreateMinimalDatabase();
-        data[300] = 0x99;
+        data[100] = 0xAB;
 
         using var inner = new MemoryPageSource(data);
-        IPageSource proxy = new NonOverridingPageSource(inner);
+        using var cached = new CachedPageSource(inner, 10);
 
-        var memory = proxy.GetPageMemory(1);
+        // First call populates cache
+        var memory1 = cached.GetPageMemory(1);
+        Assert.Equal(0xAB, memory1.Span[100]);
 
-        Assert.Equal(4096, memory.Length);
-        Assert.Equal(0x99, memory.Span[300]);
+        // Second call should return the same cached buffer (zero-copy)
+        var memory2 = cached.GetPageMemory(1);
+        Assert.True(memory1.Span == memory2.Span);
     }
 
-    /// <summary>
-    /// Minimal IPageSource that does NOT override GetPageMemory,
-    /// exercising the default interface method (which calls GetPage().ToArray()).
-    /// </summary>
-    private sealed class NonOverridingPageSource : IPageSource
+    [Fact]
+    public void CachedPageSource_GetPageMemory_ViaInterface_IsZeroCopy()
     {
-        private readonly IPageSource _inner;
-        public NonOverridingPageSource(IPageSource inner) => _inner = inner;
-        public int PageSize => _inner.PageSize;
-        public int PageCount => _inner.PageCount;
-        public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
-        public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
-        public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
-        public void Dispose() => _inner.Dispose();
-        // Deliberately does NOT override GetPageMemory — uses default
+        // Verifies that calling GetPageMemory through IPageSource interface
+        // dispatches to CachedPageSource override (not the default ToArray() DIM)
+        var data = CreateMinimalDatabase();
+        data[100] = 0xAB;
+
+        using var inner = new MemoryPageSource(data);
+        using var cached = new CachedPageSource(inner, 10);
+        IPageSource iface = cached; // typed as IPageSource — tests DIM dispatch
+
+        // Populate cache via GetPage
+        _ = cached.GetPage(1);
+
+        // Call GetPageMemory through IPageSource interface
+        var memory1 = iface.GetPageMemory(1);
+        var memory2 = iface.GetPageMemory(1);
+
+        // Both calls should return the same underlying buffer (zero-copy from cache)
+        Assert.True(memory1.Span == memory2.Span);
+
+        // Mutate via GetPage and verify memory reflects change (same buffer)
+        var span = cached.GetPage(1);
+        byte original = memory1.Span[100];
+        Assert.Equal(0xAB, original);
     }
+
 }

@@ -154,6 +154,42 @@ public sealed class CachedPageSource : IWritablePageSource
         }
     }
 
+    /// <summary>
+    /// Returns a <see cref="ReadOnlyMemory{T}"/> over the cached page buffer.
+    /// Unlike the default interface method, this does not allocate — it wraps the existing cache buffer.
+    /// The memory is valid as long as the page remains in the LRU cache.
+    /// </summary>
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_capacity == 0)
+            return _inner.GetPageMemory(pageNumber);
+
+        lock (_syncRoot)
+        {
+            int slotIndex;
+            if (_lookup.TryGetValue(pageNumber, out slotIndex))
+            {
+                MoveToHead(slotIndex);
+                CacheHitCount++;
+                UpdateSequentialTracking(pageNumber);
+            }
+            else
+            {
+                CacheMissCount++;
+                slotIndex = AllocateSlot();
+                _inner.ReadPage(pageNumber, _slots[slotIndex].Data);
+                _slots[slotIndex].PageNumber = pageNumber;
+                AddFirst(slotIndex);
+                _lookup[pageNumber] = slotIndex;
+                TryPrefetch(pageNumber);
+            }
+
+            return _slots[slotIndex].Data.AsMemory(0, PageSize);
+        }
+    }
+
     /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {

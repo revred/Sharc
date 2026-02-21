@@ -93,6 +93,15 @@ public sealed class SafeMemMapdPageSource : IPageSource
     }
 
     /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidatePageNumber(pageNumber);
+        int offset = (int)(pageNumber - 1) * PageSize;
+        return _memory.Slice(offset, PageSize);
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         GetPage(pageNumber).CopyTo(destination);

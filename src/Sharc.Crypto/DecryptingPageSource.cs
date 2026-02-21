@@ -50,6 +50,12 @@ internal sealed class DecryptingPageSource : IPageSource
     }
 
     /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        return GetPage(pageNumber).ToArray();
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
