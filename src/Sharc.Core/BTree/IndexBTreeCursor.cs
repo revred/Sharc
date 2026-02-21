@@ -34,16 +34,29 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
+    private long _snapshotVersion;
 
     public IndexBTreeCursor(IPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
+        _snapshotVersion = pageSource.DataVersion;
     }
 
     /// <inheritdoc />
     public int PayloadSize => _payloadSize;
+
+    /// <inheritdoc />
+    public bool IsStale
+    {
+        get
+        {
+            long current = _pageSource.DataVersion;
+            if (_snapshotVersion == 0 || current == 0) return false;
+            return current != _snapshotVersion;
+        }
+    }
 
     /// <inheritdoc />
     public ReadOnlySpan<byte> Payload
@@ -67,6 +80,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         _exhausted = false;
         _currentLeafPage = 0;
         _payloadSize = 0;
+        _snapshotVersion = _pageSource.DataVersion;
     }
 
     /// <inheritdoc />
@@ -129,6 +143,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         _stack.Clear();
         _exhausted = false;
         _initialized = true;
+        _snapshotVersion = _pageSource.DataVersion;
 
         bool exactMatch = DescendToLeafByKey(_rootPage, firstColumnKey);
 
