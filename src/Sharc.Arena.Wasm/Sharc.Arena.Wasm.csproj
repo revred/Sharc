@@ -9,6 +9,10 @@
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CA1707;CA1305;CA1822;WASM0001</NoWarn>
     <PublishTrimmed>false</PublishTrimmed>
+    <!-- AOT: compile IL → WASM bytecode at build time instead of runtime JIT.
+         Enables whole-program devirtualization of sealed classes (BTreeCursor, RecordDecoder, etc.)
+         and eliminates the double-JIT pipeline (Mono JIT → WASM → Browser JIT). -->
+    <RunAOTCompilation>true</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>
