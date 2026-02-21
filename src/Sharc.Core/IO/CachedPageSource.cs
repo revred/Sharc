@@ -59,6 +59,9 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <inheritdoc />
     public int PageCount => _inner.PageCount;
 
+    /// <inheritdoc />
+    public long DataVersion => _inner.DataVersion;
+
     /// <summary>
     /// Wraps an inner page source with an LRU cache of the given capacity.
     /// </summary>

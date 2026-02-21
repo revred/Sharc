@@ -11,6 +11,7 @@ public sealed class ShadowPageSource : IWritablePageSource
     private readonly Dictionary<uint, int> _dirtySlots = new(8);
     private PageArena? _arena;
     private uint _maxDirtyPage;
+    private long _shadowVersion;
     private bool _disposed;
 
     /// <inheritdoc />
@@ -18,6 +19,9 @@ public sealed class ShadowPageSource : IWritablePageSource
     {
         _baseSource = baseSource ?? throw new ArgumentNullException(nameof(baseSource));
     }
+
+    /// <inheritdoc />
+    public long DataVersion => _baseSource.DataVersion + Interlocked.Read(ref _shadowVersion);
 
     /// <inheritdoc />
     public int PageSize => _baseSource.PageSize;
@@ -78,6 +82,7 @@ public sealed class ShadowPageSource : IWritablePageSource
         }
         source.CopyTo(_arena.GetSlot(slot));
         if (pageNumber > _maxDirtyPage) _maxDirtyPage = pageNumber;
+        Interlocked.Increment(ref _shadowVersion);
     }
 
     /// <inheritdoc />
@@ -122,6 +127,7 @@ public sealed class ShadowPageSource : IWritablePageSource
         _dirtySlots.Clear();
         _arena?.Reset();
         _maxDirtyPage = 0;
+        Interlocked.Exchange(ref _shadowVersion, 0);
     }
 
     /// <inheritdoc />
