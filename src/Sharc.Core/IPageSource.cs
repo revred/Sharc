@@ -47,4 +47,13 @@ public interface IPageSource : IDisposable
     /// Returns 0 for sources that cannot track mutations (read-only, file-backed).
     /// </summary>
     long DataVersion => 0;
+
+    /// <summary>
+    /// Gets a <see cref="ReadOnlyMemory{T}"/> over a page's data that can be stored in fields.
+    /// Unlike <see cref="GetPage"/>, the returned memory survives across method calls.
+    /// The default implementation copies the page; concrete types may override for zero-copy.
+    /// </summary>
+    /// <param name="pageNumber">1-based page number.</param>
+    /// <returns>Read-only memory of page bytes.</returns>
+    ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => GetPage(pageNumber).ToArray();
 }
