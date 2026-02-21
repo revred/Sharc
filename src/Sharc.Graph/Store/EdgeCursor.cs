@@ -28,6 +28,7 @@ internal abstract class EdgeCursorBase : IEdgeCursor
 
     // Cached per row state to avoid allocations
     protected readonly long[] SerialTypes;
+    protected readonly int[] Offsets;
     protected int BodyOffset;
 
     protected EdgeCursorBase(RecordDecoder decoder, int columnCount, long matchKey, int? matchKind, bool matchIsOrigin,
@@ -48,6 +49,17 @@ internal abstract class EdgeCursorBase : IEdgeCursor
         ColWeight = colWeight;
         
         SerialTypes = ArrayPool<long>.Shared.Rent(columnCount);
+        Offsets = ArrayPool<int>.Shared.Rent(columnCount);
+    }
+
+    /// <summary>
+    /// Precomputes column byte offsets after ReadSerialTypes.
+    /// Converts O(K) per-column DecodeXxxDirect to O(1) DecodeXxxAt.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    protected void PrepareOffsets()
+    {
+        Decoder.ComputeColumnOffsets(SerialTypes, ColumnCount, BodyOffset, Offsets);
     }
 
     public long OriginKey => GetLong(ColOrigin);
@@ -62,13 +74,13 @@ internal abstract class EdgeCursorBase : IEdgeCursor
     private long GetLong(int ordinal)
     {
         if (ordinal < 0 || ordinal >= ColumnCount) return 0;
-        return Decoder.DecodeInt64Direct(CurrentPayload, ordinal, SerialTypes, BodyOffset);
+        return Decoder.DecodeInt64At(CurrentPayload, SerialTypes[ordinal], Offsets[ordinal]);
     }
 
     private double GetDouble(int ordinal)
     {
         if (ordinal < 0 || ordinal >= ColumnCount) return 0;
-        return Decoder.DecodeDoubleDirect(CurrentPayload, ordinal, SerialTypes, BodyOffset);
+        return Decoder.DecodeDoubleAt(CurrentPayload, SerialTypes[ordinal], Offsets[ordinal]);
     }
 
     public void Reset(long matchKey, int? matchKind)
@@ -84,6 +96,7 @@ internal abstract class EdgeCursorBase : IEdgeCursor
     public virtual void Dispose()
     {
         ArrayPool<long>.Shared.Return(SerialTypes);
+        ArrayPool<int>.Shared.Return(Offsets);
     }
 }
 
@@ -106,16 +119,18 @@ internal sealed class TableScanEdgeCursor : EdgeCursorBase
     {
         while (_cursor.MoveNext())
         {
-            Decoder.ReadSerialTypes(_cursor.Payload, SerialTypes, out BodyOffset);
-            long key = MatchIsOrigin ? 
-                Decoder.DecodeInt64Direct(_cursor.Payload, base.ColOrigin, SerialTypes, BodyOffset) :
-                Decoder.DecodeInt64Direct(_cursor.Payload, base.ColTarget, SerialTypes, BodyOffset);
+            var payload = _cursor.Payload;
+            Decoder.ReadSerialTypes(payload, SerialTypes, out BodyOffset);
+            PrepareOffsets();
+
+            int matchOrd = MatchIsOrigin ? base.ColOrigin : base.ColTarget;
+            long key = Decoder.DecodeInt64At(payload, SerialTypes[matchOrd], Offsets[matchOrd]);
 
             if (key != MatchKey) continue;
-            
+
             if (MatchKind.HasValue)
             {
-                int kind = (int)Decoder.DecodeInt64Direct(_cursor.Payload, base.ColKind, SerialTypes, BodyOffset);
+                int kind = (int)Decoder.DecodeInt64At(payload, SerialTypes[base.ColKind], Offsets[base.ColKind]);
                 if (kind != MatchKind.Value) continue;
             }
 
@@ -136,6 +151,7 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
     private readonly IIndexBTreeCursor _indexCursor;
     private readonly IBTreeCursor _tableCursor;
     private readonly long[] _indexSerials;
+    private readonly int[] _indexOffsets;
 
     public IndexEdgeCursor(IBTreeReader reader, uint indexRootPage, long matchKey, int? matchKind, RecordDecoder decoder, int colCount, bool matchIsOrigin,
         int colOrigin, int colTarget, int colKind, int colData, int colCvn, int colLvn, int colSync, int colWeight, uint tableRootPage)
@@ -144,6 +160,7 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
         _indexCursor = reader.CreateIndexCursor(indexRootPage);
         _tableCursor = reader.CreateCursor(tableRootPage);
         _indexSerials = ArrayPool<long>.Shared.Rent(16);
+        _indexOffsets = ArrayPool<int>.Shared.Rent(16);
     }
 
     protected override ReadOnlySpan<byte> CurrentPayload => _tableCursor.Payload;
@@ -167,29 +184,32 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
 
         do
         {
-            int indexBodyOffset;
-            Decoder.ReadSerialTypes(_indexCursor.Payload, _indexSerials, out indexBodyOffset);
-            
-            long val = Decoder.DecodeInt64Direct(_indexCursor.Payload, 0, _indexSerials, indexBodyOffset);
+            var indexPayload = _indexCursor.Payload;
+            int indexColCount = Decoder.ReadSerialTypes(indexPayload, _indexSerials, out int indexBodyOffset);
+            Decoder.ComputeColumnOffsets(_indexSerials, indexColCount, indexBodyOffset, _indexOffsets);
+
+            long val = Decoder.DecodeInt64At(indexPayload, _indexSerials[0], _indexOffsets[0]);
             if (val > MatchKey) return false;
-            if (val < MatchKey) continue; 
+            if (val < MatchKey) continue;
 
             // Optional kind filter if it's part of the index (multi-column index)
-            if (MatchKind.HasValue && Decoder.GetColumnCount(_indexCursor.Payload) >= 3)
+            if (MatchKind.HasValue && indexColCount >= 3)
             {
-                int kind = (int)Decoder.DecodeInt64Direct(_indexCursor.Payload, 1, _indexSerials, indexBodyOffset);
+                int kind = (int)Decoder.DecodeInt64At(indexPayload, _indexSerials[1], _indexOffsets[1]);
                 if (kind != MatchKind.Value) continue;
             }
 
-            long rowId = Decoder.DecodeInt64Direct(_indexCursor.Payload, Decoder.GetColumnCount(_indexCursor.Payload) - 1, _indexSerials, indexBodyOffset);
+            long rowId = Decoder.DecodeInt64At(indexPayload, _indexSerials[indexColCount - 1], _indexOffsets[indexColCount - 1]);
             if (_tableCursor.Seek(rowId))
             {
-                Decoder.ReadSerialTypes(_tableCursor.Payload, SerialTypes, out BodyOffset);
-                
+                var tablePayload = _tableCursor.Payload;
+                Decoder.ReadSerialTypes(tablePayload, SerialTypes, out BodyOffset);
+                PrepareOffsets();
+
                 // Double check kind if not in index
-                if (MatchKind.HasValue && Decoder.GetColumnCount(_indexCursor.Payload) < 3)
+                if (MatchKind.HasValue && indexColCount < 3)
                 {
-                    int kind = (int)Decoder.DecodeInt64Direct(_tableCursor.Payload, base.ColKind, SerialTypes, BodyOffset);
+                    int kind = (int)Decoder.DecodeInt64At(tablePayload, SerialTypes[base.ColKind], Offsets[base.ColKind]);
                     if (kind != MatchKind.Value) continue;
                 }
 
@@ -205,6 +225,7 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
     {
         base.Dispose();
         ArrayPool<long>.Shared.Return(_indexSerials);
+        ArrayPool<int>.Shared.Return(_indexOffsets);
         _indexCursor.Dispose();
         _tableCursor.Dispose();
     }

@@ -258,7 +258,7 @@ window.indexedDbAdapter = {
 
     _openDb: function () {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this._dbName, 1);
+            const request = indexedDB.open(this._dbName);
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
         });
