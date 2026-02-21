@@ -41,4 +41,10 @@ public interface IPageSource : IDisposable
     /// Evicts the specified page from any internal cache, forcing a re-read from the backing store.
     /// </summary>
     void Invalidate(uint pageNumber);
+
+    /// <summary>
+    /// Monotonically increasing version that changes on data mutation via <see cref="IWritablePageSource.WritePage"/>.
+    /// Returns 0 for sources that cannot track mutations (read-only, file-backed).
+    /// </summary>
+    long DataVersion => 0;
 }
