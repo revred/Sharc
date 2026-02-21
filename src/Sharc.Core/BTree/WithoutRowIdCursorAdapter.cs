@@ -40,6 +40,9 @@ internal sealed class WithoutRowIdCursorAdapter : IBTreeCursor
     public ReadOnlySpan<byte> Payload => _inner.Payload;
 
     /// <inheritdoc />
+    public bool IsStale => _inner.IsStale;
+
+    /// <inheritdoc />
     public void Reset()
     {
         _inner.Reset();
