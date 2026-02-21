@@ -272,6 +272,7 @@ public class RelationStoreTests
         public long RowId => _index >= 0 && _index < _rows.Count ? _rows[_index].rowId : 0;
         public ReadOnlySpan<byte> Payload => _index >= 0 && _index < _rows.Count ? _rows[_index].payload : default;
         public int PayloadSize => _index >= 0 && _index < _rows.Count ? _rows[_index].payload.Length : 0;
+        public bool IsStale => false;
         public bool MoveNext() { _index++; return _index < _rows.Count; }
         public bool MoveLast() { if (_rows.Count == 0) return false; _index = _rows.Count - 1; return true; }
         public bool Seek(long rowId) => false;

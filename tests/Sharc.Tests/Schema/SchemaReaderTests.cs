@@ -313,6 +313,7 @@ public class SchemaReaderTests
             }
         }
         public int PayloadSize => _dummyPayload.Length;
+        public bool IsStale => false;
         public void Dispose() { }
     }
 

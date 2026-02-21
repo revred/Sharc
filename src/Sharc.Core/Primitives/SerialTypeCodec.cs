@@ -17,6 +17,10 @@ public static class SerialTypeCodec
     public const long ZeroSerialType = 8;
     /// <summary>Serial type code for the integer constant 1 (zero-byte storage).</summary>
     public const long OneSerialType = 9;
+    // Lookup table for serial types 0-9: avoids switch overhead on WASM Mono.
+    // ReadOnlySpan<byte> literal compiles to PE static data — zero allocation.
+    private static ReadOnlySpan<byte> FixedSizes => new byte[] { 0, 1, 2, 3, 4, 6, 8, 8, 0, 0 };
+
     /// <summary>
     /// Gets the number of bytes in the content area for the given serial type.
     /// </summary>
@@ -25,25 +29,16 @@ public static class SerialTypeCodec
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetContentSize(long serialType)
     {
-        return serialType switch
-        {
-            0 => 0,    // NULL
-            1 => 1,    // 8-bit int
-            2 => 2,    // 16-bit int
-            3 => 3,    // 24-bit int
-            4 => 4,    // 32-bit int
-            5 => 6,    // 48-bit int
-            6 => 8,    // 64-bit int
-            7 => 8,    // IEEE 754 float
-            8 => 0,    // Integer constant 0
-            9 => 0,    // Integer constant 1
-            10 or 11 => throw new ArgumentOutOfRangeException(nameof(serialType),
-                serialType, "Reserved serial types 10 and 11 are not used."),
-            _ => serialType >= 12
-                ? (int)((serialType - 12) / 2)  // BLOB (even) or TEXT (odd) Ã¢â‚¬â€ same formula
-                : throw new ArgumentOutOfRangeException(nameof(serialType),
-                    serialType, "Invalid serial type.")
-        };
+        // Fast path: indexed lookup for fixed serial types 0-9
+        if ((ulong)serialType <= 9)
+            return FixedSizes[(int)serialType];
+
+        // Variable-length BLOB (even >=12) or TEXT (odd >=13) — same formula
+        if (serialType >= 12)
+            return (int)((serialType - 12) / 2);
+
+        throw new ArgumentOutOfRangeException(nameof(serialType),
+            serialType, "Reserved serial types 10 and 11 are not used.");
     }
 
     /// <summary>
