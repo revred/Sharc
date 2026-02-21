@@ -405,7 +405,7 @@ public class MultiAgentTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private static Sharc.Core.Trust.AgentInfo CreateAgent(ISharcSigner signer, long start, long end)
+    private static Sharc.Core.Trust.AgentInfo CreateAgent(SharcSigner signer, long start, long end)
     {
         var pub = signer.GetPublicKey();
         var wScope = "*";
