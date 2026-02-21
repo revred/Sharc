@@ -17,6 +17,15 @@ public interface IBTreeReader
     IBTreeCursor CreateCursor(uint rootPage);
 
     /// <summary>
+    /// Creates a scan-optimized cursor that pre-collects leaf page numbers for faster
+    /// sequential iteration. Eliminates B-tree stack navigation overhead during scan.
+    /// Does not support <see cref="IBTreeCursor.Seek"/> or <see cref="IBTreeCursor.MoveLast"/>.
+    /// </summary>
+    /// <param name="rootPage">The root page number of the table b-tree.</param>
+    /// <returns>A scan-optimized cursor positioned before the first cell.</returns>
+    IBTreeCursor CreateScanCursor(uint rootPage) => CreateCursor(rootPage);
+
+    /// <summary>
     /// Creates a cursor for iterating over all entries in an index b-tree.
     /// </summary>
     /// <param name="rootPage">The root page number of the index b-tree.</param>
