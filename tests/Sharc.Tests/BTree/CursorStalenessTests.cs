@@ -135,6 +135,132 @@ public class CursorStalenessTests
 
     #endregion
 
+    #region Cached Leaf Page + IsStale Interaction
+
+    [Fact]
+    public void CachedLeafPage_ResetClearsCache_ReadsFreshData()
+    {
+        // Scenario: Agent A's cursor reads data, Agent B writes to the same page,
+        // Agent A detects staleness, resets, and the leaf cache is invalidated
+        // so the next MoveNext re-fetches from the page source.
+        var data = CreateDatabaseWithOneRow();
+        using var source = new MemoryPageSource(data);
+        using var cursor = new BTreeCursor(source, 1, PageSize);
+
+        // Agent A reads the row
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(1, cursor.RowId);
+        var payloadBefore = cursor.Payload.ToArray();
+
+        // Agent B writes to the leaf page (page 1), changing cell data
+        var modifiedPage = data.AsSpan(0, PageSize).ToArray();
+        // Modify the payload value (byte at the cell data position)
+        int cellStart = PageSize - 20;
+        // The cell structure is: payloadSize(varint) + rowid(varint) + header(2 bytes) + value(1 byte)
+        // value is at cellStart + 4 (1 byte payloadSize + 1 byte rowid + 2 bytes header)
+        modifiedPage[cellStart + 4] = 99; // Change value from 42 to 99
+        source.WritePage(1, modifiedPage);
+
+        // Agent A detects staleness
+        Assert.True(cursor.IsStale);
+
+        // Reset clears the cached leaf page
+        cursor.Reset();
+        Assert.False(cursor.IsStale);
+
+        // Re-read gets fresh data from the page source (cache was invalidated)
+        Assert.True(cursor.MoveNext());
+        var payloadAfter = cursor.Payload.ToArray();
+
+        // The payload should reflect the modified page data
+        Assert.NotEqual(payloadBefore, payloadAfter);
+    }
+
+    [Fact]
+    public void CachedLeafPage_TwoCursors_IndependentStaleness()
+    {
+        // Two agents each hold a cursor on the same page source.
+        // A write makes both stale. Each cursor's cache is independent.
+        var data = CreateDatabaseWithOneRow();
+        using var source = new MemoryPageSource(data);
+        using var cursorA = new BTreeCursor(source, 1, PageSize);
+        using var cursorB = new BTreeCursor(source, 1, PageSize);
+
+        // Both read the same row
+        Assert.True(cursorA.MoveNext());
+        Assert.True(cursorB.MoveNext());
+        Assert.False(cursorA.IsStale);
+        Assert.False(cursorB.IsStale);
+
+        // External write
+        source.WritePage(2, new byte[PageSize]);
+
+        // Both detect staleness independently
+        Assert.True(cursorA.IsStale);
+        Assert.True(cursorB.IsStale);
+
+        // Agent A resets — only A's staleness clears
+        cursorA.Reset();
+        Assert.False(cursorA.IsStale);
+        Assert.True(cursorB.IsStale);
+
+        // Agent B resets independently
+        cursorB.Reset();
+        Assert.False(cursorB.IsStale);
+    }
+
+    [Fact]
+    public void CachedLeafPage_WriteDoesNotAutoInvalidateCache()
+    {
+        // The cached leaf page is NOT automatically invalidated by an external write.
+        // IsStale is the signal — the caller decides when to reset.
+        // This tests that the cursor continues to function (return old data) even when stale,
+        // which is the correct passive-detection semantic.
+        var data = CreateDatabaseWithOneRow();
+        using var source = new MemoryPageSource(data);
+        using var cursor = new BTreeCursor(source, 1, PageSize);
+
+        // Read initial data
+        Assert.True(cursor.MoveNext());
+        var originalPayload = cursor.Payload.ToArray();
+
+        // External write to a different page — cursor is stale but leaf cache is unaffected
+        source.WritePage(2, new byte[PageSize]);
+        Assert.True(cursor.IsStale);
+
+        // Cursor still returns the previously-read cell data (passive detection, no exception)
+        var payloadAfterWrite = cursor.Payload.ToArray();
+        Assert.Equal(originalPayload, payloadAfterWrite);
+    }
+
+    [Fact]
+    public void CachedLeafPage_SeekRefreshesBothVersionAndCache()
+    {
+        // Seek() refreshes the snapshot version AND the cached leaf page,
+        // since it navigates to a potentially different leaf.
+        var data = CreateDatabaseWithOneRow();
+        using var source = new MemoryPageSource(data);
+        using var cursor = new BTreeCursor(source, 1, PageSize);
+
+        // Read initial data
+        Assert.True(cursor.MoveNext());
+        Assert.False(cursor.IsStale);
+
+        // External write
+        source.WritePage(2, new byte[PageSize]);
+        Assert.True(cursor.IsStale);
+
+        // Seek refreshes both version snapshot and cache
+        cursor.Seek(1);
+        Assert.False(cursor.IsStale);
+
+        // Payload is accessible (cache was refreshed by seek's leaf navigation)
+        Assert.Equal(1, cursor.RowId);
+        _ = cursor.Payload; // Should not throw
+    }
+
+    #endregion
+
     #region Test Helpers
 
     /// <summary>
@@ -230,6 +356,7 @@ public class CursorStalenessTests
         public int PageCount => _inner.PageCount;
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
+        public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
         public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
         public void Dispose() => _inner.Dispose();
         // Deliberately does NOT override DataVersion — uses default (0)

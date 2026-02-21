@@ -189,6 +189,7 @@ public class DataVersionTests
         public int PageCount => _inner.PageCount;
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
+        public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
         public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
         public void Dispose() => _inner.Dispose();
         // Deliberately does NOT override DataVersion — uses default (0)

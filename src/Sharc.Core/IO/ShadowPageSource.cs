@@ -50,6 +50,15 @@ public sealed class ShadowPageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_dirtySlots.TryGetValue(pageNumber, out int _))
+            return GetPage(pageNumber).ToArray();
+        return _baseSource.GetPageMemory(pageNumber);
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
