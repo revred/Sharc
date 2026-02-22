@@ -127,12 +127,12 @@ public class LeafPageScannerTests
         return [0x02, 0x09]; // header_size=2, serial_type=9 (constant 1)
     }
 
-    private static IBTreeCursor CreateScanCursor(byte[] db, uint rootPage)
+    private static LeafPageScanner CreateScanCursor(byte[] db, uint rootPage)
     {
         var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
-        return reader.CreateScanCursor(rootPage);
+        // Directly create LeafPageScanner for scan-specific tests
+        return new LeafPageScanner(source, rootPage, header.UsablePageSize);
     }
 
     #endregion

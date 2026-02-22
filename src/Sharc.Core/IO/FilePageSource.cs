@@ -41,6 +41,9 @@ public sealed class FilePageSource : IWritablePageSource
     /// <inheritdoc />
     public int PageCount => (int)((RandomAccess.GetLength(_handle) + PageSize - 1) / PageSize);
 
+    /// <inheritdoc />
+    public long DataVersion => 0;
+
     /// <summary>
     /// Opens a SQLite database file for on-demand page reads and optional writes.
     /// Only reads the 100-byte header on construction.

@@ -26,6 +26,9 @@ internal sealed class DecryptingPageSource : IPageSource
     /// <inheritdoc />
     public int PageCount => _inner.PageCount;
 
+    /// <inheritdoc />
+    public long DataVersion => _inner.DataVersion;
+
     /// <summary>
     /// Creates a decrypting page source.
     /// </summary>

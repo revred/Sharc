@@ -38,6 +38,9 @@ public sealed class SafeMemMapdPageSource : IPageSource
     /// <inheritdoc />
     public int PageCount { get; }
 
+    /// <inheritdoc />
+    public long DataVersion => 0;
+
     /// <summary>
     /// Memory-maps a SQLite database file for zero-copy page access.
     /// </summary>

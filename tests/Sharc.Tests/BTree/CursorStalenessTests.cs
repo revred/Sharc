@@ -39,6 +39,9 @@ public class CursorStalenessTests
         using var source = new MemoryPageSource(data);
         using var cursor = new BTreeCursor(source, 1, PageSize);
 
+        // Read data to establish the snapshot baseline
+        Assert.True(cursor.MoveNext());
+
         // External write changes the DataVersion
         source.WritePage(2, new byte[PageSize]);
 
@@ -51,6 +54,9 @@ public class CursorStalenessTests
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
         using var cursor = new BTreeCursor(source, 1, PageSize);
+
+        // Read data to establish the snapshot baseline
+        Assert.True(cursor.MoveNext());
 
         source.WritePage(2, new byte[PageSize]);
         Assert.True(cursor.IsStale);
@@ -66,6 +72,9 @@ public class CursorStalenessTests
         using var source = new MemoryPageSource(data);
         using var cursor = new BTreeCursor(source, 1, PageSize);
 
+        // Read data to establish the snapshot baseline
+        Assert.True(cursor.MoveNext());
+
         source.WritePage(2, new byte[PageSize]);
         Assert.True(cursor.IsStale);
 
@@ -79,6 +88,9 @@ public class CursorStalenessTests
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
         using var cursor = new BTreeCursor(source, 1, PageSize);
+
+        // Read data to establish the snapshot baseline
+        Assert.True(cursor.MoveNext());
 
         source.WritePage(2, new byte[PageSize]);
         source.WritePage(2, new byte[PageSize]);
@@ -346,7 +358,7 @@ public class CursorStalenessTests
     }
 
     /// <summary>
-    /// IPageSource that does NOT override DataVersion — uses default (0).
+    /// IPageSource that returns DataVersion=0 (read-only, no mutation tracking).
     /// </summary>
     private sealed class ReadOnlyPageSourceStub : IPageSource
     {
@@ -354,12 +366,12 @@ public class CursorStalenessTests
         public ReadOnlyPageSourceStub(IPageSource inner) => _inner = inner;
         public int PageSize => _inner.PageSize;
         public int PageCount => _inner.PageCount;
+        public long DataVersion => 0;
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
         public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
         public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
         public void Dispose() => _inner.Dispose();
-        // Deliberately does NOT override DataVersion — uses default (0)
     }
 
     #endregion

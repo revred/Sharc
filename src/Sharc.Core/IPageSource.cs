@@ -44,9 +44,9 @@ public interface IPageSource : IDisposable
 
     /// <summary>
     /// Monotonically increasing version that changes on data mutation via <see cref="IWritablePageSource.WritePage"/>.
-    /// Returns 0 for sources that cannot track mutations (read-only, file-backed).
+    /// Must return 0 for sources that cannot track mutations (read-only, file-backed).
     /// </summary>
-    long DataVersion => 0;
+    long DataVersion { get; }
 
     /// <summary>
     /// Gets a <see cref="ReadOnlyMemory{T}"/> over a page's data that can be stored in fields.
