@@ -12,16 +12,17 @@ namespace Sharc.Core.BTree;
 /// <summary>
 /// Scan-optimized cursor that pre-collects all leaf page numbers via a single DFS
 /// through interior pages, then iterates cells in a flat loop without B-tree stack
-/// navigation. Faster than <see cref="BTreeCursor"/> for full table scans because
+/// navigation. Faster than <see cref="BTreeCursor{TPageSource}"/> for full table scans because
 /// leaf-to-leaf transitions are a simple array index bump instead of stack-based
 /// interior page re-navigation.
 /// <para>
 /// Does not support <see cref="Seek"/> or <see cref="MoveLast"/> (scan-only by design).
 /// </para>
 /// </summary>
-internal sealed class LeafPageScanner : IBTreeCursor
+internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
     private readonly uint[] _leafPages;
 
@@ -38,7 +39,10 @@ internal sealed class LeafPageScanner : IBTreeCursor
     private int _payloadSize;
     private byte[]? _assembledPayload;
     private int _inlinePayloadOffset;
-    private uint _inlinePayloadPage;
+
+    // Leaf page cache — avoids redundant GetPage() calls for cells on the same leaf
+    private ReadOnlyMemory<byte> _cachedLeafMemory;
+    private uint _cachedLeafPageNum;
 
     // Reusable overflow cycle detection set
     private HashSet<uint>? _visitedOverflowPages;
@@ -46,7 +50,7 @@ internal sealed class LeafPageScanner : IBTreeCursor
     // Staleness tracking
     private long _snapshotVersion;
 
-    public LeafPageScanner(IPageSource pageSource, uint rootPage, int usablePageSize)
+    public LeafPageScanner(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _usablePageSize = usablePageSize;
@@ -90,8 +94,8 @@ internal sealed class LeafPageScanner : IBTreeCursor
             if (_assembledPayload != null)
                 return _assembledPayload.AsSpan(0, _payloadSize);
 
-            var page = _pageSource.GetPage(_inlinePayloadPage);
-            return page.Slice(_inlinePayloadOffset, _payloadSize);
+            // Return inline payload from cached leaf page
+            return GetCachedLeafPage().Slice(_inlinePayloadOffset, _payloadSize);
         }
     }
 
@@ -145,6 +149,8 @@ internal sealed class LeafPageScanner : IBTreeCursor
         _leafIndex = 0;
         _cellIndex = -1;
         _exhausted = _leafPages.Length == 0;
+        _cachedLeafPageNum = 0;
+        _cachedLeafMemory = default;
 
         if (_leafPages.Length > 0)
             LoadLeafPage(0);
@@ -172,9 +178,32 @@ internal sealed class LeafPageScanner : IBTreeCursor
     private void LoadLeafPage(int leafIndex)
     {
         uint pageNum = _leafPages[leafIndex];
-        var page = _pageSource.GetPage(pageNum);
+        var page = GetCachedLeafPage(pageNum);
         _leafHeaderOffset = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
         _leafHeader = BTreePageHeader.Parse(page[_leafHeaderOffset..]);
+    }
+
+    /// <summary>
+    /// Returns the cached leaf page data, fetching it only on cache miss.
+    /// </summary>
+    private ReadOnlySpan<byte> GetCachedLeafPage()
+    {
+        uint pageNum = _leafPages[_leafIndex];
+        return GetCachedLeafPage(pageNum);
+    }
+
+    /// <summary>
+    /// Returns the specified leaf page data, caching it to avoid redundant GetPageMemory() calls
+    /// when iterating multiple cells on the same leaf.
+    /// </summary>
+    private ReadOnlySpan<byte> GetCachedLeafPage(uint pageNum)
+    {
+        if (pageNum != _cachedLeafPageNum)
+        {
+            _cachedLeafMemory = _pageSource.GetPageMemory(pageNum);
+            _cachedLeafPageNum = pageNum;
+        }
+        return _cachedLeafMemory.Span;
     }
 
     /// <summary>
@@ -182,8 +211,7 @@ internal sealed class LeafPageScanner : IBTreeCursor
     /// </summary>
     private void ParseCurrentLeafCell()
     {
-        uint pageNum = _leafPages[_leafIndex];
-        var page = _pageSource.GetPage(pageNum);
+        var page = GetCachedLeafPage();
         int cellOffset = _leafHeader.GetCellPointer(page[_leafHeaderOffset..], _cellIndex);
 
         int cellHeaderSize = CellParser.ParseTableLeafCell(
@@ -195,7 +223,6 @@ internal sealed class LeafPageScanner : IBTreeCursor
         if (inlineSize >= _payloadSize)
         {
             _inlinePayloadOffset = payloadStart;
-            _inlinePayloadPage = pageNum;
             _assembledPayload = null;
         }
         else
@@ -250,7 +277,7 @@ internal sealed class LeafPageScanner : IBTreeCursor
     /// Collects all leaf page numbers in left-to-right order via DFS through interior pages.
     /// This is a one-time O(I) operation where I is the number of interior pages.
     /// </summary>
-    private static uint[] CollectLeafPages(IPageSource pageSource, uint rootPage)
+    private static uint[] CollectLeafPages(TPageSource pageSource, uint rootPage)
     {
         var page = pageSource.GetPage(rootPage);
         int headerOffset = rootPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
@@ -267,7 +294,7 @@ internal sealed class LeafPageScanner : IBTreeCursor
     }
 
     private static void CollectLeavesRecursive(
-        IPageSource pageSource, uint pageNum, BTreePageHeader header, int headerOffset,
+        TPageSource pageSource, uint pageNum, BTreePageHeader header, int headerOffset,
         List<uint> leaves)
     {
         var page = pageSource.GetPage(pageNum);

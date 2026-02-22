@@ -4,6 +4,46 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-019: Generic Page Source Specialization — Eliminate Interface Dispatch
+
+**Date**: 2026-02-22
+**Status**: Accepted
+**Context**: After adding multi-agent staleness tracking (DataVersion/IsStale) and leaf page caching, PointLookup regressed from 278 ns to 321 ns (+15%). Root cause analysis revealed that every `_pageSource.GetPage()` call in BTreeCursor traverses two interface dispatch layers: `BTreeCursor → ProxyPageSource (vtable) → MemoryPageSource (vtable)`. For a Seek with 5-7 page accesses, this adds 50-100+ ns of dispatch overhead — a significant fraction of a 321 ns operation.
+
+ProxyPageSource exists to enable runtime target swapping during write transactions (`SetTarget()`), but is unnecessary for read-only databases where the target never changes. For the PointLookup benchmark (OpenMemory, read-only), the proxy is pure overhead.
+
+**Decision**: Three coordinated changes:
+
+1. **Generic type specialization on cursors and reader**: `BTreeCursor<TPageSource>`, `IndexBTreeCursor<TPageSource>`, `LeafPageScanner<TPageSource>`, and `BTreeReader<TPageSource>` — all parameterized with `where TPageSource : class, IPageSource`. The cursor stores a `TPageSource` typed field instead of `IPageSource`. When T is a sealed class known at generic instantiation time, the .NET JIT devirtualizes all interface calls on that field — converting vtable dispatch into direct or inlined calls. This is the same technique used by `List<T>`, `Dictionary<TKey,TValue>`, and other BCL types to achieve zero-overhead abstraction.
+
+2. **Proxy bypass for read-only databases**: `SharcDatabaseFactory.CreateFromPageSource` dispatches to `CreateSpecializedReader()` which pattern-matches the concrete page source type and creates the appropriately specialized `BTreeReader<T>`. Read-only databases get `BTreeReader<MemoryPageSource>` (no proxy), while writable databases get `BTreeReader<ProxyPageSource>` (proxy needed for SetTarget during transactions).
+
+3. **Leaf page caching in LeafPageScanner**: Added the same `GetCachedLeafPage()` pattern already used in BTreeCursor — caches the current leaf page via `GetPageMemory()` and returns `_cachedLeafMemory.Span` on subsequent cell accesses. Reduces per-cell interface dispatches from ~200/leaf to ~1/leaf.
+
+**Public API impact**: None. All generic parameters are on `internal sealed` classes. The public interfaces (`IBTreeReader`, `IBTreeCursor`, `IIndexBTreeCursor`, `SharcDatabase`, `SharcDataReader`) remain non-generic. End users call `SharcDatabase.Open()`, `db.CreateReader()`, `reader.Seek()` — zero generics exposed.
+
+**Files modified**: `BTreeCursor.cs`, `IndexBTreeCursor.cs`, `LeafPageScanner.cs`, `BTreeReader.cs` (generic specialization), `SharcDatabaseFactory.cs` (type dispatch + proxy bypass), `BTreeMutator.cs` (doc comment), `SharcWriter.cs` (IPageSource fallback), plus ~15 test/benchmark files (mechanical type parameter addition).
+
+**Dispatch elimination analysis**:
+
+| Scenario | Before | After | Saved |
+|---|---|---|---|
+| Read-only in-memory (benchmark) | 2 vtable dispatches/call | 0 (devirtualized) | 2 |
+| Writable (transactions) | 2 (Proxy + inner) | 1 (Proxy devirtualized) | 1 |
+| Encrypted + cached | 4 (Proxy + Cache + Decrypt + Memory) | 1 | 3 |
+| LeafPageScanner per-cell | 2 per cell (~200/leaf) | 0 per leaf (cached) | ~200 |
+
+**Consequences**:
+
+- Each distinct `IPageSource` implementation gets its own JIT-compiled cursor code (code size increase ~5-10 KB per variant, amortized over process lifetime)
+- `SharcWriter` uses `BTreeCursor<IPageSource>` fallback (no devirtualization) because its helper methods accept `IPageSource` parameters — acceptable since write-path cursor creation is not performance-critical
+- Test files specify concrete type parameters (e.g., `new BTreeCursor<MemoryPageSource>(...)`), which is slightly more verbose but makes the dispatch behavior explicit and testable
+- Future `IPageSource` implementations are automatically supported via the fallback `BTreeReader<IPageSource>` path
+
+**Design principle**: Internal complexity, external simplicity. The generic machinery is entirely hidden behind non-generic public interfaces. Users benefit from devirtualized performance without any API surface change. This follows the BCL pattern where `List<T>` users never think about JIT specialization — they just get fast code.
+
+---
+
 ## ADR-018: O(K²) → O(K) Column Offset Precomputation
 
 **Date**: 2026-02-18

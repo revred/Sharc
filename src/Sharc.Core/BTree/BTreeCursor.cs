@@ -13,9 +13,10 @@ namespace Sharc.Core.BTree;
 /// Forward-only cursor that traverses a table b-tree in rowid order.
 /// Uses a stack to track position through interior pages and descends to leaf pages.
 /// </summary>
-internal sealed class BTreeCursor : IBTreeCursor
+internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
     private CursorStackFrame[] _stack = new CursorStackFrame[8];
     private int _stackTop;
@@ -45,7 +46,7 @@ internal sealed class BTreeCursor : IBTreeCursor
     private readonly uint _rootPage;
     private long _snapshotVersion;
 
-    public BTreeCursor(IPageSource pageSource, uint rootPage, int usablePageSize)
+    public BTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _rootPage = rootPage;

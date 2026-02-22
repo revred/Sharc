@@ -256,8 +256,14 @@ internal static class SharcDatabaseFactory
             throw new UnsupportedFeatureException("UTF-16 text encoding");
 
         var proxySource = new ProxyPageSource(pageSource);
-        var bTreeReader = new BTreeReader(proxySource, header);
         var recordDecoder = new RecordDecoder();
+
+        // Dispatch to generic BTreeReader<T> based on concrete page source type.
+        // For read-only databases, bypass ProxyPageSource to eliminate an interface dispatch layer.
+        // For writable databases, route through ProxyPageSource (needed for SetTarget during transactions).
+        IBTreeReader bTreeReader = options.Writable
+            ? new BTreeReader<ProxyPageSource>(proxySource, header)
+            : CreateSpecializedReader(pageSource, header);
 
         var info = new SharcDatabaseInfo
         {
@@ -273,5 +279,22 @@ internal static class SharcDatabaseFactory
         };
 
         return new SharcDatabase(proxySource, pageSource, header, bTreeReader, recordDecoder, info, filePath, keyHandle);
+    }
+
+    /// <summary>
+    /// Creates a BTreeReader specialized for the concrete page source type.
+    /// The JIT devirtualizes GetPage/GetPageMemory calls inside cursors when
+    /// the page source type is a sealed class known at generic instantiation time.
+    /// </summary>
+    private static IBTreeReader CreateSpecializedReader(IPageSource pageSource, DatabaseHeader header)
+    {
+        return pageSource switch
+        {
+            MemoryPageSource mem => new BTreeReader<MemoryPageSource>(mem, header),
+            CachedPageSource cached => new BTreeReader<CachedPageSource>(cached, header),
+            WalPageSource wal => new BTreeReader<WalPageSource>(wal, header),
+            DecryptingPageSource dec => new BTreeReader<DecryptingPageSource>(dec, header),
+            _ => new BTreeReader<IPageSource>(pageSource, header)
+        };
     }
 }
