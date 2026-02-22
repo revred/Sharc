@@ -79,9 +79,10 @@ The `SharqBinder` walks the AST and matches `ColumnRefStar` nodes to actual `Sho
 
 ### B. Filter Compilation (The "Baked" Layer)
 The `WHERE` clause is not interpreted. It is passed to the **BakedFilter Compiler**.
-1.  The AST is converted to `System.Linq.Expressions`.
-2.  `FilterStarCompiler` emits a dynamic method.
-3.  **Result**: An `Expression<BakedDelegate>` that executes the logic via direct memory access.
+
+1.  The AST is converted to an `IFilterStar` filter tree.
+2.  `FilterStarCompiler` composes closure-based delegates — one per predicate — chained with short-circuit logic.
+3.  **Result**: A `BakedDelegate` that executes the logic via direct memory access, AOT-safe with no expression trees.
 
 ### C. Graph Rewriting
 For `ArrowStar` nodes (`a |> b`), the engine rewrites the query into a **Graph Scan**.
@@ -95,6 +96,6 @@ For `ArrowStar` nodes (`a |> b`), the engine rewrites the query into a **Graph S
 | **Lexer** | `SharqTokenizer` | **SearchValues<char>** (SIMD Regex engine) |
 | **Parser** | `SharqParser` | **Ref Structs** (Zero Allocation) |
 | **AST** | `SharqStar` | **Precedence Climbing** |
-| **Runtime** | `BakedFilter` | **JIT Compilation** (IL Generation) |
+| **Runtime** | `BakedFilter` | **Closure-Composed Delegates** (AOT-safe) |
 
 By aligning our lexer with the .NET runtime's own vectorized primitives, Sharq achieves a parsing throughput that rivals unmanaged C++ parsers.

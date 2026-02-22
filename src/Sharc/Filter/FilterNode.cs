@@ -10,8 +10,8 @@ using Sharc.Core.Primitives;
 namespace Sharc;
 
 /// <summary>
-/// Delegate for JIT-compiled filter evaluation.
-/// Uses raw pointers/spans for maximum performance without virtual dispatch.
+/// Delegate for closure-composed filter evaluation.
+/// Uses raw spans for maximum performance without virtual dispatch.
 /// </summary>
 internal delegate bool BakedDelegate(
     ReadOnlySpan<byte> payload, 
@@ -20,7 +20,7 @@ internal delegate bool BakedDelegate(
     long rowId);
 
 /// <summary>
-/// High-performance filter node that executes a JIT-compiled predicate tree.
+/// High-performance filter node that executes a closure-composed predicate chain.
 /// Implements "Offset Hoisting" — scanning the record header once per row.
 /// </summary>
 internal sealed class FilterNode : IFilterNode

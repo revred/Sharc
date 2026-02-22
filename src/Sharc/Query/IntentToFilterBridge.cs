@@ -7,7 +7,7 @@ using IntentPredicateNode = Sharc.Query.Intent.PredicateNode;
 namespace Sharc.Query;
 
 /// <summary>
-/// Converts a <see cref="PredicateIntent"/> into an <see cref="IFilterStar"/> expression tree.
+/// Converts a <see cref="PredicateIntent"/> into an <see cref="IFilterStar"/> filter tree.
 /// </summary>
 internal static class IntentToFilterBridge
 {
