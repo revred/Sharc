@@ -50,7 +50,6 @@ internal sealed class LeafPageScanner : IBTreeCursor
     {
         _pageSource = pageSource;
         _usablePageSize = usablePageSize;
-        _snapshotVersion = pageSource.DataVersion;
         _leafPages = CollectLeafPages(pageSource, rootPage);
         _leafIndex = 0;
         _cellIndex = -1;
@@ -73,7 +72,12 @@ internal sealed class LeafPageScanner : IBTreeCursor
         get
         {
             long current = _pageSource.DataVersion;
-            if (_snapshotVersion == 0 || current == 0) return false;
+            if (current == 0) return false;
+            if (_snapshotVersion == 0)
+            {
+                _snapshotVersion = current;
+                return false;
+            }
             return current != _snapshotVersion;
         }
     }
@@ -96,6 +100,9 @@ internal sealed class LeafPageScanner : IBTreeCursor
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ReturnAssembledPayload();
+
+        if (_snapshotVersion == 0)
+            _snapshotVersion = _pageSource.DataVersion;
 
         if (_exhausted)
             return false;

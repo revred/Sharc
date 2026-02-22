@@ -68,7 +68,7 @@ public class DataVersionTests
     [Fact]
     public void DataVersion_ReadOnlySource_ReturnsZero()
     {
-        // A source that doesn't override DataVersion should return the default (0)
+        // A read-only source explicitly returns DataVersion=0 (no mutation tracking)
         var data = CreateMinimalDatabase();
         using var inner = new MemoryPageSource(data);
         IPageSource readOnly = new ReadOnlyPageSourceStub(inner);
@@ -178,8 +178,7 @@ public class DataVersionTests
     }
 
     /// <summary>
-    /// Minimal IPageSource that does NOT override DataVersion,
-    /// exercising the default interface method (returns 0).
+    /// Minimal read-only IPageSource that returns DataVersion=0 (no mutation tracking).
     /// </summary>
     private sealed class ReadOnlyPageSourceStub : IPageSource
     {
@@ -190,8 +189,8 @@ public class DataVersionTests
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
         public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
+        public long DataVersion => 0;
         public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
         public void Dispose() => _inner.Dispose();
-        // Deliberately does NOT override DataVersion — uses default (0)
     }
 }

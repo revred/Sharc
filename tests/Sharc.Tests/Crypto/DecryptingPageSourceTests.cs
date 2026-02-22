@@ -154,6 +154,7 @@ public class DecryptingPageSourceTests
             return PageSize;
         }
 
+        public long DataVersion => 0;
         public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => GetPage(pageNumber).ToArray();
         public void Invalidate(uint pageNumber) { }
         public void Dispose() => IsDisposed = true;

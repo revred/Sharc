@@ -41,7 +41,6 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
-        _snapshotVersion = pageSource.DataVersion;
     }
 
     /// <inheritdoc />
@@ -53,7 +52,12 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         get
         {
             long current = _pageSource.DataVersion;
-            if (_snapshotVersion == 0 || current == 0) return false;
+            if (current == 0) return false;
+            if (_snapshotVersion == 0)
+            {
+                _snapshotVersion = current;
+                return false;
+            }
             return current != _snapshotVersion;
         }
     }
@@ -96,6 +100,8 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         if (!_initialized)
         {
             _initialized = true;
+            if (_snapshotVersion == 0)
+                _snapshotVersion = _pageSource.DataVersion;
             DescendToLeftmostLeaf(_rootPage);
         }
 

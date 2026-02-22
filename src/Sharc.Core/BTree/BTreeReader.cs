@@ -32,12 +32,6 @@ internal sealed class BTreeReader : IBTreeReader
     }
 
     /// <inheritdoc />
-    public IBTreeCursor CreateScanCursor(uint rootPage)
-    {
-        return new LeafPageScanner(_pageSource, rootPage, _usablePageSize);
-    }
-
-    /// <inheritdoc />
     public IIndexBTreeCursor CreateIndexCursor(uint rootPage)
     {
         return new IndexBTreeCursor(_pageSource, rootPage, _usablePageSize);

@@ -50,7 +50,8 @@ internal sealed class BTreeCursor : IBTreeCursor
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
-        _snapshotVersion = pageSource.DataVersion;
+        // DataVersion snapshot is taken lazily on first Seek/MoveNext/IsStale,
+        // avoiding a 3-layer proxy chain traversal in the constructor hot path.
     }
 
     /// <inheritdoc />
@@ -65,7 +66,13 @@ internal sealed class BTreeCursor : IBTreeCursor
         get
         {
             long current = _pageSource.DataVersion;
-            if (_snapshotVersion == 0 || current == 0) return false;
+            if (current == 0) return false;
+            if (_snapshotVersion == 0)
+            {
+                // First access — take snapshot now, cursor is fresh
+                _snapshotVersion = current;
+                return false;
+            }
             return current != _snapshotVersion;
         }
     }
@@ -110,6 +117,8 @@ internal sealed class BTreeCursor : IBTreeCursor
         if (!_initialized)
         {
             _initialized = true;
+            if (_snapshotVersion == 0)
+                _snapshotVersion = _pageSource.DataVersion;
             DescendToLeftmostLeaf(_rootPage);
         }
 
@@ -201,6 +210,9 @@ internal sealed class BTreeCursor : IBTreeCursor
                 _currentLeafPage = pageNumber;
                 _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
+                // Pre-cache the leaf so first ParseCurrentLeafCell gets a free cache hit
+                _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
+                _cachedLeafPageNum = pageNumber;
                 _currentCellIndex = -1; // Will be incremented by AdvanceToNextCell
                 return;
             }
@@ -238,6 +250,11 @@ internal sealed class BTreeCursor : IBTreeCursor
                 _currentLeafPage = pageNumber;
                 _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
+
+                // Pre-cache the leaf so ParseCurrentLeafCell gets a free cache hit
+                _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
+                _cachedLeafPageNum = pageNumber;
+                page = _cachedLeafMemory.Span;
 
                 // Binary search leaf cells using on-demand pointer reads
                 int low = 0;
