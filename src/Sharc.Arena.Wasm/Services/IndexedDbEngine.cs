@@ -53,6 +53,15 @@ public sealed class IndexedDbEngine
 
     public async Task<EngineBaseResult> RunSlide(string slideId, double scale)
     {
+        // Fast-fail when IDB couldn't be initialized (dataset >1000 rows).
+        // Returns clean NotSupported instead of JS interop errors on null _db.
+        if (!_initialized)
+            return new EngineBaseResult
+            {
+                NotSupported = true,
+                Note = "IndexedDB skipped (dataset too large for browser storage)",
+            };
+
         return slideId switch
         {
             "engine-load"      => await RunEngineLoad(scale),
@@ -69,6 +78,7 @@ public sealed class IndexedDbEngine
             "graph-traverse"   => await RunGraphTraverse(),
             "gc-pressure"      => await RunGcPressure(),
             "encryption"       => RunEncryption(),
+            "trust-ledger"     => new EngineBaseResult { NotSupported = true, Note = "IndexedDB has no trust layer" },
             "memory-footprint" => await RunMemoryFootprint(),
             "primitives"       => RunPrimitives(),
             _                  => new EngineBaseResult { Value = null, Note = "Unknown slide" },

@@ -16,12 +16,16 @@ public sealed class MemoryPageSource : IWritablePageSource
 {
     private byte[] _data;
     private int _pageCount;
+    private long _dataVersion = 1;
 
     /// <inheritdoc />
     public int PageSize { get; }
 
     /// <inheritdoc />
     public int PageCount => _pageCount;
+
+    /// <inheritdoc />
+    public long DataVersion => Interlocked.Read(ref _dataVersion);
 
     /// <summary>
     /// Creates a page source over a pre-loaded database buffer.
@@ -57,6 +61,16 @@ public sealed class MemoryPageSource : IWritablePageSource
         return _data.AsSpan(offset, PageSize);
     }
 
+    /// <summary>
+    /// Returns a zero-copy <see cref="ReadOnlyMemory{T}"/> view into the backing array.
+    /// </summary>
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ValidatePageNumber(pageNumber);
+        int offset = (int)(pageNumber - 1) * PageSize;
+        return _data.AsMemory(offset, PageSize);
+    }
+
     /// <inheritdoc />
     public void Invalidate(uint pageNumber)
     {
@@ -88,6 +102,7 @@ public sealed class MemoryPageSource : IWritablePageSource
 
         int offset = (int)(pageNumber - 1) * PageSize;
         source.CopyTo(_data.AsSpan(offset, PageSize));
+        Interlocked.Increment(ref _dataVersion);
     }
 
     /// <inheritdoc />

@@ -68,6 +68,13 @@ public interface IBTreeCursor : IDisposable
     /// Gets the total payload size in bytes (including overflow).
     /// </summary>
     int PayloadSize { get; }
+
+    /// <summary>
+    /// Returns true if the underlying page source has been mutated since this cursor
+    /// was created or last refreshed (via <see cref="Reset"/> or <see cref="Seek"/>).
+    /// Returns false for read-only sources that cannot track mutations.
+    /// </summary>
+    bool IsStale { get; }
 }
 
 /// <summary>
@@ -118,4 +125,11 @@ public interface IIndexBTreeCursor : IDisposable
     /// Gets the total payload size in bytes (including overflow).
     /// </summary>
     int PayloadSize { get; }
+
+    /// <summary>
+    /// Returns true if the underlying page source has been mutated since this cursor
+    /// was created or last refreshed (via <see cref="Reset"/> or <see cref="SeekFirst(long)"/>).
+    /// Returns false for read-only sources that cannot track mutations.
+    /// </summary>
+    bool IsStale { get; }
 }

@@ -9,6 +9,7 @@ namespace Sharc.Tests.Views;
 
 public sealed class ViewRegistrationTests : IDisposable
 {
+    private static readonly string[] SingleNameColumn = ["name"];
     private readonly string _dbPath;
 
     public ViewRegistrationTests()
@@ -175,7 +176,7 @@ public sealed class ViewRegistrationTests : IDisposable
     {
         using var db = SharcDatabase.Open(_dbPath);
         // Bypass ViewBuilder (which also validates) to test the RegisterView guard directly
-        var view = new SharcView("", "users", new[] { "name" }, null);
+        var view = new SharcView("", "users", SingleNameColumn, null);
         Assert.Throws<ArgumentException>(() => db.RegisterView(view));
     }
 
@@ -183,7 +184,7 @@ public sealed class ViewRegistrationTests : IDisposable
     public void RegisterView_WhitespaceName_Throws()
     {
         using var db = SharcDatabase.Open(_dbPath);
-        var view = new SharcView("   ", "users", new[] { "name" }, null);
+        var view = new SharcView("   ", "users", SingleNameColumn, null);
         Assert.Throws<ArgumentException>(() => db.RegisterView(view));
     }
 

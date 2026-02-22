@@ -322,6 +322,7 @@ public sealed class WriteEngineRegressionTests
             return _pages[pageNumber - 1].AsSpan(0, PageSize);
         }
 
+        public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => GetPage(pageNumber).ToArray();
         public void Invalidate(uint pageNumber) { }
         public void Dispose() { }
     }

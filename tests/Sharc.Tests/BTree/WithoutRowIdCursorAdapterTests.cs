@@ -123,6 +123,7 @@ public sealed class WithoutRowIdCursorAdapterTests
 
         public ReadOnlySpan<byte> Payload => _payload;
         public int PayloadSize => _payload.Length;
+        public bool IsStale => false;
         public void Dispose() => Disposed = true;
     }
 

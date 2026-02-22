@@ -106,7 +106,7 @@ public sealed class BTreeMutatorSplitTests
             root = mutator.Insert(root, i, rec);
         }
 
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         var decoded = new ColumnValue[2];
         var decoder = new RecordDecoder();
         for (int i = 1; i <= 50; i++)
@@ -134,7 +134,7 @@ public sealed class BTreeMutatorSplitTests
             root = mutator.Insert(root, i, rec);
         }
 
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(300, count);
@@ -159,7 +159,7 @@ public sealed class BTreeMutatorSplitTests
         // Root page should still be 2 (root retention)
         Assert.Equal(2u, root);
 
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(100, count);
@@ -195,7 +195,7 @@ public sealed class BTreeMutatorSplitTests
         }
 
         // Count: 50 remaining from first batch + 20 new = 70
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(70, count);
@@ -232,7 +232,7 @@ public sealed class BTreeMutatorSplitTests
         }
 
         // Remaining: 15 (odd 1-30) + 20 (31-50) = 35
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(35, count);

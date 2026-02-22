@@ -52,6 +52,9 @@ internal sealed class IndexSeekCursor : IBTreeCursor
     public int PayloadSize => _tableCursor.PayloadSize;
 
     /// <inheritdoc />
+    public bool IsStale => _tableCursor.IsStale;
+
+    /// <inheritdoc />
     public bool MoveNext()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

@@ -292,6 +292,13 @@ public sealed class SharcDataReader : IDisposable
     public long RowId => _dedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
 
     /// <summary>
+    /// Returns true if the underlying page source has been mutated since this reader
+    /// was created or last refreshed. Useful for multi-agent scenarios where one agent
+    /// may have committed changes that invalidate this reader's cached state.
+    /// </summary>
+    public bool IsStale => _cursor?.IsStale ?? false;
+
+    /// <summary>
     /// Seeks directly to the row with the specified rowid using B-tree binary search.
     /// This is dramatically faster than sequential scan for point lookups.
     /// After a successful seek, use typed accessors (GetInt64, GetString, etc.) to read values.
@@ -596,10 +603,10 @@ public sealed class SharcDataReader : IDisposable
             ? _physicalOrdinals[logicalOrdinal]
             : logicalOrdinal;
 
-        // Fast path: in lazy mode, check serial type directly (no body decode needed)
+        // Fast path: in lazy mode, check serial type directly (no body decode needed).
+        // _serialTypes is already populated by DecodeCurrentRow() — no re-parse needed.
         if (_lazyMode)
         {
-            _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _);
             // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;

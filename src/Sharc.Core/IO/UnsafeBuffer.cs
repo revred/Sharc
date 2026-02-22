@@ -12,12 +12,12 @@ namespace Sharc.Core.IO;
 /// This is the standard BCL pattern used by ASP.NET Core / Kestrel for zero-copy I/O.
 /// The caller is responsible for ensuring the underlying memory outlives this instance.
 /// </summary>
-internal sealed unsafe class UnsafeMemoryManager : MemoryManager<byte>
+internal sealed unsafe class UnsafeBuffer : MemoryManager<byte>
 {
     private byte* _pointer;
     private readonly int _length;
 
-    internal UnsafeMemoryManager(byte* pointer, int length)
+    internal UnsafeBuffer(byte* pointer, int length)
     {
         _pointer = pointer;
         _length = length;
