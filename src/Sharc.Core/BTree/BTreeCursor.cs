@@ -13,9 +13,10 @@ namespace Sharc.Core.BTree;
 /// Forward-only cursor that traverses a table b-tree in rowid order.
 /// Uses a stack to track position through interior pages and descends to leaf pages.
 /// </summary>
-internal sealed class BTreeCursor : IBTreeCursor
+internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
     private CursorStackFrame[] _stack = new CursorStackFrame[8];
     private int _stackTop;
@@ -29,23 +30,29 @@ internal sealed class BTreeCursor : IBTreeCursor
     private bool _exhausted;
     private bool _disposed;
 
+    // Leaf page cache — avoids redundant GetPage() calls for cells on the same leaf
+    private ReadOnlyMemory<byte> _cachedLeafMemory;
+    private uint _cachedLeafPageNum;
+
     // Current cell data
     private long _rowId;
     private int _payloadSize;
     private byte[]? _assembledPayload;
     private int _inlinePayloadOffset;
-    private uint _inlinePayloadPage;
 
     // Reusable overflow cycle detection set - cleared between overflow assemblies
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
+    private readonly IWritablePageSource? _writableSource;
+    private long _snapshotVersion;
 
-    public BTreeCursor(IPageSource pageSource, uint rootPage, int usablePageSize)
+    public BTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
+        _writableSource = pageSource as IWritablePageSource;
     }
 
     /// <inheritdoc />
@@ -55,6 +62,22 @@ internal sealed class BTreeCursor : IBTreeCursor
     public int PayloadSize => _payloadSize;
 
     /// <inheritdoc />
+    public bool IsStale
+    {
+        get
+        {
+            if (_writableSource is null) return false;
+            long current = _writableSource.DataVersion;
+            if (_snapshotVersion == 0)
+            {
+                _snapshotVersion = current;
+                return false;
+            }
+            return current != _snapshotVersion;
+        }
+    }
+
+    /// <inheritdoc />
     public ReadOnlySpan<byte> Payload
     {
         get
@@ -62,9 +85,8 @@ internal sealed class BTreeCursor : IBTreeCursor
             if (_assembledPayload != null)
                 return _assembledPayload.AsSpan(0, _payloadSize);
 
-            // Return inline payload from the page
-            var page = _pageSource.GetPage(_inlinePayloadPage);
-            return page.Slice(_inlinePayloadOffset, _payloadSize);
+            // Return inline payload from cached leaf page
+            return GetCachedLeafPage().Slice(_inlinePayloadOffset, _payloadSize);
         }
     }
 
@@ -76,6 +98,9 @@ internal sealed class BTreeCursor : IBTreeCursor
         _initialized = false;
         _exhausted = false;
         _currentLeafPage = 0;
+        _cachedLeafPageNum = 0;
+        _cachedLeafMemory = default;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
     }
 
     /// <inheritdoc />
@@ -92,6 +117,8 @@ internal sealed class BTreeCursor : IBTreeCursor
         if (!_initialized)
         {
             _initialized = true;
+            if (_snapshotVersion == 0)
+                _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
         }
 
@@ -144,6 +171,7 @@ internal sealed class BTreeCursor : IBTreeCursor
         _stackTop = 0;
         _exhausted = false;
         _initialized = true;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeaf(_rootPage, rowId);
 
@@ -182,6 +210,9 @@ internal sealed class BTreeCursor : IBTreeCursor
                 _currentLeafPage = pageNumber;
                 _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
+                // Pre-cache the leaf so first ParseCurrentLeafCell gets a free cache hit
+                _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
+                _cachedLeafPageNum = pageNumber;
                 _currentCellIndex = -1; // Will be incremented by AdvanceToNextCell
                 return;
             }
@@ -219,6 +250,11 @@ internal sealed class BTreeCursor : IBTreeCursor
                 _currentLeafPage = pageNumber;
                 _currentHeaderOffset = headerOffset;
                 _currentHeader = header;
+
+                // Pre-cache the leaf so ParseCurrentLeafCell gets a free cache hit
+                _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
+                _cachedLeafPageNum = pageNumber;
+                page = _cachedLeafMemory.Span;
 
                 // Binary search leaf cells using on-demand pointer reads
                 int low = 0;
@@ -339,7 +375,7 @@ internal sealed class BTreeCursor : IBTreeCursor
 
     private void ParseCurrentLeafCell()
     {
-        var page = _pageSource.GetPage(_currentLeafPage);
+        var page = GetCachedLeafPage();
         // Read cell pointer on-demand - zero allocation
         int cellOffset = _currentHeader.GetCellPointer(page[_currentHeaderOffset..], _currentCellIndex);
 
@@ -351,9 +387,8 @@ internal sealed class BTreeCursor : IBTreeCursor
 
         if (inlineSize >= _payloadSize)
         {
-            // All payload is inline - point directly at page data
+            // All payload is inline — offset into cached leaf memory
             _inlinePayloadOffset = payloadStart;
-            _inlinePayloadPage = _currentLeafPage;
             _assembledPayload = null;
         }
         else
@@ -361,6 +396,20 @@ internal sealed class BTreeCursor : IBTreeCursor
             // Overflow - assemble the full payload
             AssembleOverflowPayload(page, payloadStart, inlineSize);
         }
+    }
+
+    /// <summary>
+    /// Returns the current leaf page data, caching it to avoid redundant GetPage()/GetPageMemory() calls
+    /// when iterating multiple cells on the same leaf.
+    /// </summary>
+    private ReadOnlySpan<byte> GetCachedLeafPage()
+    {
+        if (_currentLeafPage != _cachedLeafPageNum)
+        {
+            _cachedLeafMemory = _pageSource.GetPageMemory(_currentLeafPage);
+            _cachedLeafPageNum = _currentLeafPage;
+        }
+        return _cachedLeafMemory.Span;
     }
 
     private void AssembleOverflowPayload(ReadOnlySpan<byte> page, int payloadStart, int inlineSize)

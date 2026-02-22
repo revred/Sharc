@@ -103,7 +103,7 @@ public sealed class BTreeMutatorTests
         Assert.Equal(2u, newRoot); // No split needed for single row
 
         // Read back using BTreeCursor
-        using var cursor = new BTreeCursor(shadow, newRoot, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, newRoot, UsableSize);
         Assert.True(cursor.MoveNext());
         Assert.Equal(1L, cursor.RowId);
 
@@ -139,7 +139,7 @@ public sealed class BTreeMutatorTests
         }
 
         // Read back
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         var decoded = new ColumnValue[2];
         var decoder = new RecordDecoder();
 
@@ -181,7 +181,7 @@ public sealed class BTreeMutatorTests
         }
 
         // Read back all rows in order
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         var decoded = new ColumnValue[2];
         var decoder = new RecordDecoder();
 

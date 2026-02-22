@@ -54,7 +54,7 @@ public class GraphSeekBenchmarks
         // Pre-calculate conceptsRoot for pure seek benchmarks
         var pageSource = new MemoryPageSource(_dbBytes);
         var header = Sharc.Core.Format.DatabaseHeader.Parse(pageSource.GetPage(1));
-        var bTreeReader = new BTreeReader(pageSource, header);
+        var bTreeReader = new BTreeReader<MemoryPageSource>(pageSource, header);
         using var schemaCursor = bTreeReader.CreateCursor(1);
         while (schemaCursor.MoveNext())
         {
@@ -83,7 +83,7 @@ public class GraphSeekBenchmarks
     {
         var pageSource = new MemoryPageSource(_dbBytes);
         var header = DatabaseHeader.Parse(pageSource.GetPage(1));
-        var bTreeReader = new BTreeReader(pageSource, header);
+        var bTreeReader = new BTreeReader<MemoryPageSource>(pageSource, header);
 
         using var cursor = bTreeReader.CreateCursor(_conceptsRoot);
         cursor.Seek(2500);
@@ -110,7 +110,7 @@ public class GraphSeekBenchmarks
     {
         var pageSource = new MemoryPageSource(_dbBytes);
         var header = Sharc.Core.Format.DatabaseHeader.Parse(pageSource.GetPage(1));
-        var bTreeReader = new BTreeReader(pageSource, header);
+        var bTreeReader = new BTreeReader<MemoryPageSource>(pageSource, header);
 
         long sum = 0;
         using var cursor = bTreeReader.CreateCursor(_conceptsRoot);

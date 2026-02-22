@@ -41,4 +41,14 @@ public interface IPageSource : IDisposable
     /// Evicts the specified page from any internal cache, forcing a re-read from the backing store.
     /// </summary>
     void Invalidate(uint pageNumber);
+
+    /// <summary>
+    /// Gets a <see cref="ReadOnlyMemory{T}"/> over a page's data that can be stored in fields.
+    /// Unlike <see cref="GetPage"/>, the returned memory survives across method calls.
+    /// Implementations should return zero-copy memory where possible (e.g., <c>AsMemory()</c>
+    /// over a backing array). When zero-copy is not possible, copy via <c>GetPage(pageNumber).ToArray()</c>.
+    /// </summary>
+    /// <param name="pageNumber">1-based page number.</param>
+    /// <returns>Read-only memory of page bytes.</returns>
+    ReadOnlyMemory<byte> GetPageMemory(uint pageNumber);
 }

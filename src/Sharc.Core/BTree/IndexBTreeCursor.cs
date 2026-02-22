@@ -9,9 +9,10 @@ namespace Sharc.Core.BTree;
 /// Forward-only cursor that traverses an index b-tree in key order.
 /// Index payloads are standard SQLite records where the last column is the table rowid.
 /// </summary>
-internal sealed class IndexBTreeCursor : IIndexBTreeCursor
+internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
     private readonly Stack<CursorStackFrame> _stack = new();
 
@@ -34,16 +35,35 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
+    private readonly IWritablePageSource? _writableSource;
+    private long _snapshotVersion;
 
-    public IndexBTreeCursor(IPageSource pageSource, uint rootPage, int usablePageSize)
+    public IndexBTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
+        _writableSource = pageSource as IWritablePageSource;
     }
 
     /// <inheritdoc />
     public int PayloadSize => _payloadSize;
+
+    /// <inheritdoc />
+    public bool IsStale
+    {
+        get
+        {
+            if (_writableSource is null) return false;
+            long current = _writableSource.DataVersion;
+            if (_snapshotVersion == 0)
+            {
+                _snapshotVersion = current;
+                return false;
+            }
+            return current != _snapshotVersion;
+        }
+    }
 
     /// <inheritdoc />
     public ReadOnlySpan<byte> Payload
@@ -67,6 +87,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         _exhausted = false;
         _currentLeafPage = 0;
         _payloadSize = 0;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
     }
 
     /// <inheritdoc />
@@ -82,6 +103,8 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         if (!_initialized)
         {
             _initialized = true;
+            if (_snapshotVersion == 0)
+                _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
         }
 
@@ -129,6 +152,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
         _stack.Clear();
         _exhausted = false;
         _initialized = true;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeafByKey(_rootPage, firstColumnKey);
 

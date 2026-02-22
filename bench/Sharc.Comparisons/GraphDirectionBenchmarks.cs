@@ -38,7 +38,7 @@ public class GraphDirectionBenchmarks
         // Sharc Setup
         var pageSource = new MemoryPageSource(_dbBytes);
         var header = DatabaseHeader.Parse(pageSource.GetPage(1));
-        _bTreeReader = new BTreeReader(pageSource, header);
+        _bTreeReader = new BTreeReader<MemoryPageSource>(pageSource, header);
         _graph = new SharcContextGraph(_bTreeReader, new NativeSchemaAdapter());
         _graph.Initialize();
     }

@@ -4,24 +4,24 @@ Sharc is a specialized **Context Engine**, not a general-purpose database. Hones
 
 ## 🛑 STOP if you need:
 
-### 1. SQL JOINs, Views, Triggers, or Stored Procedures
+### 1. Views, Triggers, or Stored Procedures
 
-Sharc's query pipeline now supports `GROUP BY`, `HAVING`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, Cotes (`WITH ... AS`), and compound queries (`UNION`, `INTERSECT`, `EXCEPT`). However, it does **NOT** support:
+Sharc's query pipeline supports `SELECT`, `WHERE`, `JOIN` (INNER/LEFT/CROSS), `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, Cotes (`WITH ... AS`), compound queries (`UNION`, `INTERSECT`, `EXCEPT`), and parameterized queries. However, it does **NOT** support:
 
-*   `JOIN` (use `UNION`/Cote for multi-table workflows, or the Graph API for relationship traversal)
 *   Views, Triggers, or Stored Procedures
+*   `RIGHT JOIN` or `FULL OUTER JOIN`
 *   `CASE` expressions, Window Functions (parsed but not yet executable)
 
-**Use SQLite** if you need JOINs, views, triggers, or complex multi-table queries. For large-scale analytics, consider DuckDB.
+**Use SQLite** if you need views, triggers, or complex multi-table queries. For large-scale analytics, consider DuckDB.
 
-### 2. General-Purpose Writes (UPDATE / DELETE)
-The Sharc Write Engine is **EXPERIMENTAL** and **APPEND-ONLY**.
-*   **NO `UPDATE`**: You cannot modify existing rows.
-*   **NO `DELETE`**: You cannot remove rows.
-*   **NO Index Maintenance**: Inserting data does *not* update secondary indexes.
-*   **NO Concurrency**: Sharc supports only a single writer.
+### 2. Concurrent Writes
 
-**Use SQLite** for any application that needs standard CRUD (Create, Read, Update, Delete) or concurrent writes.
+Sharc supports full CRUD (`INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`) with ACID transactions, but is **single-writer only**.
+
+*   **NO Concurrency**: No WAL locking. One writer at a time.
+*   **NO MVCC**: No snapshot isolation for concurrent readers + writers.
+
+**Use SQLite** if you need concurrent writers or WAL-mode multi-process access.
 
 ### 3. Full-Text Search (FTS)
 Sharc scans standard B-trees. It does not support SQLite's `FTS5`, `R*Tree`, or other virtual tables. If you need full-text search, use SQLite's FTS5 extension or a dedicated search engine.
@@ -36,7 +36,7 @@ Sharc is a row-store. It reads row-by-row. If you need to scan 10GB of data to c
 | Capability | Why Sharc Wins |
 | :--- | :--- |
 | **Graph Traversal** | Two-phase BFS with zero-alloc cursors is **31x faster** than SQLite recursive CTEs. |
-| **Point Lookups** | **392ns** vs 24,011ns (61x faster). If you do thousands of lookups per request, Sharc is the only choice. |
+| **Point Lookups** | **272ns** vs 25,875ns (95x faster). If you do thousands of lookups per request, Sharc is the only choice. |
 | **Agent Context** | Precision retrieval allows you to fit **100% relevant context** into small token windows. |
 | **Trust & Audit** | Built-in cryptographic ledger (`_sharc_ledger`) proves *who* wrote *what*. |
 | **WASM / Edge** | **<50KB** binary. Runs in-browser without Emscripten or multithreading headers. |

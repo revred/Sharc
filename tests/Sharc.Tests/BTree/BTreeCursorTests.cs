@@ -183,7 +183,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();
@@ -207,7 +207,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         Assert.False(cursor.MoveNext());
@@ -224,7 +224,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         Assert.True(cursor.MoveNext());
@@ -257,7 +257,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();
@@ -306,7 +306,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(1); // page 1 root
 
         Assert.True(cursor.MoveNext());
@@ -335,7 +335,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();
@@ -404,7 +404,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         Assert.True(cursor.MoveNext());
@@ -458,7 +458,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         Assert.Throws<CorruptPageException>(() => cursor.MoveNext());
@@ -526,7 +526,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         // Cell 1: small inline
@@ -553,7 +553,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateCursor(2);
 
         cursor.Dispose();
@@ -571,7 +571,7 @@ public class BTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateCursor(2);
         cursor.Dispose();
 

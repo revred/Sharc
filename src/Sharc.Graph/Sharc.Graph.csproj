@@ -3,8 +3,8 @@
   <PropertyGroup>
     <RootNamespace>Sharc.Graph</RootNamespace>
     <AssemblyName>Sharc.Graph</AssemblyName>
-    <Description>Graph reasoning and trust layer for Sharc: B-tree backed relationship stores and cryptographic identity for AI context.</Description>
-    <PackageTags>sqlite;database;graph;trust;context-space;ai;dotnet;csharp</PackageTags>
+    <Description>Graph traversal and AI trust layer for Sharc: 31x faster than SQLite CTEs. Zero-alloc edge cursors, two-phase BFS, ECDSA agent attestation, hash-chain audit ledger.</Description>
+    <PackageTags>sqlite;graph-database;graph-traversal;ai-agent;trust-layer;ecdsa;audit-ledger;bfs;dotnet;csharp</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

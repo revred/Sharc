@@ -323,6 +323,7 @@ public class ConceptStoreTests
         public long RowId => _index >= 0 && _index < _rows.Count ? _rows[_index].rowId : 0;
         public ReadOnlySpan<byte> Payload => _index >= 0 && _index < _rows.Count ? _rows[_index].payload : default;
         public int PayloadSize => _index >= 0 && _index < _rows.Count ? _rows[_index].payload.Length : 0;
+        public bool IsStale => false;
 
         public bool MoveNext()
         {

@@ -92,7 +92,7 @@ public sealed class BTreeMutatorUpdateTests
     private static List<long> ScanAllRowIds(IPageSource source, uint root)
     {
         var rowIds = new List<long>();
-        using var cursor = new BTreeCursor(source, root, UsableSize);
+        using var cursor = new BTreeCursor<IPageSource>(source, root, UsableSize);
         while (cursor.MoveNext())
             rowIds.Add(cursor.RowId);
         return rowIds;
@@ -100,7 +100,7 @@ public sealed class BTreeMutatorUpdateTests
 
     private static (long Id, string Name) ReadRow(IPageSource source, uint root, long targetRowId)
     {
-        using var cursor = new BTreeCursor(source, root, UsableSize);
+        using var cursor = new BTreeCursor<IPageSource>(source, root, UsableSize);
         var decoded = new ColumnValue[2];
         var decoder = new RecordDecoder();
         while (cursor.MoveNext())
@@ -174,7 +174,7 @@ public sealed class BTreeMutatorUpdateTests
         // Verify all remaining rows have correct data
         var decoder = new RecordDecoder();
         var decoded = new ColumnValue[2];
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         var expectedIds = Enumerable.Range(1, 21).Where(i => i != 5 && i != 10 && i != 15).ToList();
         int idx = 0;
         while (cursor.MoveNext())

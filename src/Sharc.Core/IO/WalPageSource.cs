@@ -50,6 +50,17 @@ public sealed class WalPageSource : IPageSource
     }
 
     /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        if (_walFrameMap.TryGetValue(pageNumber, out long walOffset))
+        {
+            return _walData.Slice((int)walOffset, PageSize);
+        }
+
+        return _inner.GetPageMemory(pageNumber);
+    }
+
+    /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination)
     {
         if (_walFrameMap.TryGetValue(pageNumber, out long walOffset))

@@ -17,7 +17,7 @@ namespace Sharc.Core.IO;
 /// Trade-offs vs other page sources:
 /// <list type="bullet">
 ///   <item><see cref="MemoryPageSource"/>: faster per-read (zero-copy span), but requires entire file in memory.</item>
-///   <item><see cref="SafeMemMapdPageSource"/>: faster per-read (zero-copy), but ~98 Ã‚Âµs OS mapping setup.</item>
+///   <item><see cref="SafeM2MPageSource"/>: faster per-read (zero-copy), but ~98 Ã‚Âµs OS mapping setup.</item>
 ///   <item><see cref="FilePageSource"/>: fast open (~1-5 Ã‚Âµs), one syscall per page read, small fixed buffer.</item>
 /// </list>
 /// </para>
@@ -40,6 +40,9 @@ public sealed class FilePageSource : IWritablePageSource
 
     /// <inheritdoc />
     public int PageCount => (int)((RandomAccess.GetLength(_handle) + PageSize - 1) / PageSize);
+
+    /// <inheritdoc />
+    public long DataVersion => 0;
 
     /// <summary>
     /// Opens a SQLite database file for on-demand page reads and optional writes.
@@ -104,6 +107,12 @@ public sealed class FilePageSource : IWritablePageSource
         long offset = (long)(pageNumber - 1) * PageSize;
         RandomAccess.Read(_handle, _threadBuffer, fileOffset: offset);
         return _threadBuffer;
+    }
+
+    /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        return GetPage(pageNumber).ToArray();
     }
 
     /// <inheritdoc />

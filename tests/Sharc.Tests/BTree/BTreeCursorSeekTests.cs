@@ -136,7 +136,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         bool exact = cursor.Seek(20);
@@ -158,7 +158,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         bool exact = cursor.Seek(15); // Between 10 and 20
@@ -180,7 +180,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         bool exact = cursor.Seek(99);
@@ -202,7 +202,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         bool exact = cursor.Seek(1); // Before all rows
@@ -231,7 +231,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         // Seek to a row in the right leaf
@@ -258,7 +258,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         cursor.Seek(20); // Position at row 20
@@ -287,7 +287,7 @@ public class BTreeCursorSeekTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateCursor(2);
         cursor.Dispose();
 

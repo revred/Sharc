@@ -11,6 +11,7 @@ nul
 .claude/
 secrets/
 published/
+Certificates/
 
 
 # 3rdparty build artifacts (db rebuild infra [rust] + build output)
