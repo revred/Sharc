@@ -294,6 +294,7 @@ internal static class SharcDatabaseFactory
             CachedPageSource cached => new BTreeReader<CachedPageSource>(cached, header),
             WalPageSource wal => new BTreeReader<WalPageSource>(wal, header),
             DecryptingPageSource dec => new BTreeReader<DecryptingPageSource>(dec, header),
+            SafeM2MPageSource mmap => new BTreeReader<SafeM2MPageSource>(mmap, header),
             _ => new BTreeReader<IPageSource>(pageSource, header)
         };
     }

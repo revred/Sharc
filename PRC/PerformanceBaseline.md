@@ -1,7 +1,7 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-19
-**Branch:** WriteLeft
+**Date:** 2026-02-22
+**Branch:** Arena.Fix
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
@@ -10,16 +10,16 @@
 
 ## Allocation Tier List
 
-### Tier 0 — Zero GC (cursor construction only, 632–888 B)
+### Tier 0 — Zero GC (cursor construction only, 632–912 B)
 
 | Benchmark | Mean | Allocated | GC | Notes |
 |-----------|------|-----------|-----|-------|
 | Sharc_PointLookup | 278 ns | 632 B | 0 | B-tree seek, single row |
-| Sharc_TypeDecode | 222 us | 664 B | 0 | Full scan, type decode only |
-| Sharc_GcPressure | 226 us | 664 B | 0 | Full scan, designed for zero GC |
-| Sharc_NullScan | 313 us | 664 B | 0 | Full scan with NULL handling |
+| Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
+| Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
+| Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
 | Sharc_FilterStar | 304 us | 800 B | 0 | JIT-compiled predicate scan |
-| Sharc_WhereFilter | 346 us | 888 B | 0 | SQL WHERE filter |
+| Sharc_WhereFilter | 298 us | 912 B | 0 | SQL WHERE filter |
 | DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
 | SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |
 
@@ -88,7 +88,7 @@
 | Point lookup | 278 ns / 632 B | 3.2 us / 688 B | **0.09x time** | Sharc 11x faster (direct B-tree seek) |
 | Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
 | SELECT * (3 cols) | 105 us / 672 B | 637 us / 688 B | **0.16x time** | 6x faster, comparable allocation |
-| WHERE filter | 346 us / 888 B | 538 us / 688 B | **0.64x time** | 1.6x faster, similar allocation |
+| WHERE filter | 298 us / 912 B | 560 us / 720 B | **0.53x time** | 1.9x faster, similar allocation |
 | GROUP BY | 366 us / 5,416 B | 538 us / 920 B | **0.68x time, 5.9x alloc** | See analysis below |
 | ORDER BY+LIMIT | 505 us / 32 KB | 426 us / 3.1 KB | **1.19x time, 10.5x alloc** | SQLite wins — native sort is cheaper |
 | Insert 1 row | 4.30 ms / 16.3 KB | 4.87 ms / 11.8 KB | **0.88x time, 1.4x alloc** | Sharc 12% faster, fsync-dominated |

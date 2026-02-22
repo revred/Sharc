@@ -35,6 +35,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
+    private readonly IWritablePageSource? _writableSource;
     private long _snapshotVersion;
 
     public IndexBTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
@@ -42,6 +43,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
+        _writableSource = pageSource as IWritablePageSource;
     }
 
     /// <inheritdoc />
@@ -52,8 +54,8 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     {
         get
         {
-            long current = _pageSource.DataVersion;
-            if (current == 0) return false;
+            if (_writableSource is null) return false;
+            long current = _writableSource.DataVersion;
             if (_snapshotVersion == 0)
             {
                 _snapshotVersion = current;
@@ -85,7 +87,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
         _exhausted = false;
         _currentLeafPage = 0;
         _payloadSize = 0;
-        _snapshotVersion = _pageSource.DataVersion;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
     }
 
     /// <inheritdoc />
@@ -102,7 +104,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
         {
             _initialized = true;
             if (_snapshotVersion == 0)
-                _snapshotVersion = _pageSource.DataVersion;
+                _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
         }
 
@@ -150,7 +152,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
         _stack.Clear();
         _exhausted = false;
         _initialized = true;
-        _snapshotVersion = _pageSource.DataVersion;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeafByKey(_rootPage, firstColumnKey);
 

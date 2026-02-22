@@ -48,12 +48,14 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
     private HashSet<uint>? _visitedOverflowPages;
 
     // Staleness tracking
+    private readonly IWritablePageSource? _writableSource;
     private long _snapshotVersion;
 
     public LeafPageScanner(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _usablePageSize = usablePageSize;
+        _writableSource = pageSource as IWritablePageSource;
         _leafPages = CollectLeafPages(pageSource, rootPage);
         _leafIndex = 0;
         _cellIndex = -1;
@@ -75,8 +77,8 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
     {
         get
         {
-            long current = _pageSource.DataVersion;
-            if (current == 0) return false;
+            if (_writableSource is null) return false;
+            long current = _writableSource.DataVersion;
             if (_snapshotVersion == 0)
             {
                 _snapshotVersion = current;
@@ -106,7 +108,7 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
         ReturnAssembledPayload();
 
         if (_snapshotVersion == 0)
-            _snapshotVersion = _pageSource.DataVersion;
+            _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         if (_exhausted)
             return false;
@@ -145,7 +147,7 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
     public void Reset()
     {
         ReturnAssembledPayload();
-        _snapshotVersion = _pageSource.DataVersion;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
         _leafIndex = 0;
         _cellIndex = -1;
         _exhausted = _leafPages.Length == 0;

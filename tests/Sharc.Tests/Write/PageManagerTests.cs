@@ -189,7 +189,6 @@ public class PageManagerTests
             return _pages[pageNumber - 1];
         }
 
-        public long DataVersion => 0;
         public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => GetPage(pageNumber).ToArray();
         public void Invalidate(uint pageNumber) { }
         public void Dispose() { }

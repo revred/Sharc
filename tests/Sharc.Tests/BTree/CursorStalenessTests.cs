@@ -358,7 +358,7 @@ public class CursorStalenessTests
     }
 
     /// <summary>
-    /// IPageSource that returns DataVersion=0 (read-only, no mutation tracking).
+    /// Read-only IPageSource wrapper (no IWritablePageSource, so IsStale always returns false).
     /// </summary>
     private sealed class ReadOnlyPageSourceStub : IPageSource
     {
@@ -366,7 +366,6 @@ public class CursorStalenessTests
         public ReadOnlyPageSourceStub(IPageSource inner) => _inner = inner;
         public int PageSize => _inner.PageSize;
         public int PageCount => _inner.PageCount;
-        public long DataVersion => 0;
         public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
         public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _inner.GetPageMemory(pageNumber);
