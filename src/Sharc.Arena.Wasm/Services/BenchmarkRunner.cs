@@ -245,6 +245,7 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             "graph-traverse"   => _sqliteEngine.RunGraphTraverse(),
             "gc-pressure"      => _sqliteEngine.RunGcPressure(scale),
             "encryption"       => _sqliteEngine.RunEncryption(),
+            "trust-ledger"     => new EngineBaseResult { NotSupported = true, Note = "SQLite has no trust layer" },
             "memory-footprint" => _sqliteEngine.RunMemoryFootprint(),
             "primitives"       => _sqliteEngine.RunPrimitives(),
             _                  => new EngineBaseResult { Value = null, Note = "Unknown slide" },

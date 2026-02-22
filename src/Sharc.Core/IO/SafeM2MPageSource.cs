@@ -14,7 +14,7 @@ namespace Sharc.Core.IO;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses <see cref="UnsafeMemoryManager"/> (the BCL <c>MemoryManager&lt;byte&gt;</c> pattern)
+/// Uses <see cref="UnsafeBuffer"/> (the BCL <c>MemoryManager&lt;byte&gt;</c> pattern)
 /// to expose the mapped region as safe <see cref="ReadOnlyMemory{T}"/> / <see cref="ReadOnlySpan{T}"/>.
 /// The single <c>unsafe</c> block is confined to the constructor's pointer acquisition.
 /// All subsequent page reads are fully safe span slices.
@@ -24,11 +24,11 @@ namespace Sharc.Core.IO;
 /// <see cref="Span{T}"/> length limits. For larger files, use a streaming page source.
 /// </para>
 /// </remarks>
-public sealed class SafeMemMapdPageSource : IPageSource
+public sealed class SafeM2MPageSource : IPageSource
 {
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
-    private readonly UnsafeMemoryManager _memoryManager;
+    private readonly UnsafeBuffer _unsafeBuffer;
     private readonly ReadOnlyMemory<byte> _memory;
     private bool _disposed;
 
@@ -45,7 +45,7 @@ public sealed class SafeMemMapdPageSource : IPageSource
     /// <exception cref="FileNotFoundException">File does not exist.</exception>
     /// <exception cref="ArgumentException">File is empty or exceeds 2 GiB.</exception>
     /// <exception cref="Sharc.Exceptions.InvalidDatabaseException">Database header is invalid.</exception>
-    public SafeMemMapdPageSource(string filePath)
+    public SafeM2MPageSource(string filePath)
     {
         var fileInfo = new FileInfo(filePath);
         if (!fileInfo.Exists)
@@ -66,17 +66,17 @@ public sealed class SafeMemMapdPageSource : IPageSource
         _accessor = _mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
 
         // SAFETY: The single unsafe block acquires the OS-pinned pointer and wraps it
-        // in UnsafeMemoryManager (BCL MemoryManager<byte> pattern) so all downstream
+        // in UnsafeBuffer (BCL MemoryManager<byte> pattern) so all downstream
         // code uses safe Memory<byte> / Span<byte>.
         unsafe
         {
             byte* ptr = null;
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
             ptr += _accessor.PointerOffset;
-            _memoryManager = new UnsafeMemoryManager(ptr, fileLength);
+            _unsafeBuffer = new UnsafeBuffer(ptr, fileLength);
         }
 
-        _memory = _memoryManager.Memory;
+        _memory = _unsafeBuffer.Memory;
 
         var header = DatabaseHeader.Parse(_memory.Span);
         PageSize = header.PageSize;
@@ -90,6 +90,15 @@ public sealed class SafeMemMapdPageSource : IPageSource
         ValidatePageNumber(pageNumber);
         int offset = (int)(pageNumber - 1) * PageSize;
         return _memory.Span.Slice(offset, PageSize);
+    }
+
+    /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidatePageNumber(pageNumber);
+        int offset = (int)(pageNumber - 1) * PageSize;
+        return _memory.Slice(offset, PageSize);
     }
 
     /// <inheritdoc />
@@ -114,7 +123,7 @@ public sealed class SafeMemMapdPageSource : IPageSource
         _disposed = true;
 
         _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        ((IDisposable)_memoryManager).Dispose();
+        ((IDisposable)_unsafeBuffer).Dispose();
         _accessor.Dispose();
         _mmf.Dispose();
     }

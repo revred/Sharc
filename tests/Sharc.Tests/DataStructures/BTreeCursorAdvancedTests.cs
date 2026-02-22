@@ -172,7 +172,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();
@@ -201,7 +201,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();
@@ -228,7 +228,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         long prev = long.MinValue;
@@ -252,7 +252,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         while (cursor.MoveNext()) { } // exhaust
@@ -275,7 +275,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         Assert.True(cursor.MoveNext());
@@ -301,7 +301,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         int count = 0;
@@ -333,7 +333,7 @@ public class BTreeCursorAdvancedTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateCursor(2);
 
         var rowIds = new List<long>();

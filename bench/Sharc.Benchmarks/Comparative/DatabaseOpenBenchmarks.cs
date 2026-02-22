@@ -119,7 +119,7 @@ public class DatabaseOpenBenchmarks
     [BenchmarkCategory("Sharc", "Mmap")]
     public int Sharc_OpenMmap_Small()
     {
-        using var source = new SafeMemMapdPageSource(_smallDbPath);
+        using var source = new SafeM2MPageSource(_smallDbPath);
         return source.PageSize;
     }
 
@@ -127,7 +127,7 @@ public class DatabaseOpenBenchmarks
     [BenchmarkCategory("Sharc", "Mmap")]
     public int Sharc_OpenMmap_Medium()
     {
-        using var source = new SafeMemMapdPageSource(_mediumDbPath);
+        using var source = new SafeM2MPageSource(_mediumDbPath);
         return source.PageSize;
     }
 
@@ -138,7 +138,7 @@ public class DatabaseOpenBenchmarks
     [BenchmarkCategory("Sharc", "Mmap")]
     public int Sharc_OpenMmap_ParseFirstPage()
     {
-        using var source = new SafeMemMapdPageSource(_smallDbPath);
+        using var source = new SafeM2MPageSource(_smallDbPath);
         var page1 = source.GetPage(1);
         var btreeHeader = BTreePageHeader.Parse(page1[100..]); // page 1 b-tree starts after 100-byte db header
         return source.PageSize + btreeHeader.CellCount;
@@ -154,7 +154,7 @@ public class DatabaseOpenBenchmarks
         int sum = 0;
         for (int i = 0; i < 50; i++)
         {
-            using var source = new SafeMemMapdPageSource(_smallDbPath);
+            using var source = new SafeM2MPageSource(_smallDbPath);
             sum += source.PageCount;
         }
         return sum;
@@ -237,7 +237,7 @@ public class DatabaseOpenBenchmarks
     [BenchmarkCategory("Sharc", "Amortized")]
     public int Sharc_Mmap_Open_Read10Pages()
     {
-        using var source = new SafeMemMapdPageSource(_smallDbPath);
+        using var source = new SafeM2MPageSource(_smallDbPath);
         int sum = 0;
         for (uint p = 1; p <= Math.Min(10, (uint)source.PageCount); p++)
         {

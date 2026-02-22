@@ -1,7 +1,7 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-21
-**Branch:** Arena.Fix (merged to dev)
+**Date:** 2026-02-22
+**Branch:** Arena.Fix
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
@@ -11,20 +11,32 @@
 
 ## Allocation Tier List
 
-### Tier 0 — Zero GC (cursor construction only, 640–896 B)
+### Tier 0 — Zero GC (cursor construction only, 664–912 B)
 
 | Benchmark | Mean | Allocated | GC | Notes |
 |-----------|------|-----------|-----|-------|
-| Sharc_PointLookup | 279 ns | 640 B | 0 | B-tree seek, single row |
-| Sharc_TypeDecode | 176 us | 672 B | 0 | Full scan, type decode only |
-| Sharc_GcPressure | 172 us | 672 B | 0 | Full scan, designed for zero GC |
-| Sharc_NullScan | 243 us | 672 B | 0 | Full scan with NULL handling |
-| Sharc_FilterStar | 275 us | 808 B | 0 | JIT-compiled predicate scan |
-| Sharc_WhereFilter | 320 us | 896 B | 0 | SQL WHERE filter |
-| DirectTable_SequentialScan | 175 us | 680 B | 0 | Raw CreateReader |
-| SELECT * (no filter) | 82 us | 680 B | 0 | Simplest SQL query |
+| Sharc_PointLookup | 272 ns | 664 B | 0 | B-tree seek, single row |
+| Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
+| Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
+| Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
+| Sharc_FilterStar | 304 us | 800 B | 0 | JIT-compiled predicate scan |
+| Sharc_WhereFilter | 298 us | 912 B | 0 | SQL WHERE filter |
+| DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
+| SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |
 
-**Key insight:** All core read operations are flat 640–896 B (+8 B vs previous baseline from `_snapshotVersion` field for multi-agent staleness detection). This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
+**Key insight:** All core read operations are flat 664–912 B (+8 B vs previous baseline from `_snapshotVersion` field for multi-agent staleness detection). This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
+
+### Tier 0.5 — Index Seek (1,352–1,456 B)
+
+| Benchmark | Mean | Allocated | GC | Notes |
+|-----------|------|-----------|-----|-------|
+| Sharc_Where_IndexSeek (int) | 1.25 us | 1,456 B | 0 | O(log N) SeekFirst + table Seek, 3 rows |
+| Sharc_Where_FullScan (baseline) | 506 us | 816 B | 0 | Sequential scan, same query |
+| Sharc_WhereText_IndexSeek | 185 us | 1,352 B | 0 | UTF-8 byte-span comparison, ~1K rows |
+| Sharc_WhereText_FullScan | 224 us | 672 B | 0 | Sequential scan, same query |
+| SQLite_Where_PointLookup | 35.4 us | 872 B | 0 | SQLite indexed point lookup |
+
+**Key insight:** Integer index seek is **450x faster than full scan** and **28x faster than SQLite**. Text index seek is 1.2x faster than full scan at 20% selectivity — benefit grows with selectivity. Zero-allocation hot path: byte-span `SequenceEqual` for text, `DecodeInt64Direct` for integers. Both paths use `ArrayPool<long>.Shared` for serial type buffer.
 
 ### Tier 1 — Minimal Overhead (+96–296 B per feature)
 
@@ -86,16 +98,16 @@
 
 | Operation | Sharc | SQLite | Sharc/SQLite | Notes |
 |-----------|-------|--------|-------------|-------|
-| Point lookup | 279 ns / 640 B | 26.0 us / 728 B | **0.01x time** | Sharc 93x faster (direct B-tree seek) |
-| Sequential scan 5K | 1,261 us / 1.4 MB | 5,976 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
-| SELECT * (3 cols) | 82 us / 680 B | 643 us / 688 B | **0.13x time** | 7.8x faster, comparable allocation |
-| WHERE filter | 320 us / 896 B | 569 us / 720 B | **0.56x time** | 1.8x faster, similar allocation |
-| GROUP BY | 352 us / 5,424 B | 514 us / 920 B | **0.68x time, 5.9x alloc** | See analysis below |
-| ORDER BY+LIMIT | 389 us / 32 KB | 415 us / 3.1 KB | **0.94x time, 10.5x alloc** | Near-parity on time, SQLite wins allocation |
-| Insert 1 row | 4.50 ms / 16.3 KB | 5.54 ms / 8.0 KB | **0.81x time, 2.0x alloc** | Sharc 19% faster, fsync-dominated |
-| Insert 100 rows | 4.80 ms / 20.0 KB | 5.70 ms / 71.2 KB | **0.84x time, 0.28x alloc** | Sharc 3.6x less allocation |
-| Transaction 100 rows | 4.48 ms / 20.3 KB | 5.52 ms / 71.2 KB | **0.81x time, 0.28x alloc** | Sharc 3.5x less allocation |
-| Insert+Read 100 rows | 4.99 ms / 39.7 KB | 5.99 ms / 71.9 KB | **0.83x time, 0.55x alloc** | Read-back adds ~20 KB |
+| Point lookup | 272 ns / 664 B | 25.9 us / 728 B | **0.01x time** | Sharc 95x faster (direct B-tree seek, generic specialization) |
+| Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
+| SELECT * (3 cols) | 105 us / 672 B | 637 us / 688 B | **0.16x time** | 6x faster, comparable allocation |
+| WHERE filter | 298 us / 912 B | 560 us / 720 B | **0.53x time** | 1.9x faster, similar allocation |
+| GROUP BY | 366 us / 5,416 B | 538 us / 920 B | **0.68x time, 5.9x alloc** | See analysis below |
+| ORDER BY+LIMIT | 505 us / 32 KB | 426 us / 3.1 KB | **1.19x time, 10.5x alloc** | SQLite wins — native sort is cheaper |
+| Insert 1 row | 4.30 ms / 16.3 KB | 4.87 ms / 11.8 KB | **0.88x time, 1.4x alloc** | Sharc 12% faster, fsync-dominated |
+| Insert 100 rows | 4.32 ms / 20.0 KB | 5.44 ms / 71.2 KB | **0.79x time, 0.28x alloc** | Sharc 3.6x less allocation |
+| Transaction 100 rows | 4.70 ms / 18.5 KB | 5.95 ms / 71.2 KB | **0.79x time, 0.26x alloc** | Sharc 3.9x less allocation |
+| Insert+Read 100 rows | 4.78 ms / 39.6 KB | 5.72 ms / 71.9 KB | **0.84x time, 0.55x alloc** | Read-back adds ~20 KB |
 | Graph BFS 2-hop | 2.4 us / 960 B | 80.8 us / 2,808 B | **0.03x time** | Sharc 34x faster |
 | Graph scan edges | 442 us / 640 B | 2,396 us / 696 B | **0.18x time** | Sharc 5.4x faster |
 

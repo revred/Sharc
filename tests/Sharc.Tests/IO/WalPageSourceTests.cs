@@ -161,6 +161,7 @@ public class WalPageSourceTests
         }
 
         public ReadOnlySpan<byte> GetPage(uint pageNumber) => _pages[pageNumber - 1];
+        public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => GetPage(pageNumber).ToArray();
         public int ReadPage(uint pageNumber, Span<byte> destination)
         {
             _pages[pageNumber - 1].CopyTo(destination);

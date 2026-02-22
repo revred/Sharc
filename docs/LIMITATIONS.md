@@ -2,14 +2,13 @@
 
 This document summarizes what is **missing**, **experimental**, or **intentionally omitted** in Sharc.
 
-## 1. The Write Engine (Experimental)
-*   **Status**: `INSERT`-only. Single-writer.
-*   **Missing Features**:
-    *   ? **No UPDATE/DELETE**: Records are immutable once written.
-    *   ? **No Index Maintenance**: Writing to a table does not update its secondary indexes. Lookups will fail for new rows.
-    *   ? **No Overflow Support**: Records > Page Size will corrupt the page.
-    *   ? **No Root Splits**: If a table grows enough to split its root page, the table definition becomes invalid.
-    *   ? **No Concurrency**: No WAL locking. Single thread/process only.
+## 1. The Write Engine
+
+*   **Status**: Full CRUD (INSERT/UPDATE/DELETE) with ACID transactions. Single-writer.
+*   **Capabilities**: B-tree leaf/interior splits, cell insertion/removal, page defragmentation, freelist recycling, overflow page support, root splits, vacuum.
+* **Remaining Limitations**:
+  * **No Concurrency**: No WAL locking. Single writer at a time.
+  * **No MVCC**: No snapshot isolation for concurrent readers + writers.
 
 ## 2. Querying Capabilities
 *   **Status**: `Sharq` parser + `JIT` filter + streaming query pipeline.

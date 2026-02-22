@@ -18,7 +18,7 @@ namespace Sharc.Benchmarks
     [Config(typeof(Config))]
     public class LedgerBenchmark
     {
-        private class Config : ManualConfig
+        private sealed class Config : ManualConfig
         {
             public Config()
             {

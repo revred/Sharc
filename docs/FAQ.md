@@ -3,20 +3,20 @@
 ## General
 
 ### What is Sharc?
-Sharc is a **high-performance, managed context engine** for AI agents. It reads and writes the standard SQLite file format (Format 3) but bypasses the SQLite library entirely to achieve **2-75x faster read performance**. It is built in pure C# with no native dependencies.
+Sharc is a **high-performance, managed context engine** for AI agents. It reads and writes the standard SQLite file format (Format 3) but bypasses the SQLite library entirely to achieve **2-95x faster read performance**. It is built in pure C# with no native dependencies.
 
 ### Why not just use SQLite?
-If you need JOINs, views, triggers, or stored procedures, use SQLite. Sharc now supports `GROUP BY`, Cotes, and compound queries (`UNION`/`INTERSECT`/`EXCEPT`) via the Query API.
+If you need views, triggers, or stored procedures, use SQLite. Sharc supports `JOIN` (INNER/LEFT/CROSS), `GROUP BY`, Cotes, and compound queries (`UNION`/`INTERSECT`/`EXCEPT`) via the Query API.
 
 **Use Sharc when:**
 
-*   **Latency matters:** You need sub-microsecond point lookups (392ns vs 24,011ns in SQLite).
+*   **Latency matters:** You need sub-microsecond point lookups (272ns vs 25,875ns in SQLite).
 *   **Memory matters:** You need zero per-row allocations (using `ref struct` and `Span<T>`).
 *   **Context matters:** You need to traverse graphs at 31x the speed of SQLite recursive CTEs (Cotes in Sharc).
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
-The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,216 tests** across 6 test projects.
+The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,260 tests** across 6 test projects.
 
 The **Write Engine** supports:
 *   **Full CRUD**: `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`

@@ -42,7 +42,7 @@ public class PageReadBenchmarks
     private SqliteCommand _selectFirst = null!;
     private SqliteCommand _countRows = null!;
     private SqliteCommand _selectAll = null!;
-    private SafeMemMapdPageSource _mmapSource = null!;
+    private SafeM2MPageSource _mmapSource = null!;
     private FilePageSource _fileSource = null!;
     private int _pageSize;
     private int _pageCount;
@@ -59,7 +59,7 @@ public class PageReadBenchmarks
         _pageSize = header.PageSize;
         _pageCount = header.PageCount;
 
-        _mmapSource = new SafeMemMapdPageSource(_dbPath);
+        _mmapSource = new SafeM2MPageSource(_dbPath);
         _fileSource = new FilePageSource(_dbPath);
 
         _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");

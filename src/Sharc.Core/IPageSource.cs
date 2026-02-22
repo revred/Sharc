@@ -43,8 +43,12 @@ public interface IPageSource : IDisposable
     void Invalidate(uint pageNumber);
 
     /// <summary>
-    /// Monotonically increasing version that changes on data mutation via <see cref="IWritablePageSource.WritePage"/>.
-    /// Returns 0 for sources that cannot track mutations (read-only, file-backed).
+    /// Gets a <see cref="ReadOnlyMemory{T}"/> over a page's data that can be stored in fields.
+    /// Unlike <see cref="GetPage"/>, the returned memory survives across method calls.
+    /// Implementations should return zero-copy memory where possible (e.g., <c>AsMemory()</c>
+    /// over a backing array). When zero-copy is not possible, copy via <c>GetPage(pageNumber).ToArray()</c>.
     /// </summary>
-    long DataVersion => 0;
+    /// <param name="pageNumber">1-based page number.</param>
+    /// <returns>Read-only memory of page bytes.</returns>
+    ReadOnlyMemory<byte> GetPageMemory(uint pageNumber);
 }

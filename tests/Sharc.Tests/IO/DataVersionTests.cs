@@ -9,8 +9,8 @@ using Xunit;
 namespace Sharc.Tests.IO;
 
 /// <summary>
-/// Tests for <see cref="IPageSource.DataVersion"/> — monotonic version counter
-/// that tracks data mutations across page source implementations.
+/// Tests for <see cref="IWritablePageSource.DataVersion"/> — monotonic version counter
+/// that tracks data mutations across writable page source implementations.
 /// </summary>
 public class DataVersionTests
 {
@@ -66,17 +66,6 @@ public class DataVersionTests
     }
 
     [Fact]
-    public void DataVersion_ReadOnlySource_ReturnsZero()
-    {
-        // A source that doesn't override DataVersion should return the default (0)
-        var data = CreateMinimalDatabase();
-        using var inner = new MemoryPageSource(data);
-        IPageSource readOnly = new ReadOnlyPageSourceStub(inner);
-
-        Assert.Equal(0L, readOnly.DataVersion);
-    }
-
-    [Fact]
     public void DataVersion_CachedPageSource_DelegatesToInner()
     {
         var data = CreateMinimalDatabase();
@@ -98,38 +87,6 @@ public class DataVersionTests
 
         Assert.True(cached.DataVersion > before);
         Assert.Equal(inner.DataVersion, cached.DataVersion);
-    }
-
-    [Fact]
-    public void DataVersion_ProxyPageSource_DelegatesToTarget()
-    {
-        var data = CreateMinimalDatabase();
-        using var inner = new MemoryPageSource(data);
-        var proxy = new ProxyPageSource(inner);
-
-        Assert.Equal(inner.DataVersion, proxy.DataVersion);
-    }
-
-    [Fact]
-    public void DataVersion_ProxyPageSource_AfterSetTarget_ReflectsNewTarget()
-    {
-        var data1 = CreateMinimalDatabase();
-        var data2 = CreateMinimalDatabase();
-        using var source1 = new MemoryPageSource(data1);
-        using var source2 = new MemoryPageSource(data2);
-
-        // Write to source2 so its version differs
-        source2.WritePage(1, new byte[4096]);
-
-        var proxy = new ProxyPageSource(source1);
-        long v1 = proxy.DataVersion;
-
-        proxy.SetTarget(source2);
-        long v2 = proxy.DataVersion;
-
-        Assert.Equal(source1.DataVersion, v1);
-        Assert.Equal(source2.DataVersion, v2);
-        Assert.NotEqual(v1, v2);
     }
 
     [Fact]
@@ -177,20 +134,4 @@ public class DataVersionTests
         Assert.Equal(baseVersion + 2, shadow.DataVersion);
     }
 
-    /// <summary>
-    /// Minimal IPageSource that does NOT override DataVersion,
-    /// exercising the default interface method (returns 0).
-    /// </summary>
-    private sealed class ReadOnlyPageSourceStub : IPageSource
-    {
-        private readonly IPageSource _inner;
-        public ReadOnlyPageSourceStub(IPageSource inner) => _inner = inner;
-        public int PageSize => _inner.PageSize;
-        public int PageCount => _inner.PageCount;
-        public int ReadPage(uint pageNumber, Span<byte> destination) => _inner.ReadPage(pageNumber, destination);
-        public ReadOnlySpan<byte> GetPage(uint pageNumber) => _inner.GetPage(pageNumber);
-        public void Invalidate(uint pageNumber) => _inner.Invalidate(pageNumber);
-        public void Dispose() => _inner.Dispose();
-        // Deliberately does NOT override DataVersion — uses default (0)
-    }
 }

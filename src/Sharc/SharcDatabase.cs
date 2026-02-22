@@ -11,6 +11,7 @@ using Sharc.Exceptions;
 using global::Sharc.Core.Query;
 using Sharc.Query;
 using Sharc.Query.Execution;
+using Sharc.Query.Optimization;
 using Sharc.Query.Sharq;
 using Intent = global::Sharc.Query.Intent;
 
@@ -618,7 +619,7 @@ public sealed class SharcDatabase : IDisposable
             });
         }
 
-        var cursor = CreateTableCursor(info.Table);
+        var cursor = TryCreateIndexSeekCursor(intent, info.Table) ?? CreateTableCursor(info.Table);
         return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
         {
             Columns = info.Table.Columns,
@@ -728,6 +729,31 @@ public sealed class SharcDatabase : IDisposable
             };
         }
         return resolved;
+    }
+
+    /// <summary>
+    /// Attempts to create an index-accelerated cursor for the given query intent.
+    /// Returns null if no suitable index exists or conditions aren't sargable.
+    /// </summary>
+    private IndexSeekCursor? TryCreateIndexSeekCursor(Intent.QueryIntent intent, TableInfo table)
+    {
+        if (!intent.Filter.HasValue || table.Indexes.Count == 0)
+            return null;
+
+        var conditions = PredicateAnalyzer.ExtractSargableConditions(
+            intent.Filter.Value, intent.TableAlias);
+        if (conditions.Count == 0)
+            return null;
+
+        var plan = IndexSelector.SelectBestIndex(conditions, table.Indexes);
+        if (plan.Index == null)
+            return null;
+
+        // DECISION: Keep the JIT-compiled residual filter even for consumed index conditions.
+        // The byte-level filter is near-zero cost and avoids predicate subtraction complexity.
+        return new IndexSeekCursor(
+            _bTreeReader, _recordDecoder,
+            (uint)plan.Index.RootPage, (uint)table.RootPage, plan);
     }
 
     private IBTreeCursor CreateTableCursor(TableInfo table)
