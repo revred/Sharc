@@ -257,8 +257,8 @@ new SharcOpenOptions
 ### WHERE Filtering (Milestone 7 — COMPLETE)
 
 - `SharcFilter` with 6 operators (Eq, Ne, Lt, Le, Gt, Ge) across all column types
-- **Filter Star (JIT)**: Flattened Expression Trees with **Offset Hoisting**
-- Scan-based JIT filtering outperforms SQLite VDB by ~25%
+- **Filter Star**: Closure-composed delegates with **Offset Hoisting** (AOT-safe)
+- Scan-based filtering outperforms SQLite VDB by ~25%
 - Composable with column projection for <2KB total allocation per 5k row scan
 
 ### Index Reads (Milestone 7+ — COMPLETE)
