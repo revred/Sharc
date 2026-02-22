@@ -7,7 +7,7 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 ## ADR-019: Generic Page Source Specialization — Eliminate Interface Dispatch
 
 **Date**: 2026-02-22
-**Status**: Accepted
+**Status**: Accepted — **Outcome: 272 ns achieved** (vs 327 ns on dev = 17% improvement, exceeding 10% gate)
 **Context**: After adding multi-agent staleness tracking (DataVersion/IsStale) and leaf page caching, PointLookup regressed from 278 ns to 321 ns (+15%). Root cause analysis revealed that every `_pageSource.GetPage()` call in BTreeCursor traverses two interface dispatch layers: `BTreeCursor → ProxyPageSource (vtable) → MemoryPageSource (vtable)`. For a Seek with 5-7 page accesses, this adds 50-100+ ns of dispatch overhead — a significant fraction of a 321 ns operation.
 
 ProxyPageSource exists to enable runtime target swapping during write transactions (`SetTarget()`), but is unnecessary for read-only databases where the target never changes. For the PointLookup benchmark (OpenMemory, read-only), the proxy is pure overhead.

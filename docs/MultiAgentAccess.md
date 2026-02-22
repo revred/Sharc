@@ -8,25 +8,27 @@ This is a prerequisite for AI multi-agent coordination (e.g., agent chess, colla
 
 ## The Two Primitives
 
-### IPageSource.DataVersion
+### IWritablePageSource.DataVersion
 
 ```csharp
-public interface IPageSource : IDisposable
+public interface IWritablePageSource : IPageSource
 {
-    long DataVersion => 0;  // default: unknown/untracked
+    long DataVersion { get; }
+    void WritePage(uint pageNumber, ReadOnlySpan<byte> source);
+    void Flush();
 }
 ```
 
-A monotonically increasing counter that changes on every data mutation.
+A monotonically increasing counter that changes on every data mutation. Only writable page sources implement `DataVersion` — read-only sources (`IPageSource`) do not expose it.
 
-| Source Type | DataVersion Behavior |
-|---|---|
-| `MemoryPageSource` | Starts at 1, increments on every `WritePage()` via `Interlocked.Increment` |
-| `CachedPageSource` | Delegates to `_inner.DataVersion` |
-| `ProxyPageSource` | Delegates to `_target.DataVersion` |
-| `ShadowPageSource` | Composite: `_baseSource.DataVersion + _shadowVersion` |
-| `FilePageSource` | Returns 0 (read-only, no tracking) |
-| `SafeMemMapdPageSource` | Returns 0 (read-only) |
+| Source Type | Interface | DataVersion Behavior |
+| --- | --- | --- |
+| `MemoryPageSource` | `IWritablePageSource` | Starts at 1, increments on every `WritePage()` via `Interlocked.Increment` |
+| `CachedPageSource` | `IWritablePageSource` | Delegates to `(_inner as IWritablePageSource)?.DataVersion ?? 0` |
+| `ShadowPageSource` | `IWritablePageSource` | Composite: `_baseSource.DataVersion + _shadowVersion` |
+| `FilePageSource` | `IWritablePageSource` | Returns 0 (read-only, no tracking) |
+| `SafeM2MPageSource` | `IPageSource` | N/A (read-only, no DataVersion) |
+| `WalPageSource` | `IPageSource` | N/A (read-only, no DataVersion) |
 
 **Semantics:**
 - `DataVersion == 0` means "unknown/untracked" — the source cannot detect mutations (read-only file-backed sources)
@@ -49,12 +51,15 @@ public bool IsStale
 {
     get
     {
-        long current = _pageSource.DataVersion;
-        if (_snapshotVersion == 0 || current == 0) return false;
+        if (_writableSource is not { } w) return false;
+        long current = w.DataVersion;
+        if (_snapshotVersion == 0) { _snapshotVersion = current; return false; }
         return current != _snapshotVersion;
     }
 }
 ```
+
+Where `_writableSource` is cached at cursor construction: `_writableSource = pageSource as IWritablePageSource;`
 
 **Semantics:**
 - `IsStale` is a **property check**, not a method call. No exceptions, no side effects.
@@ -300,13 +305,13 @@ Tests for `IPageSource.GetPageMemory` — zero-copy verification, default implem
 
 | File | Purpose |
 |---|---|
-| `src/Sharc.Core/IPageSource.cs` | `DataVersion` default method, `GetPageMemory` default method |
+| `src/Sharc.Core/IPageSource.cs` | `GetPageMemory` default method |
+| `src/Sharc.Core/IWritablePageSource.cs` | `DataVersion` property on writable sources |
 | `src/Sharc.Core/IO/MemoryPageSource.cs` | `_dataVersion` field + `GetPageMemory` zero-copy override |
-| `src/Sharc.Core/IO/CachedPageSource.cs` | Delegates `DataVersion` to inner |
-| `src/Sharc.Core/IO/ProxyPageSource.cs` | Delegates `DataVersion` to target |
+| `src/Sharc.Core/IO/CachedPageSource.cs` | Delegates `DataVersion` via runtime cast to inner |
 | `src/Sharc.Core/IO/ShadowPageSource.cs` | Composite `DataVersion` (base + shadow) |
 | `src/Sharc.Core/IBTreeReader.cs` | `IsStale` on `IBTreeCursor` and `IIndexBTreeCursor` |
-| `src/Sharc.Core/BTree/BTreeCursor.cs` | `_snapshotVersion`, `IsStale`, `_cachedLeafMemory`, `GetCachedLeafPage()` |
-| `src/Sharc.Core/BTree/IndexBTreeCursor.cs` | `_snapshotVersion`, `IsStale` |
+| `src/Sharc.Core/BTree/BTreeCursor.cs` | `_writableSource`, `_snapshotVersion`, `IsStale`, `_cachedLeafMemory`, `GetCachedLeafPage()` |
+| `src/Sharc.Core/BTree/IndexBTreeCursor.cs` | `_writableSource`, `_snapshotVersion`, `IsStale` |
 | `src/Sharc.Core/BTree/WithoutRowIdCursorAdapter.cs` | `IsStale => _inner.IsStale` |
 | `src/Sharc/SharcDataReader.cs` | `public bool IsStale` |

@@ -14,7 +14,7 @@
 
 | Benchmark | Mean | Allocated | GC | Notes |
 |-----------|------|-----------|-----|-------|
-| Sharc_PointLookup | 278 ns | 632 B | 0 | B-tree seek, single row |
+| Sharc_PointLookup | 272 ns | 664 B | 0 | B-tree seek, single row |
 | Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
 | Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
 | Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
@@ -23,7 +23,7 @@
 | DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
 | SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |
 
-**Key insight:** All core read operations are flat 632–888 B. This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
+**Key insight:** All core read operations are flat 664–912 B. This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
 
 ### Tier 1 — Minimal Overhead (+96–296 B per feature)
 
@@ -85,7 +85,7 @@
 
 | Operation | Sharc | SQLite | Sharc/SQLite | Notes |
 |-----------|-------|--------|-------------|-------|
-| Point lookup | 278 ns / 632 B | 3.2 us / 688 B | **0.09x time** | Sharc 11x faster (direct B-tree seek) |
+| Point lookup | 272 ns / 664 B | 25.9 us / 728 B | **0.01x time** | Sharc 95x faster (direct B-tree seek, generic specialization) |
 | Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
 | SELECT * (3 cols) | 105 us / 672 B | 637 us / 688 B | **0.16x time** | 6x faster, comparable allocation |
 | WHERE filter | 298 us / 912 B | 560 us / 720 B | **0.53x time** | 1.9x faster, similar allocation |
