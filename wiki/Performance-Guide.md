@@ -4,7 +4,7 @@
 
 | Operation | Sharc | SQLite | Speedup | Allocation |
 |-----------|-------|--------|---------|------------|
-| Point seek (rowid) | 0.27 us | 15.8 us | **56x** | 0 B vs 728 B |
+| Point seek (rowid) | 0.27 us | 25.9 us | **95x** | 664 B vs 728 B |
 | Table scan (1K rows) | 48 us | 187 us | **3.9x** | 0 B vs 37 KB |
 | Graph BFS 2-hop | 2.60 us | 81.55 us | **31x** | 928 B vs 2.8 KB |
 | Graph node seek | 3.4 us | 24.3 us | **7.1x** | 8.3 KB vs 728 B |

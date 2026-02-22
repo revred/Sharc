@@ -33,18 +33,18 @@
     <Company>Maker.AI</Company>
     <Product>Sharc</Product>
     <Copyright>Copyright (c) 2025-2026 Ram Kumar Revanur. All rights reserved.</Copyright>
-    <Description>High-performance pure managed SQLite file-format reader for .NET</Description>
+    <Description>High-performance pure managed SQLite file-format reader and writer for .NET. 95x faster point lookups, zero per-row allocation, no native dependencies. Built for AI agents, Blazor WASM, and edge deployment.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>sqlite;database;reader;high-performance;zero-allocation;wasm;encryption</PackageTags>
+    <PackageTags>sqlite;database;reader;writer;high-performance;zero-allocation;wasm;blazor;ai-agent;context-engine;embedded-database;no-native-dependencies;encryption;graph-traversal;point-lookup;dotnet;csharp</PackageTags>
     <PackageProjectUrl>https://github.com/revred/sharc</PackageProjectUrl>
     <RepositoryUrl>https://github.com/revred/sharc.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
 
     <!-- Assembly metadata -->
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
-    <Version>1.0.1.0-alpha</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.1.0.0-beta</Version>
 
     <!-- Optimization for WASM/Size -->
     <IsTrimmable>true</IsTrimmable>

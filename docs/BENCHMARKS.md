@@ -3,7 +3,7 @@
 Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 
 > BenchmarkDotNet v0.15.8 | .NET 10.0.2 | Windows 11 | Intel i7-11800H (8C/16T)
-> All numbers are **measured**, not estimated. Last run: February 19, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
+> All numbers are **measured**, not estimated. Last run: February 22, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
 
 ---
 
@@ -14,12 +14,12 @@ Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 | Engine Init (open + header) | **981 ns** | 38.68 us | **39x** | **1,416 B** | 1,160 B |
 | Schema Introspection | **4.69 us** | 27.86 us | **5.9x** | 4,784 B | 2,536 B |
 | Sequential Scan (9 cols) | **1.54 ms** | 6.22 ms | **4.0x** | 1.41 MB | 1.41 MB |
-| Point Lookup (Seek) | **392 ns** | 24,011 ns | **61x** | **688 B** | 728 B |
+| Point Lookup (Seek) | **272 ns** | 25,875 ns | **95x** | **664 B** | 728 B |
 | Batch 6 Lookups | **1,940 ns** | 127,526 ns | **66x** | **1,792 B** | 3,712 B |
-| Type Decode (5K ints) | **185 us** | 854 us | **4.6x** | 648 B | 688 B |
-| NULL Detection | **394 us** | 1.24 ms | **3.1x** | 648 B | 688 B |
-| WHERE Filter | **315 us** | 587 us | **1.8x** | 1,008 B | 720 B |
-| GC Pressure (sustained) | **214 us** | 1.20 ms | **5.6x** | 648 B | 688 B |
+| Type Decode (5K ints) | **176 us** | 888 us | **5.0x** | 688 B | 688 B |
+| NULL Detection | **175 us** | 773 us | **4.4x** | 688 B | 688 B |
+| WHERE Filter | **298 us** | 560 us | **1.9x** | 912 B | 720 B |
+| GC Pressure (sustained) | **175 us** | 853 us | **4.9x** | 688 B | 688 B |
 
 > **Sharc wins 9 of 9 on speed.** Engine Init allocation is the one-time schema parse cost (~40 KB). The page cache is demand-driven — buffers are rented on first access, not at construction (see [ADR-015](../PRC/DecisionLog.md)).
 
@@ -54,14 +54,14 @@ Speed without memory discipline is incomplete. Here's what each engine allocates
 | Operation | Sharc | SQLite | Winner |
 |:---|---:|---:|:---:|
 | Primitives (header, varint) | **0 B** | N/A | Sharc |
-| NULL Detection (5K rows) | **784 B** | 688 B | Parity |
-| Type Decode (5K ints) | **784 B** | 688 B | Parity |
-| GC Pressure (sustained) | **784 B** | 688 B | Parity |
+| NULL Detection (5K rows) | **688 B** | 688 B | Parity |
+| Type Decode (5K ints) | **688 B** | 688 B | Parity |
+| GC Pressure (sustained) | **688 B** | 688 B | Parity |
 | Batch 6 Lookups | **1.8 KB** | 3.7 KB | Sharc |
-| Point Lookup (Seek) | **688 B** | 728 B | Sharc |
+| Point Lookup (Seek) | **664 B** | 728 B | Sharc |
 | Schema Read | 4.8 KB | **2.5 KB** | SQLite |
 | Sequential Scan (5K rows) | **1.35 MB** | 1.35 MB | **Parity** |
-| WHERE Filter | 1.0 KB | **720 B** | SQLite |
+| WHERE Filter | 912 B | **720 B** | SQLite |
 | Single DELETE | 14.54 KB | **1.66 KB** | SQLite † |
 | Single UPDATE | 31.91 KB | **1.72 KB** | SQLite † |
 | Single INSERT | 26.05 KB | **8.04 KB** | SQLite † |
@@ -81,11 +81,11 @@ SQLite Seek Path (21,193 ns):
   sqlite3_step > B-tree descend > read leaf > VDBE decode >
   P/Invoke return > marshal to managed objects
 
-Sharc Seek Path (392 ns):
+Sharc Seek Path (272 ns):
   Span<byte> > B-tree page > binary search > leaf cell > decode value
 ```
 
-**61x on single seeks. 66x on batch 6.** Batch amplification comes from LRU page cache locality -- the second through sixth seeks reuse cached B-tree interior pages.
+**95x on single seeks. 66x on batch 6.** Batch amplification comes from LRU page cache locality -- the second through sixth seeks reuse cached B-tree interior pages.
 
 ---
 
@@ -228,10 +228,10 @@ These have no SQLite equivalent -- they measure raw byte-level decode speed.
 | WHERE filtering | **FilterStar (14+ ops)** + Query API | Yes (via SQL) |
 | GROUP BY / aggregates | **Yes** -- streaming hash aggregator | Yes |
 | UNION / INTERSECT / EXCEPT / Cotes | **Yes** | Yes |
-| JOIN | No | Yes |
+| JOIN | **Yes** — INNER/LEFT/CROSS (hash join) | Yes |
 | Write / INSERT / UPDATE / DELETE | **Yes** | Yes |
 | Native dependencies | **None** | Requires `e_sqlite3` |
-| B-tree point lookup | **7-61x faster** | Baseline |
+| B-tree point lookup | **7-95x faster** | Baseline |
 | Single UPDATE | **39x faster** | Baseline |
 | Single DELETE | **7x faster** | Baseline |
 | Graph 2-hop BFS | **31x faster** | Baseline |

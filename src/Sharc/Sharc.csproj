@@ -2,8 +2,8 @@
   <PropertyGroup>
     <RootNamespace>Sharc</RootNamespace>
     <AssemblyName>Sharc</AssemblyName>
-    <Description>Pure C# SQLite read/write engine for AI context space engineering. Zero dependencies, sub-50KB footprint, zero-allocation hot paths.</Description>
-    <PackageTags>sqlite;database;ai;context-space;zero-allocation;dotnet;csharp</PackageTags>
+    <Description>Pure C# SQLite read/write engine — 95x faster point lookups, zero per-row allocation, no native dependencies. Full CRUD, SQL query pipeline, WASM-ready (~40KB). Built for AI agents, Blazor, and edge deployment.</Description>
+    <PackageTags>sqlite;database;ai;context-engine;zero-allocation;wasm;blazor;embedded-database;no-native-dependencies;point-lookup;dotnet;csharp</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
