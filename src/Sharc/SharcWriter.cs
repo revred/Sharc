@@ -383,7 +383,7 @@ public sealed class SharcWriter : IDisposable
     /// </summary>
     private static uint FindTableRootPage(IPageSource source, string tableName, int usableSize)
     {
-        using var cursor = new BTreeCursor(source, 1, usableSize);
+        using var cursor = new BTreeCursor<IPageSource>(source, 1, usableSize);
         var columnBuffer = t_schemaColumnBuffer ??= new ColumnValue[5];
         var decoder = t_schemaDecoder ??= new RecordDecoder();
 
@@ -484,7 +484,7 @@ public sealed class SharcWriter : IDisposable
         {
             if (table.Name.Equals("sqlite_master", StringComparison.OrdinalIgnoreCase)) continue;
             var records = new List<byte[]>();
-            using var cursor = new BTreeCursor(_db.PageSource, (uint)table.RootPage, usableSize);
+            using var cursor = new BTreeCursor<IPageSource>(_db.PageSource, (uint)table.RootPage, usableSize);
             while (cursor.MoveNext())
             {
                 records.Add(cursor.Payload.ToArray());

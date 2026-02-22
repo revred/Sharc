@@ -27,7 +27,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         Assert.False(cursor.IsStale);
     }
@@ -37,7 +37,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read data to establish the snapshot baseline
         Assert.True(cursor.MoveNext());
@@ -53,7 +53,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read data to establish the snapshot baseline
         Assert.True(cursor.MoveNext());
@@ -70,7 +70,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read data to establish the snapshot baseline
         Assert.True(cursor.MoveNext());
@@ -87,7 +87,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read data to establish the snapshot baseline
         Assert.True(cursor.MoveNext());
@@ -104,7 +104,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         source.WritePage(2, new byte[PageSize]);
         cursor.Reset();
@@ -120,7 +120,7 @@ public class CursorStalenessTests
         var data = CreateDatabaseWithOneRow();
         using var inner = new MemoryPageSource(data);
         var readOnly = new ReadOnlyPageSourceStub(inner);
-        using var cursor = new BTreeCursor(readOnly, 1, PageSize);
+        using var cursor = new BTreeCursor<ReadOnlyPageSourceStub>(readOnly, 1, PageSize);
 
         // Even though inner has changed, the read-only source reports DataVersion=0
         inner.WritePage(2, new byte[PageSize]);
@@ -137,7 +137,7 @@ public class CursorStalenessTests
     {
         var data = CreateDatabaseWithIndexPage();
         using var source = new MemoryPageSource(data);
-        using var cursor = new IndexBTreeCursor(source, 2, PageSize);
+        using var cursor = new IndexBTreeCursor<MemoryPageSource>(source, 2, PageSize);
 
         Assert.False(cursor.IsStale);
 
@@ -157,7 +157,7 @@ public class CursorStalenessTests
         // so the next MoveNext re-fetches from the page source.
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Agent A reads the row
         Assert.True(cursor.MoveNext());
@@ -195,8 +195,8 @@ public class CursorStalenessTests
         // A write makes both stale. Each cursor's cache is independent.
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursorA = new BTreeCursor(source, 1, PageSize);
-        using var cursorB = new BTreeCursor(source, 1, PageSize);
+        using var cursorA = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
+        using var cursorB = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Both read the same row
         Assert.True(cursorA.MoveNext());
@@ -230,7 +230,7 @@ public class CursorStalenessTests
         // which is the correct passive-detection semantic.
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read initial data
         Assert.True(cursor.MoveNext());
@@ -252,7 +252,7 @@ public class CursorStalenessTests
         // since it navigates to a potentially different leaf.
         var data = CreateDatabaseWithOneRow();
         using var source = new MemoryPageSource(data);
-        using var cursor = new BTreeCursor(source, 1, PageSize);
+        using var cursor = new BTreeCursor<MemoryPageSource>(source, 1, PageSize);
 
         // Read initial data
         Assert.True(cursor.MoveNext());

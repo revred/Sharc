@@ -9,9 +9,10 @@ namespace Sharc.Core.BTree;
 /// Forward-only cursor that traverses an index b-tree in key order.
 /// Index payloads are standard SQLite records where the last column is the table rowid.
 /// </summary>
-internal sealed class IndexBTreeCursor : IIndexBTreeCursor
+internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
     private readonly Stack<CursorStackFrame> _stack = new();
 
@@ -36,7 +37,7 @@ internal sealed class IndexBTreeCursor : IIndexBTreeCursor
     private readonly uint _rootPage;
     private long _snapshotVersion;
 
-    public IndexBTreeCursor(IPageSource pageSource, uint rootPage, int usablePageSize)
+    public IndexBTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
         _rootPage = rootPage;

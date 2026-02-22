@@ -11,7 +11,7 @@ namespace Sharc.Core.BTree;
 
 /// <summary>
 /// Insert/update/delete operations on a table B-tree.
-/// Mirrors <see cref="BTreeCursor"/> for navigation,
+/// Mirrors <see cref="BTreeCursor{TPageSource}"/> for navigation,
 /// but modifies pages via <see cref="IWritablePageSource"/>.
 /// Page buffers are rented from <see cref="ArrayPool{T}"/> and cached
 /// for the lifetime of this instance. Call <see cref="Dispose"/> to return them.
