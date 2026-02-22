@@ -4,6 +4,8 @@
     <RootNamespace>Sharc.Core</RootNamespace>
     <AssemblyName>Sharc.Core</AssemblyName>
     <IsPackable>false</IsPackable>
+    <!-- Only this project contains unsafe code (UnsafeBuffer, SafeM2MPageSource) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc" />

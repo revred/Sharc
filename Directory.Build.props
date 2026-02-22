@@ -25,13 +25,13 @@
 
   <!-- ─── Source projects (src/**) ─── -->
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
 
     <!-- NuGet metadata -->
     <Authors>Ram Kumar Revanur</Authors>
-    <Company>Sharc</Company>
+    <Company>Maker.AI</Company>
+    <Product>Sharc</Product>
     <Copyright>Copyright (c) 2025-2026 Ram Kumar Revanur. All rights reserved.</Copyright>
     <Description>High-performance pure managed SQLite file-format reader for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
