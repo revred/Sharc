@@ -25,6 +25,18 @@
 
 **Key insight:** All core read operations are flat 664–912 B. This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
 
+### Tier 0.5 — Index Seek (1,352–1,456 B)
+
+| Benchmark | Mean | Allocated | GC | Notes |
+|-----------|------|-----------|-----|-------|
+| Sharc_Where_IndexSeek (int) | 1.25 us | 1,456 B | 0 | O(log N) SeekFirst + table Seek, 3 rows |
+| Sharc_Where_FullScan (baseline) | 506 us | 816 B | 0 | Sequential scan, same query |
+| Sharc_WhereText_IndexSeek | 185 us | 1,352 B | 0 | UTF-8 byte-span comparison, ~1K rows |
+| Sharc_WhereText_FullScan | 224 us | 672 B | 0 | Sequential scan, same query |
+| SQLite_Where_PointLookup | 35.4 us | 872 B | 0 | SQLite indexed point lookup |
+
+**Key insight:** Integer index seek is **450x faster than full scan** and **28x faster than SQLite**. Text index seek is 1.2x faster than full scan at 20% selectivity — benefit grows with selectivity. Zero-allocation hot path: byte-span `SequenceEqual` for text, `DecodeInt64Direct` for integers. Both paths use `ArrayPool<long>.Shared` for serial type buffer.
+
 ### Tier 1 — Minimal Overhead (+96–296 B per feature)
 
 | Benchmark | Mean | Allocated | Notes |
