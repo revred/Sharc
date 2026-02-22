@@ -221,7 +221,7 @@ All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap
 
 ## What NOT To Do
 
-- **Do not add dependencies** without checking `PRC/DependencyPolicy.md`
+- **Do not add dependencies** — zero external dependencies is a core project value. Any new PackageReference requires explicit user approval after presenting the 7-criteria evaluation from `PRC/DependencyPolicy.md`. This applies to all projects (src/, tests/, bench/, tools/)
 - **Do not use `unsafe` code** unless profiling proves it's necessary and the gain is >20%
 - **Do not allocate in hot paths** — use spans, stackalloc, ArrayPool
 - **Do not break the public API surface** without updating all docs and tests
