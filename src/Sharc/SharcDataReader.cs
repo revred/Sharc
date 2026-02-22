@@ -603,10 +603,10 @@ public sealed class SharcDataReader : IDisposable
             ? _physicalOrdinals[logicalOrdinal]
             : logicalOrdinal;
 
-        // Fast path: in lazy mode, check serial type directly (no body decode needed)
+        // Fast path: in lazy mode, check serial type directly (no body decode needed).
+        // _serialTypes is already populated by DecodeCurrentRow() — no re-parse needed.
         if (_lazyMode)
         {
-            _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _);
             // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
                 return false;

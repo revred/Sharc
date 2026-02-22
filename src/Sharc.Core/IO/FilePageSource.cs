@@ -17,7 +17,7 @@ namespace Sharc.Core.IO;
 /// Trade-offs vs other page sources:
 /// <list type="bullet">
 ///   <item><see cref="MemoryPageSource"/>: faster per-read (zero-copy span), but requires entire file in memory.</item>
-///   <item><see cref="SafeMemMapdPageSource"/>: faster per-read (zero-copy), but ~98 Ã‚Âµs OS mapping setup.</item>
+///   <item><see cref="SafeM2MPageSource"/>: faster per-read (zero-copy), but ~98 Ã‚Âµs OS mapping setup.</item>
 ///   <item><see cref="FilePageSource"/>: fast open (~1-5 Ã‚Âµs), one syscall per page read, small fixed buffer.</item>
 /// </list>
 /// </para>

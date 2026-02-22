@@ -21,7 +21,7 @@ public sealed class ShadowPageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
-    public long DataVersion => _baseSource.DataVersion + Interlocked.Read(ref _shadowVersion);
+    public long DataVersion => ((_baseSource as IWritablePageSource)?.DataVersion ?? 0) + Interlocked.Read(ref _shadowVersion);
 
     /// <inheritdoc />
     public int PageSize => _baseSource.PageSize;

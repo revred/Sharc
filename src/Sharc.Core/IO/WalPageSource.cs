@@ -21,9 +21,6 @@ public sealed class WalPageSource : IPageSource
     /// <inheritdoc />
     public int PageCount => _inner.PageCount;
 
-    /// <inheritdoc />
-    public long DataVersion => _inner.DataVersion;
-
     /// <summary>
     /// Creates a WAL page source wrapping an inner page source.
     /// </summary>

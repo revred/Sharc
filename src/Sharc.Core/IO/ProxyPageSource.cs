@@ -17,8 +17,6 @@ internal sealed class ProxyPageSource : IPageSource
     public int PageSize => _target.PageSize;
     /// <inheritdoc />
     public int PageCount => _target.PageCount;
-    /// <inheritdoc />
-    public long DataVersion => _target.DataVersion;
 
     public void SetTarget(IPageSource target)
     {

@@ -44,6 +44,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     private HashSet<uint>? _visitedOverflowPages;
 
     private readonly uint _rootPage;
+    private readonly IWritablePageSource? _writableSource;
     private long _snapshotVersion;
 
     public BTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
@@ -51,8 +52,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         _pageSource = pageSource;
         _rootPage = rootPage;
         _usablePageSize = usablePageSize;
-        // DataVersion snapshot is taken lazily on first Seek/MoveNext/IsStale,
-        // avoiding a 3-layer proxy chain traversal in the constructor hot path.
+        _writableSource = pageSource as IWritablePageSource;
     }
 
     /// <inheritdoc />
@@ -66,11 +66,10 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     {
         get
         {
-            long current = _pageSource.DataVersion;
-            if (current == 0) return false;
+            if (_writableSource is null) return false;
+            long current = _writableSource.DataVersion;
             if (_snapshotVersion == 0)
             {
-                // First access — take snapshot now, cursor is fresh
                 _snapshotVersion = current;
                 return false;
             }
@@ -101,7 +100,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         _currentLeafPage = 0;
         _cachedLeafPageNum = 0;
         _cachedLeafMemory = default;
-        _snapshotVersion = _pageSource.DataVersion;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
     }
 
     /// <inheritdoc />
@@ -119,7 +118,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         {
             _initialized = true;
             if (_snapshotVersion == 0)
-                _snapshotVersion = _pageSource.DataVersion;
+                _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
         }
 
@@ -172,7 +171,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         _stackTop = 0;
         _exhausted = false;
         _initialized = true;
-        _snapshotVersion = _pageSource.DataVersion;
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeaf(_rootPage, rowId);
 
