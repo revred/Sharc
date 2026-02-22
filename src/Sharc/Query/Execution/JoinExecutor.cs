@@ -215,6 +215,18 @@ internal static class JoinExecutor
                 probeCol = join.LeftColumn;
             }
         }
+        else if (join.Kind == JoinType.Right)
+        {
+            // RIGHT JOIN: build left, probe right
+            var leftList = (leftRows as RowSet) ?? leftRows.ToList();
+            buildRows = leftList;
+            probeRows = rightList;
+            buildSchema = leftSchema;
+            probeSchema = rightSchema;
+            buildCol = join.LeftColumn;
+            probeCol = join.RightColumn;
+            swapped = true;
+        }
         else
         {
             // LEFT/CROSS: always build on right, stream left as probe
@@ -255,12 +267,18 @@ internal static class JoinExecutor
                 throw new InvalidOperationException($"Probe join column '{probeCol}' not found in schema.");
         }
 
-        // Pre-build the null row for LEFT JOIN (reused across all unmatched probe rows)
+        // Pre-build the null row for LEFT/RIGHT JOIN (reused across all unmatched probe rows)
         QueryValue[]? leftJoinNullRow = null;
+        QueryValue[]? rightJoinNullRow = null;
         if (join.Kind == JoinType.Left)
         {
             leftJoinNullRow = new QueryValue[rightColumnCount];
             Array.Fill(leftJoinNullRow, QueryValue.Null);
+        }
+        else if (join.Kind == JoinType.Right)
+        {
+            rightJoinNullRow = new QueryValue[leftColumnCount];
+            Array.Fill(rightJoinNullRow, QueryValue.Null);
         }
 
         // When reuseBuffer is true, the downstream will project (copy needed columns
@@ -298,6 +316,11 @@ internal static class JoinExecutor
             else if (join.Kind == JoinType.Left)
             {
                 yield return MergeRows(probeRow, leftJoinNullRow!, mergedWidth, leftColumnCount, scratch);
+            }
+            else if (join.Kind == JoinType.Right)
+            {
+                // RIGHT JOIN: unmatched right row -> [null left, right row]
+                yield return MergeRows(rightJoinNullRow!, probeRow, mergedWidth, leftColumnCount, scratch);
             }
         }
     }
