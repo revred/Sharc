@@ -184,7 +184,7 @@ public sealed class BTreeMutatorPoolingTests
             $"Expected CachedPageCount > 1, but was {mutator.CachedPageCount}");
 
         // All rows still readable
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(200, count);
@@ -238,7 +238,7 @@ public sealed class BTreeMutatorPoolingTests
         Assert.True(found);
 
         // Verify remaining 9 rows
-        using var cursor = new BTreeCursor(shadow, newRoot, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, newRoot, UsableSize);
         int count = 0;
         while (cursor.MoveNext())
         {
@@ -268,7 +268,7 @@ public sealed class BTreeMutatorPoolingTests
         Assert.True(found);
 
         // Verify row 3 has updated value
-        using var cursor = new BTreeCursor(shadow, updatedRoot, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, updatedRoot, UsableSize);
         var decoded = new ColumnValue[1];
         var decoder = new RecordDecoder();
         while (cursor.MoveNext())
@@ -317,7 +317,7 @@ public sealed class BTreeMutatorPoolingTests
         mutator2.Insert(2, 1, rec2);
 
         // Verify the row is readable
-        using var cursor = new BTreeCursor(shadow2, 2, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow2, 2, UsableSize);
         Assert.True(cursor.MoveNext());
         Assert.Equal(1L, cursor.RowId);
     }
@@ -341,7 +341,7 @@ public sealed class BTreeMutatorPoolingTests
         } // mutator disposed here, pooled buffers returned
 
         // Data should still be readable from ShadowPageSource
-        using var cursor = new BTreeCursor(shadow, root, UsableSize);
+        using var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize);
         int count = 0;
         while (cursor.MoveNext()) count++;
         Assert.Equal(100, count);

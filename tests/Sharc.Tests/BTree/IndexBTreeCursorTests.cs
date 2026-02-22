@@ -170,7 +170,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var payloads = new List<byte[]>();
@@ -195,7 +195,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         Assert.False(cursor.MoveNext());
@@ -212,7 +212,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         Assert.True(cursor.MoveNext());
@@ -246,7 +246,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var payloads = new List<byte[]>();
@@ -287,7 +287,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var payloads = new List<byte[]>();
@@ -310,7 +310,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateIndexCursor(2);
 
         cursor.Dispose();
@@ -328,7 +328,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateIndexCursor(2);
         cursor.Dispose();
 
@@ -346,7 +346,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         Assert.True(cursor.MoveNext());
@@ -370,7 +370,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var found = cursor.SeekFirst(20);
@@ -392,7 +392,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Seek for key=20 which doesn't exist; should position at key=30
@@ -415,7 +415,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Key 99 is beyond all entries
@@ -439,7 +439,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Seek for key=5 (before all entries)
@@ -464,7 +464,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         cursor.SeekFirst(20);
@@ -506,7 +506,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Seek for key=30 which is in the right leaf (page 4)
@@ -537,7 +537,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Seek to key=20 (last entry in left leaf)
@@ -570,7 +570,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var found = cursor.SeekFirst(300);
@@ -589,7 +589,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         var found = cursor.SeekFirst(42);
@@ -608,7 +608,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         var cursor = reader.CreateIndexCursor(2);
         cursor.Dispose();
 
@@ -641,7 +641,7 @@ public class IndexBTreeCursorTests
 
         using var source = new MemoryPageSource(db);
         var header = DatabaseHeader.Parse(db);
-        var reader = new BTreeReader(source, header);
+        var reader = new BTreeReader<MemoryPageSource>(source, header);
         using var cursor = reader.CreateIndexCursor(2);
 
         // Seek to key=40 in the middle leaf

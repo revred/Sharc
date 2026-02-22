@@ -51,11 +51,12 @@ Core tenets:
 ┌───────┼─────────────────────────────────────────────────────────┐
 │  B-TREE LAYER (Sharc.Core/BTree/)                               │
 │       │                                                         │
-│  BTreeReader (implements IBTreeReader)                           │
-│    - creates BTreeCursor for a given root page                   │
+│  BTreeReader<T> (implements IBTreeReader)                        │
+│    - creates BTreeCursor<T> for a given root page                │
 │    - handles interior → leaf page traversal (depth-first)        │
+│    - generic specialization: JIT devirtualizes IPageSource calls │
 │       │                                                         │
-│  BTreeCursor (implements IBTreeCursor)                           │
+│  BTreeCursor<T> (implements IBTreeCursor)                        │
 │    - iterates leaf cells in rowid order                          │
 │    - extracts rowid + payload from table leaf cells              │
 │    - follows overflow page chains for large payloads             │
@@ -69,10 +70,13 @@ Core tenets:
 ┌───────┼─────────────────────────────────────────────────────────┐
 │  PAGE I/O LAYER (Sharc.Core/IO/)                                │
 │       │                                                         │
-│  IPageSource                                                    │
-│    ├── FilePageSource    — reads pages from FileStream           │
-│    ├── MemoryPageSource  — reads pages from ReadOnlyMemory<byte> │
-│    └── CachedPageSource  — LRU cache wrapping any IPageSource    │
+│  IPageSource / IWritablePageSource                              │
+│    ├── FilePageSource      — reads pages from FileStream         │
+│    ├── MemoryPageSource    — reads/writes pages in memory        │
+│    ├── CachedPageSource    — LRU cache wrapping any IPageSource  │
+│    ├── SafeM2MPageSource   — memory-mapped file (read-only)      │
+│    ├── WalPageSource       — WAL frame overlay (read-only)       │
+│    └── ShadowPageSource    — copy-on-write for transactions      │
 │       │                                                         │
 │  IPageTransform                                                 │
 │    ├── IdentityPageTransform    — no-op (unencrypted)            │
@@ -216,7 +220,7 @@ Sharc.Scene is **optional** — trust playground for visualizing agent interacti
 
 | Interface | Purpose | Built-in Implementations |
 |-----------|---------|------------------------|
-| `IPageSource` | Page I/O backend | `FilePageSource`, `MemoryPageSource`, `CachedPageSource` |
+| `IPageSource` / `IWritablePageSource` | Page I/O backend | `FilePageSource`, `MemoryPageSource`, `CachedPageSource`, `SafeM2MPageSource`, `WalPageSource`, `ShadowPageSource` |
 | `IPageTransform` | Page pre/post processing | `IdentityPageTransform`, `DecryptingPageTransform` |
 | `IBTreeReader` | B-tree access strategy | `BTreeReader` |
 | `IRecordDecoder` | Record format interpretation | `RecordDecoder` |
@@ -280,15 +284,16 @@ new SharcOpenOptions
 - `GetEdges()`/`GetIncomingEdges()` marked `[Obsolete]` in favor of cursor/Traverse APIs
 - Schema adapter resolves table root pages dynamically
 
-### Write Engine (Phase 3 — IN PROGRESS)
+### Write Engine (Phase 3 — COMPLETE)
 
-- `SharcWriter` public API for INSERT operations
-- `BTreeMutator` handles leaf inserts with B-tree page splits
+- `SharcWriter` public API for full CRUD (INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE)
+- `BTreeMutator` handles leaf/interior inserts, splits, cell removal, page defragmentation
 - `RecordEncoder` serializes typed values to SQLite record format
 - `CellBuilder` constructs B-tree leaf cells from encoded records
-- `PageManager` allocates and manages database pages
+- `PageManager` allocates and manages database pages with freelist recycling
 - `RollbackJournal` provides ACID transaction support (atomic writes, rollback)
 - `Transaction` wraps Begin/Commit/Rollback lifecycle
+- Vacuum support for database compaction
 
 ### Agent Trust Layer (Phase 4 — COMPLETE)
 
@@ -302,4 +307,4 @@ new SharcOpenOptions
 
 ### Current Test Status
 
-**2,216 tests passing** across 6 projects (unit + integration + query + graph + index + context).
+**2,260 tests passing** across 6 projects (unit + integration + query + graph + index + context).

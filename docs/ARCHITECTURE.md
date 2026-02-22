@@ -1,6 +1,6 @@
 # Sharc Architecture
 
-Sharc is a **Context Engineering Engine** that reads and writes the standard SQLite file format. It bypasses the SQLite library entirely to achieve **2-75x** faster reads and **zero per-row allocations**, enabling high-frequency AI context retrieval.
+Sharc is a **Context Engineering Engine** that reads and writes the standard SQLite file format. It bypasses the SQLite library entirely to achieve **2-95x** faster reads and **zero per-row allocations**, enabling high-frequency AI context retrieval.
 
 ## Layered Design
 
@@ -8,7 +8,7 @@ Sharc is a **Context Engineering Engine** that reads and writes the standard SQL
 graph TD
     API["Public API: SharcDatabase, SharcDataReader"]
     Query["Query Layer: SharqParser, JIT Filter"]
-    Write["Write Layer (Exp): SharcWriter, BTreeMutator"]
+    Write["Write Layer: SharcWriter, BTreeMutator"]
     Trust["Trust Layer: ECDSA, Ledger, Agents"]
     Graph["Graph Layer: ConceptStore, RelationStore"]
     Schema["Schema Layer: SchemaReader"]
@@ -42,10 +42,10 @@ graph TD
 | **Query Layer** | **Sharq** Parser + **FilterStar** JIT Compiler | `SharqParser`, `SharqTokenizer`, `FilterStarCompiler` | Stable |
 | **Graph Layer** | Traversal logic (`\|>`) and Node/Edge storage | `SharcContextGraph`, `ConceptStore`, `RelationStore` | Stable |
 | **Trust Layer** | Identity, Ledger management, cryptographic audit | `AgentRegistry`, `LedgerManager`, `EcdsaP256` | Stable |
-| **Write Layer** | **EXPERIMENTAL** Append-only writes | `SharcWriter`, `BTreeMutator` | **Alpha** |
+| **Write Layer** | Full CRUD writes (INSERT/UPDATE/DELETE) | `SharcWriter`, `BTreeMutator` | Stable |
 | **Schema Layer** | Parse `sqlite_schema` table | `SchemaReader`, `CreateTableParser` | Stable |
 | **Record Layer** | Varint + serial type decode/encode | `RecordDecoder`, `RecordEncoder` | Stable |
-| **B-Tree Engine** | Page-level navigation (Table + Index) | `BTreeCursor`, `IndexBTreeCursor` | Stable |
+| **B-Tree Engine** | Page-level navigation (Table + Index) | `BTreeCursor<T>`, `IndexBTreeCursor<T>` | Stable |
 | **Page I/O** | Pluggable page sources + WAL | `FilePageSource`, `WalReader`, `MemoryMappedPageSource` | Stable |
 | **Crypto** | Page-level encryption | `AesGcmPageTransform`, `Argon2idKdf` | Stable |
 
@@ -80,7 +80,7 @@ src/Sharc.Query/              Sharq Parser & JIT Compiler
 src/Sharc.Graph/              Graph Logic & Stores
 src/Sharc.Graph.Surface/      Graph Interfaces
 src/Sharc.Crypto/             Encryption
-tests/                        2,216 Unit & Integration Tests
+tests/                        2,260 Unit & Integration Tests
 bench/                        BenchmarkDotNet Suite
 tools/                        CLI & Context Tools
 ```

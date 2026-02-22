@@ -308,13 +308,104 @@ public class MultiAgentTests : IDisposable
         Assert.Equal("AgentB", agentIds[3]);
     }
 
+    [Fact]
+    public void CachedLeafPage_AgentWriteInvalidatesCache_FreshReaderSeesUpdatedData()
+    {
+        // Full multi-agent flow with cached leaf page optimization:
+        // 1. Agent B opens reader (cursor caches leaf page internally)
+        // 2. Agent A writes new rows (DataVersion increments)
+        // 3. Agent B detects staleness via IsStale
+        // 4. Agent B creates a new reader — sees updated data (fresh cache)
+        var data = TestDatabaseFactory.CreateUsersDatabase(5);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        // Agent B reads current data — cursor caches the leaf pages
+        using var readerB = db.CreateReader("users", "id");
+        int countBefore = 0;
+        while (readerB.Read())
+        {
+            _ = readerB.GetInt64(0);
+            countBefore++;
+        }
+        Assert.Equal(5, countBefore);
+        Assert.False(readerB.IsStale);
+
+        // Agent A inserts 3 new rows — DataVersion changes
+        using (var writer = SharcWriter.From(db))
+        {
+            for (int i = 100; i <= 102; i++)
+            {
+                writer.Insert("users",
+                    ColumnValue.FromInt64(1, i),
+                    ColumnValue.Text(25, System.Text.Encoding.UTF8.GetBytes($"Agent{i}")),
+                    ColumnValue.FromInt64(2, 25),
+                    ColumnValue.FromDouble(50.0),
+                    ColumnValue.Null());
+            }
+        }
+
+        // Agent B's cached reader is now stale
+        Assert.True(readerB.IsStale);
+
+        // Agent B opens fresh reader — new cursor, fresh leaf page cache
+        using var readerB2 = db.CreateReader("users", "id");
+        Assert.False(readerB2.IsStale);
+        int countAfter = 0;
+        while (readerB2.Read())
+        {
+            _ = readerB2.GetInt64(0);
+            countAfter++;
+        }
+        Assert.Equal(8, countAfter);
+        Assert.False(readerB2.IsStale);
+    }
+
+    [Fact]
+    public void CachedLeafPage_MultipleReaders_WriterCommit_AllDetectStale()
+    {
+        // Multiple agent readers with cached leaf pages detect staleness
+        // when a writer agent commits.
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        // 3 agent readers, each caching leaf pages via MoveNext()
+        var readers = new SharcDataReader[3];
+        for (int i = 0; i < 3; i++)
+        {
+            readers[i] = db.CreateReader("users", "id");
+            while (readers[i].Read()) { _ = readers[i].GetInt64(0); }
+        }
+
+        // All readers should start fresh
+        foreach (var r in readers)
+            Assert.False(r.IsStale);
+
+        // Writer commits
+        using (var writer = SharcWriter.From(db))
+        {
+            writer.Insert("users",
+                ColumnValue.FromInt64(1, 999),
+                ColumnValue.Text(25, System.Text.Encoding.UTF8.GetBytes("Writer")),
+                ColumnValue.FromInt64(2, 40),
+                ColumnValue.FromDouble(100.0),
+                ColumnValue.Null());
+        }
+
+        // All cached readers detect staleness
+        foreach (var r in readers)
+        {
+            Assert.True(r.IsStale);
+            r.Dispose();
+        }
+    }
+
     public void Dispose()
     {
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
         GC.SuppressFinalize(this);
     }
 
-    private static Sharc.Core.Trust.AgentInfo CreateAgent(ISharcSigner signer, long start, long end)
+    private static Sharc.Core.Trust.AgentInfo CreateAgent(SharcSigner signer, long start, long end)
     {
         var pub = signer.GetPublicKey();
         var wScope = "*";

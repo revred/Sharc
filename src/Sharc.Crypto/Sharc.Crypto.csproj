@@ -2,8 +2,8 @@
   <PropertyGroup>
     <RootNamespace>Sharc.Crypto</RootNamespace>
     <AssemblyName>Sharc.Crypto</AssemblyName>
-    <Description>Cryptographic extensions for Sharc: AES-256-GCM encryption and Argon2id key derivation for SQLite databases.</Description>
-    <PackageTags>sqlite;database;crypto;encryption;aes-gcm;argon2id;dotnet;csharp</PackageTags>
+    <Description>Cryptographic extensions for Sharc: AES-256-GCM page-level encryption with Argon2id key derivation. Transparent read/write encryption for SQLite databases in pure C#.</Description>
+    <PackageTags>sqlite;database;encryption;aes-gcm;argon2id;page-encryption;zero-dependency;dotnet;csharp</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />

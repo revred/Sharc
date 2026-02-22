@@ -17,8 +17,6 @@ internal sealed class ProxyPageSource : IPageSource
     public int PageSize => _target.PageSize;
     /// <inheritdoc />
     public int PageCount => _target.PageCount;
-    /// <inheritdoc />
-    public long DataVersion => _target.DataVersion;
 
     public void SetTarget(IPageSource target)
     {
@@ -27,6 +25,9 @@ internal sealed class ProxyPageSource : IPageSource
 
     /// <inheritdoc />
     public ReadOnlySpan<byte> GetPage(uint pageNumber) => _target.GetPage(pageNumber);
+
+    /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber) => _target.GetPageMemory(pageNumber);
 
     /// <inheritdoc />
     public int ReadPage(uint pageNumber, Span<byte> destination) => _target.ReadPage(pageNumber, destination);

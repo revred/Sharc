@@ -8,10 +8,12 @@ namespace Sharc.Core.BTree;
 
 /// <summary>
 /// Creates cursors for iterating over table and index b-trees.
+/// Generic over TPageSource to enable JIT devirtualization of page access calls.
 /// </summary>
-internal sealed class BTreeReader : IBTreeReader
+internal sealed class BTreeReader<TPageSource> : IBTreeReader
+    where TPageSource : class, IPageSource
 {
-    private readonly IPageSource _pageSource;
+    private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
 
     /// <summary>
@@ -19,7 +21,7 @@ internal sealed class BTreeReader : IBTreeReader
     /// </summary>
     /// <param name="pageSource">The page source for reading pages.</param>
     /// <param name="header">The parsed database header.</param>
-    public BTreeReader(IPageSource pageSource, DatabaseHeader header)
+    public BTreeReader(TPageSource pageSource, DatabaseHeader header)
     {
         _pageSource = pageSource;
         _usablePageSize = header.UsablePageSize;
@@ -28,12 +30,12 @@ internal sealed class BTreeReader : IBTreeReader
     /// <inheritdoc />
     public IBTreeCursor CreateCursor(uint rootPage)
     {
-        return new BTreeCursor(_pageSource, rootPage, _usablePageSize);
+        return new BTreeCursor<TPageSource>(_pageSource, rootPage, _usablePageSize);
     }
 
     /// <inheritdoc />
     public IIndexBTreeCursor CreateIndexCursor(uint rootPage)
     {
-        return new IndexBTreeCursor(_pageSource, rootPage, _usablePageSize);
+        return new IndexBTreeCursor<TPageSource>(_pageSource, rootPage, _usablePageSize);
     }
 }

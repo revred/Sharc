@@ -85,7 +85,7 @@ public sealed class BTreeMutatorDeleteTests
     private static List<long> ScanAllRowIds(IPageSource source, uint root)
     {
         var rowIds = new List<long>();
-        using var cursor = new BTreeCursor(source, root, UsableSize);
+        using var cursor = new BTreeCursor<IPageSource>(source, root, UsableSize);
         while (cursor.MoveNext())
             rowIds.Add(cursor.RowId);
         return rowIds;
@@ -436,7 +436,7 @@ public sealed class BTreeMutatorDeleteTests
 
         // Capture all row data before delete
         var beforeRows = new Dictionary<long, byte[]>();
-        using (var cursor = new BTreeCursor(shadow, root, UsableSize))
+        using (var cursor = new BTreeCursor<ShadowPageSource>(shadow, root, UsableSize))
         {
             while (cursor.MoveNext())
                 beforeRows[cursor.RowId] = cursor.Payload.ToArray();
@@ -445,7 +445,7 @@ public sealed class BTreeMutatorDeleteTests
         var (_, newRoot) = mutator.Delete(root, 1);
 
         // Verify all other rows have identical payload
-        using var cursor2 = new BTreeCursor(shadow, newRoot, UsableSize);
+        using var cursor2 = new BTreeCursor<ShadowPageSource>(shadow, newRoot, UsableSize);
         while (cursor2.MoveNext())
         {
             Assert.True(beforeRows.ContainsKey(cursor2.RowId));

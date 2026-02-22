@@ -21,7 +21,7 @@ public sealed class ShadowPageSource : IWritablePageSource
     }
 
     /// <inheritdoc />
-    public long DataVersion => _baseSource.DataVersion + Interlocked.Read(ref _shadowVersion);
+    public long DataVersion => ((_baseSource as IWritablePageSource)?.DataVersion ?? 0) + Interlocked.Read(ref _shadowVersion);
 
     /// <inheritdoc />
     public int PageSize => _baseSource.PageSize;
@@ -47,6 +47,15 @@ public sealed class ShadowPageSource : IWritablePageSource
         if (_dirtySlots.TryGetValue(pageNumber, out int slot))
             return _arena!.GetSlot(slot)[..PageSize];
         return _baseSource.GetPage(pageNumber);
+    }
+
+    /// <inheritdoc />
+    public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_dirtySlots.TryGetValue(pageNumber, out int _))
+            return GetPage(pageNumber).ToArray();
+        return _baseSource.GetPageMemory(pageNumber);
     }
 
     /// <inheritdoc />
