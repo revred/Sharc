@@ -407,21 +407,50 @@ public sealed class SharcWriter : IDisposable
 
     /// <summary>
     /// Updates the root page of a table in sqlite_master after a root split.
+    /// Scans page 1 to find the matching sqlite_master row, re-encodes the record
+    /// with the new rootpage value, and updates it via BTreeMutator.
     /// </summary>
-    /// <remarks>
-    /// PHASE 1 LIMITATION: Root page updates are not yet persisted to sqlite_master.
-    /// This means operations that trigger a B-tree root split will not be reflected
-    /// in the schema table. In practice, root splits only occur during Insert when a
-    /// leaf page overflows — Delete and Update do not cause root splits because they
-    /// do not increase tree size. For tables with existing data, root splits are rare
-    /// unless bulk-inserting enough rows to overflow the initial leaf page.
-    /// This will be fully implemented in Phase 2 (sqlite_master record re-encoding).
-    /// </remarks>
     private static void UpdateTableRootPage(IWritablePageSource source, string tableName,
         uint newRootPage, int usableSize)
     {
-        // TODO(phase2): Read page 1, find the sqlite_master entry for this table,
-        // re-encode the record with the new rootpage value, and update the cell.
+        using var cursor = new BTreeCursor<IWritablePageSource>(source, 1, usableSize);
+        var columnBuffer = new ColumnValue[5];
+        var decoder = new RecordDecoder();
+
+        while (cursor.MoveNext())
+        {
+            decoder.DecodeRecord(cursor.Payload, columnBuffer);
+            if (columnBuffer[0].IsNull) continue;
+
+            string type = columnBuffer[0].AsString();
+            if (type != "table" && type != "index") continue;
+
+            string name = columnBuffer[1].IsNull ? "" : columnBuffer[1].AsString();
+            if (!string.Equals(name, tableName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Found the matching sqlite_master entry — re-encode with new rootpage
+            long rowId = cursor.RowId;
+
+            // Preserve all columns except rootpage (column 3)
+            var record = new ColumnValue[5];
+            record[0] = columnBuffer[0];
+            record[1] = columnBuffer[1];
+            record[2] = columnBuffer[2];
+            record[3] = ColumnValue.FromInt64(1, (long)newRootPage);
+            record[4] = columnBuffer[4];
+
+            int size = RecordEncoder.ComputeEncodedSize(record);
+            Span<byte> buf = size <= 512 ? stackalloc byte[size] : new byte[size];
+            RecordEncoder.EncodeRecord(record, buf);
+
+            // Must dispose cursor before mutating the same B-tree it's reading
+            cursor.Dispose();
+
+            using var mutator = new BTreeMutator(source, usableSize);
+            mutator.Update(1, rowId, buf);
+            return;
+        }
     }
 
     /// <summary>
