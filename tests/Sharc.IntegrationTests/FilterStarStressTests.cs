@@ -13,6 +13,8 @@ namespace Sharc.IntegrationTests;
 /// </summary>
 public sealed class FilterStarStressTests
 {
+    private static readonly string[] CategoryStockColumns = ["category", "stock"];
+    private static readonly string[] CategoryColumns = ["category"];
     private static byte[] CreateNullableDatabase()
     {
         return TestDatabaseFactory.CreateDatabaseWith(conn =>
@@ -140,7 +142,7 @@ public sealed class FilterStarStressTests
         var data = CreateLargeFilterDatabase();
         using var db = SharcDatabase.OpenMemory(data);
         using var reader = db.CreateReader("items",
-            new[] { "category", "stock" },
+            CategoryStockColumns,
             FilterStar.And(
                 FilterStar.Column("category").Eq("electronics"),
                 FilterStar.Column("stock").Gt(5L)));
@@ -161,7 +163,7 @@ public sealed class FilterStarStressTests
         var data = CreateLargeFilterDatabase();
         using var db = SharcDatabase.OpenMemory(data);
         using var reader = db.CreateReader("items",
-            new[] { "category" },
+            CategoryColumns,
             FilterStar.Or(
                 FilterStar.Column("category").Eq("electronics"),
                 FilterStar.Column("category").Eq("books")));
@@ -186,7 +188,7 @@ public sealed class FilterStarStressTests
         var data = CreateLargeFilterDatabase();
         using var db = SharcDatabase.OpenMemory(data);
         using var reader = db.CreateReader("items",
-            new[] { "category" },
+            CategoryColumns,
             FilterStar.Not(FilterStar.Column("category").Eq("food")));
 
         int count = 0;
@@ -255,7 +257,7 @@ public sealed class FilterStarStressTests
         var data = CreateLargeFilterDatabase();
         using var db = SharcDatabase.OpenMemory(data);
         using var reader = db.CreateReader("items",
-            new[] { "category" },
+            CategoryColumns,
             FilterStar.Column("category").Contains("oo"));
 
         // "books" and "food" both contain "oo"
