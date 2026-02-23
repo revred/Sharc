@@ -51,7 +51,72 @@ SharcContextGraph
 
 ---
 
-## Design: Graph Stored Procedures
+## Phase 0: PreparedTraversal Foundation (Implementing Now)
+
+The full graph procedure system (Phases 1-5 below) requires cursor independence and state isolation. `PreparedTraversal` is that foundation — it owns its cursors and traversal state, enabling concurrent traversals.
+
+### Why Graph Gains Are Architectural, Not Latency
+
+The graph pipeline is already thin — cursor reuse, pre-allocated collections, zero-alloc hot paths. The current bottleneck is **shared state**: `SharcContextGraph` owns a single pair of cursors (`_outgoingCursor`, `_incomingCursor`) and 5 shared collections. Two concurrent traversals cannot run.
+
+### PreparedTraversal Type
+
+```csharp
+public sealed class PreparedTraversal : IDisposable
+{
+    private readonly TraversalPolicy _policy;
+
+    // OWNED cursors — not shared with SharcContextGraph
+    private IEdgeCursor? _outgoingCursor;
+    private IEdgeCursor? _incomingCursor;
+
+    // OWNED traversal state — enables concurrent traversals
+    private readonly HashSet<NodeKey> _visited;
+    private readonly Queue<TraversalQueueItem> _queue;
+    private readonly List<TraversalNode> _resultNodes;
+    private readonly List<TraversalQueueItem> _collectedKeys;
+    private readonly List<PathReconstructionNode> _pathNodes;
+
+    // Pre-computed from policy
+    private readonly int _capacityHint;
+
+    public GraphResult Execute(NodeKey startKey);
+    public void Dispose();
+}
+```
+
+**Location**: `src/Sharc.Graph/PreparedTraversal.cs`
+**Factory**: `SharcContextGraph.PrepareTraversal(TraversalPolicy policy)`
+**Reuses**: `TraversalQueueItem` and `PathReconstructionNode` already `internal` in `GraphTypes.cs`
+
+### What PreparedTraversal Gains
+
+| Gain | Type | Description |
+| :--- | :--- | :--- |
+| Concurrent traversals | Architectural | Each PreparedTraversal owns its cursors + state |
+| Cursor pre-creation | Latency | Move 0.1-0.5 us cursor creation to prepare time |
+| Policy pre-validation | Correctness | Catch invalid MaxDepth/MaxFanOut/MinWeight at prepare, not execute |
+| Collection pre-sizing | Allocation | `EstimateCapacity()` computed once |
+
+### Performance Targets
+
+| Operation | Current | Target | Delta | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| BFS 2-hop | 2.4 us / 960 B | 2.3 us / 960 B | -100 ns | Pre-created cursors |
+| First-call overhead | +0.5 us | 0 | -0.5 us | Moved to Prepare() |
+| Concurrent 2 traversals | Impossible | 2x parallel | N/A | Independent state |
+
+### Scope
+
+- Single-step traversals with captured `TraversalPolicy`
+- Owned cursor pair + traversal state (independent per instance)
+- Policy validation at prepare time
+- Same BFS algorithm as `SharcContextGraph.Traverse()` on owned state
+- `IDisposable` to release owned cursors
+
+---
+
+## Design: Graph Stored Procedures (Long-Term Vision)
 
 ### Core Concept
 

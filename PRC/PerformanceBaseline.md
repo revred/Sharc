@@ -177,6 +177,41 @@ All non-filtered view operations show **zero Gen0/Gen1 collections** per 1,000 o
 
 ---
 
+## Execution Tier Comparison (DIRECT vs CACHED vs JIT) — v2 Optimized
+
+**Dataset:** 2,500 rows × 8 columns (id, name, email, age, score, active, dept, created)
+**Optimization:** QueryIntent-keyed caches (reference equality) + per-intent JIT entries + deferred ComputeParamKey
+
+### Filtered Scan — `WHERE age > 30` (~2,000 matching rows)
+
+| Method | Mean | Ratio | Allocated |
+|---|---|---|---|
+| DIRECT: `Query(sql)` | 123.20 us | 1.00 | 704 B |
+| CACHED: `Query(hint sql)` | 118.01 us | **0.96** | 664 B |
+| JIT: `Query(hint sql)` | 116.50 us | **0.95** | 664 B |
+| Manual `Prepare().Execute()` | 117.67 us | 0.96 | 664 B |
+| Manual `Jit().Query()` | 107.72 us | 0.88 | 712 B |
+
+### Parameterized Filter — `WHERE age > $minAge`
+
+| Method | Mean | Ratio | Allocated |
+|---|---|---|---|
+| DIRECT: parameterized | 118.46 us | 1.00 | 760 B |
+| CACHED: parameterized | 116.27 us | **0.98** | 720 B |
+| Manual `Prepare().Execute(params)` | 107.12 us | 0.91 | 720 B |
+
+### Full Scan — `SELECT *` (no filter)
+
+| Method | Mean | Ratio | Allocated |
+|---|---|---|---|
+| DIRECT: `SELECT *` | 80.24 us | 1.00 | 704 B |
+| CACHED: `SELECT *` | 102.02 us | 1.27 | 664 B |
+| JIT: `SELECT *` | 109.98 us | 1.37 | 664 B |
+
+**Key insight:** After the QueryIntent-keyed cache optimization, CACHED and JIT hints **beat DIRECT** for filtered/parameterized queries (0.95-0.98x). Manual handles remain 4-12% faster by eliminating all routing. FullScan remains inherently slower for hints (no filter to optimize). Full report: `PRC/ExecutionTierReport.md`.
+
+---
+
 ## Recommendations
 
 ### Immediate wins

@@ -1,6 +1,8 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc.Query.Intent;
+
 namespace Sharc.Query.Sharq.Ast;
 
 /// <summary>
@@ -8,6 +10,8 @@ namespace Sharc.Query.Sharq.Ast;
 /// </summary>
 internal sealed class SelectStatement
 {
+    /// <summary>Execution hint prefix (DIRECT, CACHED, JIT). Default is Direct.</summary>
+    public ExecutionHint Hint { get; init; }
     public bool IsDistinct { get; init; }
     public required IReadOnlyList<SelectItem> Columns { get; init; }
     public required TableRef From { get; init; }

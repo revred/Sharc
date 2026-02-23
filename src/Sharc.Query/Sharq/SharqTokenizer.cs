@@ -69,6 +69,9 @@ internal ref struct SharqTokenizer
             ["RIGHT"] = SharqTokenKind.Right,
             ["CROSS"] = SharqTokenKind.Cross,
             ["ON"] = SharqTokenKind.On,
+            ["DIRECT"] = SharqTokenKind.Direct,
+            ["CACHED"] = SharqTokenKind.Cached,
+            ["JIT"] = SharqTokenKind.Jit,
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private readonly ReadOnlySpan<char> _sql;
