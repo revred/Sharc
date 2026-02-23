@@ -1,6 +1,6 @@
 # Sharc
 
-**Sharc reads SQLite files 2-95x faster than Managed Sqlite, in pure C#, with zero native dependencies.**
+**Sharc reads SQLite files 2-109x faster than Managed Sqlite, in pure C#, with zero native dependencies.**
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
@@ -12,7 +12,7 @@
 | **Speed** | **Size** | **Trust** |
 | :--- | :--- | :--- |
 | **450x faster** indexed WHERE | **~52 KB** engine footprint | **ECDSA** agent attestation |
-| **95x faster** B-tree seeks | **Zero** native dependencies | **AES-256-GCM** encryption |
+| **109x faster** B-tree seeks | **Zero** native dependencies | **AES-256-GCM** encryption |
 | **31x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
 | **~0 B** per-row read allocation | SQL query pipeline built-in | JOIN / UNION / INTERSECT / EXCEPT / Cote |
 
@@ -23,10 +23,11 @@
 | Your Problem | Solution |
 | :--- | :--- |
 | Need to read/write SQLite **without native DLLs** | `dotnet add package Sharc` — pure managed C# |
-| SQLite P/Invoke is **too slow** for point lookups | Sharc: **272ns** vs 25,875ns (**95x** faster) |
+| SQLite P/Invoke is **too slow** for point lookups | Sharc: **276ns** vs 30,135ns (**109x** faster) |
 | Need an embedded DB for **Blazor WASM** | Sharc: **~40KB**, no Emscripten, no special headers |
 | Need **AI agent memory** with audit trail | Built-in ECDSA attestation + hash-chain ledger |
 | Need **graph traversal** over relational data | Two-phase BFS: **31x** faster than SQLite CTEs |
+| Need **vector similarity search** for RAG | SIMD-accelerated cosine/euclidean, zero-copy, metadata pre-filter |
 | Need **zero GC pressure** on hot read paths | 0 B per-row allocation via `Span<T>` |
 
 **Not a fit?** See [When NOT to Use Sharc](docs/WHEN_NOT_TO_USE.md) — we're honest about limitations.
@@ -39,6 +40,7 @@
 dotnet add package Sharc            # Core read/write engine
 dotnet add package Sharc.Crypto     # AES-256-GCM encryption (optional)
 dotnet add package Sharc.Graph      # Graph traversal + trust layer (optional)
+dotnet add package Sharc.Vector     # Vector similarity search (optional)
 ```
 
 ## Quick Start
@@ -133,12 +135,12 @@ writer.Insert("entities",
 | :--- | :--- | ---: | ---: | ---: |
 | **Index Seek** | WHERE on indexed int col | **1.25 us** | 35.4 us | **28x** |
 | | WHERE on indexed text col | **185 us** | 261 us | **1.4x** |
-| **Point Ops** | B-tree Seek | **272 ns** | 25,875 ns | **95x** |
-| | Batch 6 Seeks | **1,940 ns** | 127,526 ns | **66x** |
+| **Point Ops** | B-tree Seek (PreparedReader) | **276 ns** | 30,135 ns | **109x** |
+| | Batch 6 Seeks (PreparedReader) | **1,656 ns** | 180,810 ns | **109x** |
 | **Scans** | Sequential (5K rows) | **1.54 ms** | 6.22 ms | **4x** |
-| | WHERE Filter | **298 us** | 560 us | **1.9x** |
+| | WHERE Filter (PreparedQuery) | **236 us** | 551 us | **2.3x** |
 | **Graph** | 2-Hop BFS | **2.60 us** | 81.55 us | **31x** |
-| | Node Seek | **1,475 ns** | 21,349 ns | **14.5x** |
+| | Node Seek (graph index) | **421 ns** | 26,000 ns | **62x** |
 | **Memory** | GC Pressure (sustained) | **688 B** | 688 B | Parity |
 | | Primitives | **0 B** | N/A | Zero-alloc |
 | **Write** | Single DELETE | **1.72 ms** | 12.02 ms | **7x** |
@@ -185,7 +187,7 @@ writer.Insert("entities",
 
 > **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's numbers (marked †) reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
 >
-> **Takeaway**: Sharc's core engine (CreateReader) is 2-95x faster with zero-alloc reads. The SQL query pipeline (Query) **wins or ties every benchmark** — from 1.1x on sorted queries to 9.2x on full scans (lazy decode: **576 B** vs SQLite's 688 B). Cote queries use cached intent resolution with inlined filters (**808 B** for Cote → SELECT WHERE, 3.1x faster). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap with JIT-specialized struct comparer, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan + intent caching) deliver consistent wins across all query types.
+> **Takeaway**: Sharc's core engine (CreateReader + PreparedReader) is 2-109x faster with zero-alloc reads. The SQL query pipeline (Query) **wins or ties every benchmark** — from 1.1x on sorted queries to 9.2x on full scans (lazy decode: **576 B** vs SQLite's 688 B). Cote queries use cached intent resolution with inlined filters (**808 B** for Cote → SELECT WHERE, 3.1x faster). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap with JIT-specialized struct comparer, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan + intent caching) deliver consistent wins across all query types.
 
 [**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc/)
 
@@ -195,7 +197,7 @@ writer.Insert("entities",
 
 AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc delivers:
 
-1. **Precision Retrieval**: Point lookups in < 300ns reduce token waste by 62-133x.
+1. **Precision Retrieval**: Point lookups in 276ns (109x faster) reduce token waste.
 2. **Cryptographic Provenance**: A built-in trust layer verifies who contributed what data.
 3. **Graph Reasoning**: O(log N) relationship traversal for context mapping.
 
@@ -238,6 +240,7 @@ src/
   Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
   Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
   Sharc.Graph.Surface/      Graph interfaces and models
+  Sharc.Vector/             SIMD-accelerated vector similarity search
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
   Sharc.Tests/              1,477 unit tests
