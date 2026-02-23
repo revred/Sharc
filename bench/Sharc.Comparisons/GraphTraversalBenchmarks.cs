@@ -54,6 +54,12 @@ public class GraphTraversalBenchmarks
         _graph.Initialize();
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 namespace Sharc.Core.Trust;
 
 /// <summary>
@@ -39,7 +42,7 @@ public enum SecurityEventType
 /// <summary>
 /// Arguments for the SecurityAudit event.
 /// </summary>
-public class SecurityEventArgs : EventArgs
+public sealed class SecurityEventArgs : EventArgs
 {
     /// <summary>
     /// Gets the type of security event.

@@ -45,6 +45,12 @@ public class SchemaMetadataBenchmarks
         _conn.Open();
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

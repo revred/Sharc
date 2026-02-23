@@ -1,7 +1,13 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using Microsoft.Data.Sqlite;
 
 namespace Sharc.Comparisons;
 
+/// <summary>
+/// Generates SQLite-backed graph databases for benchmark scenarios.
+/// </summary>
 public static class GraphGenerator
 {
     public static void GenerateSQLite(string dbPath, int nodeCount, int edgeCount)

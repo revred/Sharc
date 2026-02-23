@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Security.Cryptography;
 using Sharc.Crypto;
 using Xunit;
