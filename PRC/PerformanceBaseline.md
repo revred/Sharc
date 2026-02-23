@@ -192,23 +192,51 @@ All non-filtered view operations show **zero Gen0/Gen1 collections** per 1,000 o
 
 | Method | Mean | Ratio | Allocated | Alloc Ratio |
 |---|---|---|---|---|
-| DIRECT: `Query(sql)` | 107.5 us | 1.00 | 720 B | 1.00 |
-| CACHED: `Query(hint sql)` | 102.1 us | **0.95** | **0 B** | **0.00** |
-| JIT: `Query(hint sql)` | 81.7 us | **0.76** | **0 B** | **0.00** |
-| Manual `Prepare().Execute()` | 102.9 us | 0.96 | **0 B** | **0.00** |
-| Manual `Jit().Query()` | 90.8 us | **0.85** | 48 B | 0.07 |
+| DIRECT: `Query(sql)` | 82.78 us | 1.00 | 720 B | 1.00 |
+| CACHED: `Query(hint sql)` | 91.63 us | 1.11 | **0 B** | **0.00** |
+| JIT: `Query(hint sql)` | 96.29 us | 1.17 | **0 B** | **0.00** |
+| Manual `Prepare().Execute()` | 91.31 us | 1.11 | **0 B** | **0.00** |
+| Manual `Jit().Query()` | 87.55 us | 1.06 | 48 B | 0.07 |
+
+### Full Scan — `SELECT *` (5,000 rows, no filter)
+
+| Method | Mean | Ratio | Allocated | Alloc Ratio |
+|---|---|---|---|---|
+| DIRECT: `SELECT *` | 73.04 us | 1.00 | 720 B | 1.00 |
+| CACHED: `SELECT *` | 72.81 us | 1.00 | **0 B** | **0.00** |
+| JIT: `SELECT *` | **68.14 us** | **0.93** | **0 B** | **0.00** |
+
+### Narrow Projection — 3 string columns (5,000 rows)
+
+| Method | Mean | Ratio | Gen0 | Allocated | Alloc Ratio |
+|---|---|---|---|---|---|
+| DIRECT: narrow | 138.66 us | 1.00 | 7.57 | 97,968 B | 1.00 |
+| CACHED: narrow | 154.81 us | 1.12 | 7.57 | 97,248 B | 0.99 |
+| JIT: narrow | 155.13 us | 1.12 | 7.57 | 97,248 B | 0.99 |
+
+### Parameterized Filter — `WHERE age > @p0` (bound parameter)
+
+| Method | Mean | Ratio | Allocated | Alloc Ratio |
+|---|---|---|---|---|
+| DIRECT: parameterized | 81.47 us | 1.00 | 776 B | 1.00 |
+| CACHED: parameterized | 89.77 us | 1.11 | 56 B | 0.07 |
+| Manual Prepare: parameterized | 96.69 us | 1.19 | 56 B | 0.07 |
 
 ### Key Allocation Achievement
 
-CACHED, JIT, and Manual Prepare achieve **true zero allocation** (0 B) — the BenchmarkDotNet MemoryDiagnoser reports no managed allocation at all. This means cursor reuse + reader reset eliminates all per-call construction overhead. Only DIRECT (720 B for query parse + reader) and Manual Jit (48 B for column array) allocate.
+CACHED, JIT, and Manual Prepare achieve **true zero allocation** (0 B) for non-materialized queries — the BenchmarkDotNet MemoryDiagnoser reports no managed allocation at all. Cursor reuse + reader reset eliminates all per-call construction overhead. Only DIRECT (720 B for query parse + reader) and Manual Jit (48 B for column array) allocate on clean queries. Parameterized CACHED/Prepare allocate 56 B for parameter binding.
+
+Narrow projection is **string-allocation dominated** (~97 KB). The 720 B DIRECT overhead is invisible at this scale. CACHED saves 720 B of cursor construction but the 97 KB string materialization dwarfs any dispatch savings. Gen0 collections confirm this is all ephemeral (no Gen1/Gen2 pressure).
 
 ### Timing Notes
 
-Absolute times are thermal-sensitive on laptop hardware (±15-20% baseline shift between runs). Ratios are more stable. Across multiple runs:
-- CACHED consistently achieves **0.83-0.95x** vs DIRECT
-- JIT consistently achieves **0.76-0.84x** vs DIRECT (best tier for filtered scans)
-- Manual Prepare matches CACHED (identical code path via `PreparedQuery.Execute()`)
-- Manual Jit is 10-15% faster than CACHED (no SQL parse, no plan cache lookup)
+Absolute times are thermal-sensitive on laptop hardware (±15-20% baseline shift between runs). Ratios are more stable but also fluctuate. Across multiple runs:
+- **Full Scan**: JIT consistently achieves **0.93x** vs DIRECT — the clearest win, no filter evaluation noise
+- **Filtered Scan**: CACHED ranges **0.83-1.11x**, JIT ranges **0.76-1.17x** — highly thermal-dependent, no consistent winner
+- **Narrow Projection**: DIRECT consistently wins (~1.12x advantage) — string allocation cost dominates and DIRECT's simpler call stack has less overhead per materialization call
+- **Parameterized**: CACHED at **1.11x** with 93% allocation reduction (776→56 B) — parameter binding adds 56 B but eliminates parse + reader construction
+- Manual Prepare matches CACHED timing (identical code path via `PreparedQuery.Execute()`)
+- Manual Jit is fastest non-DIRECT path for filtered scans (no SQL parse, no plan cache lookup)
 
 ---
 
