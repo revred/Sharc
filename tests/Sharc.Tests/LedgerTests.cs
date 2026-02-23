@@ -10,8 +10,25 @@ using Xunit;
 
 namespace Sharc.Tests;
 
-public class LedgerTests
+public class LedgerTests : IDisposable
 {
+    private readonly List<string> _tempFiles = new();
+
+    private string CreateTempFile(byte[] data)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ledger_{Guid.NewGuid():N}.db");
+        _tempFiles.Add(path);
+        File.WriteAllBytes(path, data);
+        return path;
+    }
+
+    public void Dispose()
+    {
+        foreach (var path in _tempFiles)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+    }
     [Fact]
     public void SharcSigner_SignAndVerify_Works()
     {
@@ -129,68 +146,52 @@ public class LedgerTests
     [Fact]
     public void Ledger_TamperAttempt_DetectedByVerifyIntegrity()
     {
-        var tempFile = Path.GetTempFileName();
-        try
+        var tempFile = CreateTempFile(CreateLedgerDatabase());
+
+        using (var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
         {
-            var data = CreateLedgerDatabase();
-            File.WriteAllBytes(tempFile, data);
+            var ledger = new LedgerManager(db);
+            var signer = new SharcSigner("agent-alpha");
 
-            using (var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
-            {
-                var ledger = new LedgerManager(db);
-                var signer = new SharcSigner("agent-alpha");
+            ledger.Append("Valid data 1", signer);
+            ledger.Append("Valid data 2", signer);
 
-                ledger.Append("Valid data 1", signer);
-                ledger.Append("Valid data 2", signer);
-
-                var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
-                Assert.True(ledger.VerifyIntegrity(keys));
-            }
-
-            // TAMPER: Manually flip a bit in the first entry's Payload Hash
-            // Read all bytes from disk
-            var diskData = File.ReadAllBytes(tempFile);
-            var page2 = diskData.AsSpan(4096, 4096);
-            
-            ushort cellPtr = BinaryPrimitives.ReadUInt16BigEndian(page2.Slice(8, 2)); // First cell pointer
-            var cell = page2.Slice(cellPtr);
-            
-            // Parse cell header to get payload
-            int pSzLen = VarintDecoder.Read(cell, out long payloadSize);
-            int rIdLen = VarintDecoder.Read(cell.Slice(pSzLen), out long rowId);
-            int headerLen = pSzLen + rIdLen;
-            var payload = cell.Slice(headerLen, (int)payloadSize);
-
-            // Parse record header to find offset of column 4 (PayloadHash)
-            var decoder = new RecordDecoder();
-            Span<long> serialTypes = stackalloc long[10];
-            decoder.ReadSerialTypes(payload, serialTypes, out int bodyOffset);
-            
-            // Calculate offset to column 4
-            int offset = bodyOffset;
-            for (int i = 0; i < 4; i++)
-                offset += SerialTypeCodec.GetContentSize(serialTypes[i]);
-            
-            // Corrupt first byte of PayloadHash
-            payload[offset] ^= 0xFF;
-
-            // Write back to disk
-            File.WriteAllBytes(tempFile, diskData);
-
-            // Re-open and verify
-            using (var db2 = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
-            {
-                var ledger2 = new LedgerManager(db2);
-                var signer = new SharcSigner("agent-alpha");
-                var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
-                
-                // Now integrity should fail
-                Assert.False(ledger2.VerifyIntegrity(keys));
-            }
+            var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
+            Assert.True(ledger.VerifyIntegrity(keys));
         }
-        finally
+
+        // TAMPER: Manually flip a bit in the first entry's Payload Hash
+        var diskData = File.ReadAllBytes(tempFile);
+        var page2 = diskData.AsSpan(4096, 4096);
+
+        ushort cellPtr = BinaryPrimitives.ReadUInt16BigEndian(page2.Slice(8, 2));
+        var cell = page2.Slice(cellPtr);
+
+        int pSzLen = VarintDecoder.Read(cell, out long payloadSize);
+        int rIdLen = VarintDecoder.Read(cell.Slice(pSzLen), out long rowId);
+        int headerLen = pSzLen + rIdLen;
+        var payload = cell.Slice(headerLen, (int)payloadSize);
+
+        var decoder = new RecordDecoder();
+        Span<long> serialTypes = stackalloc long[10];
+        decoder.ReadSerialTypes(payload, serialTypes, out int bodyOffset);
+
+        int offset = bodyOffset;
+        for (int i = 0; i < 4; i++)
+            offset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+
+        // Corrupt first byte of PayloadHash
+        payload[offset] ^= 0xFF;
+        File.WriteAllBytes(tempFile, diskData);
+
+        // Re-open and verify — integrity should fail
+        using (var db2 = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true }))
         {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
+            var ledger2 = new LedgerManager(db2);
+            var signer = new SharcSigner("agent-alpha");
+            var keys = new Dictionary<string, byte[]> { { signer.AgentId, signer.GetPublicKey() } };
+
+            Assert.False(ledger2.VerifyIntegrity(keys));
         }
     }
 

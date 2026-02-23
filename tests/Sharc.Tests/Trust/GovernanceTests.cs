@@ -9,35 +9,26 @@ public class GovernanceTests
     [Fact]
     public void Append_ExceedsAuthorityCeiling_ShouldThrow()
     {
-        var tempFile = Path.GetTempFileName();
-        try
-        {
-            // 1. Setup Trust DB
-            File.WriteAllBytes(tempFile, TrustTestFixtures.CreateTrustDatabase());
-            using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
-            
-            var registry = new AgentRegistry(db);
-            var ledger = new LedgerManager(db);
-            using var signer = new SharcSigner("intern-bob");
+        var data = TrustTestFixtures.CreateTrustDatabase();
+        using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
 
-            // 2. Register Agent with limit 500
-            registry.RegisterAgent(TrustTestFixtures.CreateValidAgent(signer, authorityCeiling: 500));
+        var registry = new AgentRegistry(db);
+        var ledger = new LedgerManager(db);
+        using var signer = new SharcSigner("intern-bob");
 
-            // 3. Attempt to spend 100 (Should Succeed)
-            var validPayload = new TrustPayload(PayloadType.Financial, "Lunch Expense", 100);
-            ledger.Append(validPayload, signer);
+        // Register Agent with limit 500
+        registry.RegisterAgent(TrustTestFixtures.CreateValidAgent(signer, authorityCeiling: 500));
 
-            // 4. Attempt to spend 600 (Should Fail)
-            var invalidPayload = new TrustPayload(PayloadType.Financial, "Server Purchase", 600);
-            
-            var ex = Assert.Throws<InvalidOperationException>(() => ledger.Append(invalidPayload, signer));
-            Assert.Contains("Authority ceiling exceeded", ex.Message);
-            Assert.Contains("limit: 500", ex.Message);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Attempt to spend 100 (Should Succeed)
+        var validPayload = new TrustPayload(PayloadType.Financial, "Lunch Expense", 100);
+        ledger.Append(validPayload, signer);
+
+        // Attempt to spend 600 (Should Fail)
+        var invalidPayload = new TrustPayload(PayloadType.Financial, "Server Purchase", 600);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ledger.Append(invalidPayload, signer));
+        Assert.Contains("Authority ceiling exceeded", ex.Message);
+        Assert.Contains("limit: 500", ex.Message);
     }
 
     [Fact]
@@ -45,7 +36,7 @@ public class GovernanceTests
     {
         var data = TrustTestFixtures.CreateTrustDatabase();
         using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
-        
+
         var ledger = new LedgerManager(db);
         using var signer = new SharcSigner("system-audit");
         var registry = new AgentRegistry(db);
@@ -59,10 +50,10 @@ public class GovernanceTests
         // Verify content by reading raw blob
         using var reader = db.CreateReader("_sharc_ledger");
         Assert.True(reader.Read());
-        
+
         var blob = reader.GetBlob(3).ToArray();
         var decoded = TrustPayload.FromBytes(blob);
-        
+
         Assert.NotNull(decoded);
         Assert.Equal(PayloadType.Financial, decoded.Type);
         Assert.Equal("Audit Record", decoded.Content);
