@@ -218,6 +218,19 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="PreparedWriter"/> for zero-overhead repeated writes to the given table.
+    /// Schema and root page are resolved once at creation time.
+    /// </summary>
+    /// <param name="tableName">The table to write to.</param>
+    /// <returns>A reusable <see cref="PreparedWriter"/> bound to the table.</returns>
+    public PreparedWriter PrepareWriter(string tableName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var tableInfo = TryGetTableInfo(tableName);
+        return new PreparedWriter(_db, tableName, tableInfo, _tableRootCache);
+    }
+
+    /// <summary>
     /// Begins an explicit write transaction.
     /// </summary>
     public SharcWriteTransaction BeginTransaction()
