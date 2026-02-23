@@ -71,9 +71,9 @@ public sealed class SharcDatabase : IDisposable
     // Eliminates per-invocation delegate construction overhead
     // by caching the closure-composed filter delegate, projection array,
     // and table metadata for each unique (intent, parameters) pair.
-    private System.Collections.Concurrent.ConcurrentDictionary<
-        Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
-    private System.Collections.Concurrent.ConcurrentDictionary<long, IFilterNode>? _paramFilterCache;
+    // Dictionary (not ConcurrentDictionary) — SharcDatabase is not thread-safe.
+    private Dictionary<Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
+    private Dictionary<long, IFilterNode>? _paramFilterCache;
 
     private sealed class CachedReaderInfo
     {
@@ -674,9 +674,7 @@ public sealed class SharcDatabase : IDisposable
         Intent.QueryIntent intent,
         IReadOnlyDictionary<string, object>? parameters)
     {
-        var readerCache = _readerInfoCache ??=
-            new System.Collections.Concurrent.ConcurrentDictionary<
-                Intent.QueryIntent, CachedReaderInfo>();
+        var readerCache = _readerInfoCache ??= new Dictionary<Intent.QueryIntent, CachedReaderInfo>();
 
         // Build or retrieve cached reader info (projection, table, filter for non-parameterized)
         if (!readerCache.TryGetValue(intent, out var info))
@@ -729,7 +727,7 @@ public sealed class SharcDatabase : IDisposable
                 Table = table,
                 RowidAliasOrdinal = rowidAlias,
             };
-            readerCache.TryAdd(intent, info);
+            readerCache[intent] = info;
         }
 
         // Determine filter node to use
@@ -740,13 +738,14 @@ public sealed class SharcDatabase : IDisposable
             // Parameterized filter — check param-level cache
             var paramCache = _paramFilterCache ??= new();
             long paramKey = ComputeParamCacheKey(intent, parameters);
-            node = paramCache.GetOrAdd(paramKey, _ =>
+            if (!paramCache.TryGetValue(paramKey, out node))
             {
                 var filterStar = IntentToFilterBridge.Build(
                     intent.Filter.Value, parameters, intent.TableAlias);
-                return FilterTreeCompiler.CompileBaked(
+                node = FilterTreeCompiler.CompileBaked(
                     filterStar, info.Table.Columns, info.RowidAliasOrdinal);
-            });
+                paramCache[paramKey] = node;
+            }
         }
 
         var cursor = TryCreateIndexSeekCursor(intent, info.Table) ?? CreateTableCursor(info.Table);

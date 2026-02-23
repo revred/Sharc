@@ -671,7 +671,8 @@ public sealed class SharcDataReader : IDisposable
     {
         if (_filterNode != null)
         {
-            // Reuse the pre-parsed serial types from the filter step
+            // Reuse the pre-parsed serial types from the filter step.
+            // Both arrays are Rent(_physicalColumnCount) — same capacity.
             int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
             Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
             _currentBodyOffset = _filterBodyOffset;
@@ -1247,7 +1248,7 @@ public sealed class SharcDataReader : IDisposable
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Append(ReadOnlySpan<byte> data)
+        public void Append(scoped ReadOnlySpan<byte> data)
         {
             _byteCount += data.Length;
             for (int i = 0; i < data.Length; i++)
@@ -1258,22 +1259,27 @@ public sealed class SharcDataReader : IDisposable
         }
 
         /// <summary>
-        /// Hashes a string's UTF-16 character data directly — two bytes per char,
-        /// zero allocation. Equivalent to Append(MemoryMarshal.AsBytes(s.AsSpan()))
-        /// without requiring System.Runtime.InteropServices.
+        /// Hashes a string as UTF-8 bytes — matches the cursor path which hashes
+        /// raw UTF-8 payload bytes directly from the SQLite record. Required for
+        /// correct UNION/EXCEPT/INTERSECT dedup when mixing materialized (QueryValue)
+        /// and cursor-backed rows.
         /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AppendString(string s)
         {
-            _byteCount += s.Length * 2;
-            for (int i = 0; i < s.Length; i++)
+            // Short strings: stackalloc avoids allocation (128 chars * 3 bytes/char = 384 max)
+            if (s.Length <= 128)
             {
-                ulong lo = (byte)s[i];
-                ulong hi = (byte)(s[i] >> 8);
-                _hashLo ^= lo; _hashLo *= FnvPrime;
-                _hashHi ^= lo; _hashHi *= FnvPrime2;
-                _hashLo ^= hi; _hashLo *= FnvPrime;
-                _hashHi ^= hi; _hashHi *= FnvPrime2;
+                Span<byte> utf8 = stackalloc byte[384];
+                int written = System.Text.Encoding.UTF8.GetBytes(s, utf8);
+                Append(utf8.Slice(0, written));
+            }
+            else
+            {
+                byte[] rented = ArrayPool<byte>.Shared.Rent(
+                    System.Text.Encoding.UTF8.GetMaxByteCount(s.Length));
+                int written = System.Text.Encoding.UTF8.GetBytes(s, rented);
+                Append(rented.AsSpan(0, written));
+                ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
@@ -1493,7 +1499,7 @@ internal sealed class IndexSet : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void EscapeSentinel(ref ulong lo, ref ulong hi)
     {
-        if (lo == 0 & hi == 0) lo = 1;
+        if (lo == 0 & hi == 0) { lo = 1; hi = 1; }
     }
 
     /// <summary>
