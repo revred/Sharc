@@ -371,6 +371,24 @@ public sealed class SharcDatabase : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var schema = GetSchema();
         var table = schema.GetTable(tableName) ?? throw new KeyNotFoundException($"Table '{tableName}' not found.");
+
+        // ── ThreadStatic reader pool: zero-alloc reuse for unfiltered, unprojected reads ──
+        // Only eligible when no projection and no filters — the common PointLookup/scan case.
+        bool isPoolable = columns is null or { Length: 0 }
+                       && filters is null or { Length: 0 }
+                       && filter is null;
+
+        if (isPoolable)
+        {
+            uint rootPage = (uint)table.RootPage;
+            var pooled = SharcDataReader.TryRentFromPool(rootPage, _recordDecoder);
+            if (pooled != null)
+            {
+                pooled.ReactivateFromPool();
+                return pooled;
+            }
+        }
+
         var cursor = CreateTableCursor(table);
 
         int[]? projection = null;
@@ -397,7 +415,7 @@ public sealed class SharcDatabase : IDisposable
             });
         }
 
-        return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        var reader = new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
         {
             Columns = table.Columns,
             Projection = projection,
@@ -405,6 +423,11 @@ public sealed class SharcDatabase : IDisposable
             TableIndexes = table.Indexes,
             Filters = ResolveFilters(table, filters)
         });
+
+        if (isPoolable)
+            reader.MarkPoolable((uint)table.RootPage);
+
+        return reader;
     }
 
     /// <summary>Creates a reader with column projection.</summary>
@@ -418,6 +441,53 @@ public sealed class SharcDatabase : IDisposable
 
     /// <summary>Creates a reader with column projection and a FilterStar expression.</summary>
     public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter) => CreateReader(tableName, columns, null, filter);
+
+    /// <summary>
+    /// Creates a pre-resolved reader handle for zero-allocation repeated Seek/Read calls.
+    /// Schema, projection, and cursor are resolved once; subsequent <see cref="PreparedReader.CreateReader"/>
+    /// calls reuse the same reader and buffers with zero per-call allocation.
+    /// </summary>
+    /// <param name="tableName">The table to read from.</param>
+    /// <param name="columns">Optional column projection. If empty or null, all columns are returned.</param>
+    /// <returns>A <see cref="PreparedReader"/> that can produce zero-alloc readers.</returns>
+    public PreparedReader PrepareReader(string tableName, params string[]? columns)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName) ?? throw new KeyNotFoundException($"Table '{tableName}' not found.");
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                int ordinal = table.GetColumnOrdinal(columns[i]);
+                projection[i] = ordinal >= 0 ? ordinal : throw new ArgumentException($"Column '{columns[i]}' not found.");
+            }
+        }
+
+        var config = new SharcDataReader.CursorReaderConfig
+        {
+            Columns = table.Columns,
+            Projection = projection,
+            BTreeReader = _bTreeReader,
+            TableIndexes = table.Indexes
+        };
+
+        return new PreparedReader(this, table, config);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="PreparedAgent.Builder"/> for composing read + write steps
+    /// into a coordinated, reusable operation.
+    /// </summary>
+    /// <returns>A fluent builder for constructing a <see cref="PreparedAgent"/>.</returns>
+    public PreparedAgent.Builder PrepareAgent()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return new PreparedAgent.Builder();
+    }
 
     /// <summary>
     /// Executes a Sharq query string and returns a data reader.

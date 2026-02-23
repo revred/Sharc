@@ -87,6 +87,12 @@ public class MemoryAllocationBenchmarks
         _textBytes = "Hello, Sharc benchmark!"u8.ToArray();
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

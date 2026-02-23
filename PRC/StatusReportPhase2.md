@@ -1,5 +1,10 @@
 # Phase 2 Status Report: Graph Storage Implementation
 
+> **ARCHIVE**: This is a historical milestone snapshot from early Phase 2 (1,064 tests).
+> Current state: 2,660+ tests across 6 projects with full CRUD, trust layer, graph storage,
+> query pipeline, JitSQL, and prepared pattern. See [PerformanceBaseline.md](PerformanceBaseline.md)
+> for current metrics.
+
 ## Completed Work
 1. **Core Storage Implementation**:
    - `ConceptStore`: Implemented node retrieval logic, supporting O(log N) lookups by Integer Key.

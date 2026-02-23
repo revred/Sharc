@@ -8,6 +8,9 @@ using Sharc.Core.Records;
 
 namespace Sharc.Graph.Store;
 
+/// <summary>
+/// Base class for edge cursors that iterate relation records matching a given node and direction.
+/// </summary>
 internal abstract class EdgeCursorBase : IEdgeCursor
 {
     protected readonly RecordDecoder Decoder;

@@ -51,6 +51,12 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
     private readonly IWritablePageSource? _writableSource;
     private long _snapshotVersion;
 
+    /// <summary>
+    /// Initializes a new scan-optimized cursor by collecting all leaf pages via DFS.
+    /// </summary>
+    /// <param name="pageSource">The page source for reading B-tree pages.</param>
+    /// <param name="rootPage">The root page number of the table B-tree.</param>
+    /// <param name="usablePageSize">Usable bytes per page (page size minus reserved space).</param>
     public LeafPageScanner(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;

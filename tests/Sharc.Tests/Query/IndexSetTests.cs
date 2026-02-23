@@ -7,7 +7,7 @@ namespace Sharc.Tests.Query;
 
 public class IndexSetTests
 {
-    private static SharcDataReader.Fingerprint128 Fp(ulong lo, uint guard, ushort len, ushort tag) =>
+    private static Fingerprint128 Fp(ulong lo, uint guard, ushort len, ushort tag) =>
         new(lo, guard, len, tag);
 
     // ─── Add / Contains basics ──────────────────────────────────

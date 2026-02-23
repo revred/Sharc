@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Text;
 using System.Security.Cryptography;
 using Sharc.Core;
@@ -9,7 +12,7 @@ namespace Sharc.Trust;
 /// <summary>
 /// Manages tamper-evident audit logging.
 /// </summary>
-public class AuditManager
+public sealed class AuditManager
 {
     private readonly SharcDatabase _db;
     private const string TableName = "_sharc_audit";

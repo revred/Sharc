@@ -99,15 +99,21 @@ public sealed class TableInfo
     /// <summary>True if any column is a merged column (physical count exceeds logical count).</summary>
     public bool HasMergedColumns => PhysicalColumnCount > Columns.Count;
 
-    private Dictionary<string, int>? _columnMap;
+    private volatile Dictionary<string, int>? _columnMap;
 
     /// <summary>
     /// Gets the ordinal of a column by name (case-insensitive).
+    /// Thread-safe: lazy-initialized via <see cref="Interlocked.CompareExchange{T}"/>.
     /// </summary>
     public int GetColumnOrdinal(string name)
     {
-        _columnMap ??= Columns.ToDictionary(c => c.Name, c => c.Ordinal, StringComparer.OrdinalIgnoreCase);
-        return _columnMap.TryGetValue(name, out int ordinal) ? ordinal : -1;
+        var map = _columnMap;
+        if (map == null)
+        {
+            var newMap = Columns.ToDictionary(c => c.Name, c => c.Ordinal, StringComparer.OrdinalIgnoreCase);
+            map = Interlocked.CompareExchange(ref _columnMap, newMap, null) ?? newMap;
+        }
+        return map.TryGetValue(name, out int ordinal) ? ordinal : -1;
     }
 }
 

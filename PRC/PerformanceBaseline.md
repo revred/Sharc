@@ -1,30 +1,40 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-23
+**Date:** 2026-02-23 (v5 Leaf Cache + Random Lookup Proof)
 **Branch:** local.MultiCache
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
-**Change:** v3 hot path optimizations — ScanMode jump table dispatch, generic specialization, batch single-byte varint decode, MoveNext branch elimination, zero-copy filter path
+**Change:** v5 B-tree leaf range cache — same-rowid fast path (skip all traversal), same-leaf fast path (skip interior pages), 512-entry circular random buffer for honest benchmarking. Random rowid lookup achieves 276 ns / 0 B (109x vs SQLite). Same-rowid achieves 104 ns / 0 B (257x).
+**Previous:** v4 Prepared Pattern — `PreparedReader`/`PreparedQuery` zero-allocation reuse + ThreadStatic pool. PointLookup was 159 ns / 0 B (prepared) before leaf cache.
 
 ---
 
 ## Allocation Tier List
 
-### Tier 0 — Zero GC (cursor construction only, 640–912 B)
+### Tier 0 — True Zero Allocation (Prepared Pattern, 0 B)
+
+| Benchmark | Hot (Prepared) | Cold (CreateReader) | Allocated (Hot) | Allocated (Cold) | GC | Notes |
+|-----------|---------------|---------------------|-----------------|------------------|----|-------|
+| Sharc_RandomLookup | 275.8 ns | — | **0 B** | — | 0 | **109x vs SQLite** (honest random rowid, 512-buf) |
+| Sharc_PointLookup | 103.7 ns | 82.4 ns (pooled) | **0 B** | **0 B** | 0 | 257x vs SQLite (same-rowid, leaf cache hit) |
+| Sharc_TypeDecode | 161.3 us | 151.7 us | **0 B** | 408 B | 0 | Full scan, type decode only |
+| Sharc_GcPressure | 168.0 us | 146.0 us | **0 B** | 408 B | 0 | Full scan, zero GC target |
+| Sharc_NullScan | 141.4 us | 148.2 us | **0 B** | 408 B | 0 | Full scan with NULL handling |
+| Sharc_FilterStar | 229.9 us | 231.2 us | **0 B** | 592 B | 0 | Closure-composed predicate scan |
+| Sharc_WhereFilter | 236.1 us | 245.5 us | **0 B** | 680 B | 0 | SQL WHERE filter (PreparedQuery) |
+| Sharc_SequentialScan | 908.1 us | 922.7 us | 1.35 MB | 1.35 MB | Gen0 | String-dominated, reader overhead invisible |
+
+**Key insight:** The Prepared Pattern (`PreparedReader`/`PreparedQuery`) achieves **true 0 B allocation** in every benchmark area. The B-tree leaf range cache adds same-rowid (257x) and same-leaf (skip interior pages) fast paths that bring random-rowid lookups to 276 ns / 0 B (109x vs SQLite). The ThreadStatic reader pool also eliminates allocation on the cold `CreateReader()` path for no-projection calls. SequentialScan is string-allocation dominated (5K `GetString()` calls = 1.35 MB) — reader overhead is invisible at that scale.
+
+### Tier 0 (legacy) — Cold Path Only (408–680 B cursor construction)
 
 | Benchmark | Mean | Allocated | GC | Notes |
 |-----------|------|-----------|-----|-------|
-| Sharc_PointLookup | 282 ns | 640 B | 0 | B-tree seek, single row (97x faster than SQLite) |
-| Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
-| Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
-| Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
-| Sharc_FilterStar | 304 us | 800 B | 0 | Closure-composed predicate scan |
-| Sharc_WhereFilter | 298 us | 912 B | 0 | SQL WHERE filter |
-| DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
+| DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader (no projection) |
 | SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |
 
-**Key insight:** All core read operations are flat 640–912 B. Point lookup allocation dropped 24 B (664→640 B) from generic specialization removing interface dispatch overhead. The hot path (MoveNext + accessor) is truly zero-allocation.
+**Note:** These benchmarks have not been updated to the prepared pattern yet. They represent the legacy cold-path allocation baseline.
 
 ### Tier 0.5 — Index Seek (1,352–1,456 B)
 
@@ -98,12 +108,15 @@
 
 | Operation | Sharc | SQLite | Sharc/SQLite | Notes |
 |-----------|-------|--------|-------------|-------|
-| Point lookup | 282 ns / 640 B | 27.4 us / 728 B | **0.01x time** | Sharc **97x faster** (direct B-tree seek, generic specialization) |
+| Random lookup (prepared) | 275.8 ns / **0 B** | 30,135 ns / 832 B | **0.009x time** | Sharc **109x faster** (honest random rowid, 512-buf) |
+| Point lookup (prepared) | 103.7 ns / **0 B** | 26,738 ns / 408 B | **0.004x time** | Sharc **257x faster** (same-rowid, leaf cache) |
+| Point lookup (cold, pooled) | 82.4 ns / **0 B** | 30,229 ns / 728 B | **0.003x time** | Sharc **367x faster** (same-rowid, cold path) |
 | 5-row read | 5.5 ns / 0 B | 23.0 us / 944 B | **0.0002x time** | Sharc **4,200x faster** (pre-decoded, zero-alloc) |
 | 100-int scan | 123 ns / 0 B | 46.1 us / 384 B | **0.003x time** | Sharc **375x faster** (in-memory varint decode) |
 | Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
 | SELECT * (3 cols) | 105 us / 672 B | 637 us / 688 B | **0.16x time** | 6x faster, comparable allocation |
-| WHERE filter | 298 us / 912 B | 560 us / 720 B | **0.53x time** | 1.9x faster, similar allocation |
+| WHERE filter (prepared) | 236.1 us / **0 B** | 550.6 us / 720 B | **0.43x time** | Sharc 2.3x faster, zero alloc |
+| WHERE filter (cold) | 245.5 us / 680 B | 550.6 us / 720 B | **0.45x time** | 2.2x faster, similar allocation |
 | GROUP BY | 366 us / 5,416 B | 538 us / 920 B | **0.68x time, 5.9x alloc** | See analysis below |
 | ORDER BY+LIMIT | 505 us / 32 KB | 426 us / 3.1 KB | **1.19x time, 10.5x alloc** | SQLite wins — native sort is cheaper |
 | Insert 1 row | 4.30 ms / 16.3 KB | 4.87 ms / 11.8 KB | **0.88x time, 1.4x alloc** | Sharc 12% faster, fsync-dominated |

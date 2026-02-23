@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -5,6 +8,9 @@ using ModelContextProtocol.Server;
 
 namespace Sharc.Context.Tools;
 
+/// <summary>
+/// MCP tool for querying project health: build status, test counts, and git status.
+/// </summary>
 [McpServerToolType]
 public static class ProjectStatusTool
 {
