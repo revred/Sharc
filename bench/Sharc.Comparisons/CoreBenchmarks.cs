@@ -48,7 +48,7 @@ public class CoreBenchmarks
         _conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         _conn.Open();
 
-        // Pre-compile the Baked filter for fair comparison (bypass JIT compilation overhead per call)
+        // Pre-compile the Baked filter for fair comparison (bypass delegate construction overhead per call)
         _sharcDb = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 100 });
         var tables = _sharcDb.Schema.Tables;
         var filter = FilterStar.And(

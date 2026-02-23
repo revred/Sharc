@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch seeks** — 6 consecutive seeks in 1,940 ns (66x faster)
 - **Page I/O** — File, Memory, Memory-mapped, and Cached page sources
 - **LRU page cache** with configurable capacity (default 2,000 pages)
-- **WHERE filtering** via `SharcFilter` and JIT-compiled `FilterStar` predicates
+- **WHERE filtering** via `SharcFilter` and closure-compiled `FilterStar` predicates
 - **Column projection** — skip decoding unwanted columns
 - **WAL read support** — read databases with active WAL files
 - **Overflow page assembly** using `ArrayPool<byte>` (zero steady-state allocation)

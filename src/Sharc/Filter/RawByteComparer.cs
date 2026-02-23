@@ -84,7 +84,7 @@ internal static class RawByteComparer
     }
 
     /// <summary>
-    /// Overload for JIT path (Expression Trees do not support Spans).
+    /// Overload accepting byte[] for closure-captured filter constants (ref structs cannot be captured).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int Utf8Compare(ReadOnlySpan<byte> a, byte[] b)
@@ -102,7 +102,7 @@ internal static class RawByteComparer
     }
 
     /// <summary>
-    /// Overload for JIT path.
+    /// Overload accepting byte[] for closure-captured filter constants.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool Utf8StartsWith(ReadOnlySpan<byte> columnUtf8, byte[] prefixUtf8)
@@ -120,7 +120,7 @@ internal static class RawByteComparer
     }
 
     /// <summary>
-    /// Overload for JIT path.
+    /// Overload accepting byte[] for closure-captured filter constants.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool Utf8EndsWith(ReadOnlySpan<byte> columnUtf8, byte[] suffixUtf8)
@@ -138,7 +138,7 @@ internal static class RawByteComparer
     }
 
     /// <summary>
-    /// Overload for JIT path.
+    /// Overload accepting byte[] for closure-captured filter constants.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool Utf8Contains(ReadOnlySpan<byte> columnUtf8, byte[] patternUtf8)
