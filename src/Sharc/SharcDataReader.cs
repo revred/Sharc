@@ -516,22 +516,48 @@ public sealed partial class SharcDataReader : IDisposable
     /// </summary>
     /// <param name="rowId">The rowid to seek to.</param>
     /// <returns>True if an exact match was found; false otherwise.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Seek(long rowId)
     {
-        ObjectDisposedException.ThrowIf(DispatchMode == ScanMode.Disposed, this);
-
-        bool found = _cursor!.Seek(rowId);
-
-        if (found)
+        return DispatchMode switch
         {
-            DecodeCurrentRow(_cursor!.Payload);
-        }
+            ScanMode.TypedCached => SeekTyped(_btreeCachedCursor!, rowId),
+            ScanMode.TypedMemory => SeekTyped(_btreeMemoryCursor!, rowId),
+            ScanMode.Disposed => throw new ObjectDisposedException(GetType().FullName),
+            _ => SeekDefault(rowId),
+        };
+    }
+
+    /// <summary>
+    /// Typed seek: direct call to sealed BTreeCursor — eliminates interface dispatch.
+    /// </summary>
+    private bool SeekTyped<TPageSource>(BTreeCursor<TPageSource> cursor, long rowId)
+        where TPageSource : class, IPageSource
+    {
+        bool found = cursor.Seek(rowId);
+        if (found)
+            DecodeCurrentRow(cursor.Payload);
         else
         {
             _currentRow = null;
             IsLazy = false;
         }
+        return found;
+    }
 
+    /// <summary>
+    /// Default seek path: interface dispatch fallback for non-BTreeCursor types.
+    /// </summary>
+    private bool SeekDefault(long rowId)
+    {
+        bool found = _cursor!.Seek(rowId);
+        if (found)
+            DecodeCurrentRow(_cursor!.Payload);
+        else
+        {
+            _currentRow = null;
+            IsLazy = false;
+        }
         return found;
     }
 

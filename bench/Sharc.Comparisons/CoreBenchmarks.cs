@@ -33,6 +33,7 @@ public class CoreBenchmarks
     private SqliteConnection _conn = null!;
     private SharcDatabase _sharcDb = null!;
     private IFilterNode _cachedFilterNode = null!;
+    private PreparedReader _preparedReader = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -63,11 +64,14 @@ public class CoreBenchmarks
                 break;
             }
         }
+
+        _preparedReader = _sharcDb.PrepareReader("users");
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
+        _preparedReader?.Dispose();
         _conn?.Dispose();
         _sharcDb?.Dispose();
     }
@@ -192,11 +196,19 @@ public class CoreBenchmarks
     [BenchmarkCategory("PointLookup")]
     public long Sharc_PointLookup()
     {
+        using var reader = _preparedReader.CreateReader();
+        if (reader.Seek(2500))
+            return reader.GetInt64(0);
+        return -1;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("PointLookup")]
+    public long Sharc_PointLookup_Cold()
+    {
         using var reader = _sharcDb.CreateReader("users");
         if (reader.Seek(2500))
-        {
             return reader.GetInt64(0);
-        }
         return -1;
     }
 
@@ -219,7 +231,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("BatchLookup")]
     public long Sharc_BatchLookup()
     {
-        using var reader = _sharcDb.CreateReader("users");
+        using var reader = _preparedReader.CreateReader();
         long sum = 0;
         foreach (var target in BatchTargets)
         {
