@@ -57,13 +57,16 @@ public sealed class SharcDataReader : IDisposable
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
 
-    // Row-level filter support (legacy path)
-    private readonly ResolvedFilter[]? _filters;
+    // Mode-projected composition: non-cursor modes (materialized, concat, dedup)
+    // are consolidated into a single inner object, null for cursor mode.
+    // Saves ~96 B on cursor-mode readers (PointLookup, scans).
+    private readonly CompositeState? _composite;
 
-    // Byte-level filter support (FilterStar path)
-    private IFilterNode? _filterNode;
-    private FilterNode? _concreteFilterNode;
-    private long[]? _filterSerialTypes;
+    // Filter state: held separately from CompositeState because filters
+    // apply to cursor mode. Null when no filter is active.
+    private FilterState? _filter;
+
+    // Per-row filter fields kept on main reader (hot writes every row in ProcessRow)
     private int _filterBodyOffset;
     private int _filterColCount;
 
@@ -76,27 +79,8 @@ public sealed class SharcDataReader : IDisposable
     private bool _lazyMode;
     private int _currentBodyOffset;
 
-    private readonly string[]? _materializedColumnNames;
-    private int _materializedIndex = -1;
-
     // Cached column names — built once on first call to GetColumnNames()
     private string[]? _cachedColumnNames;
-
-    // Unboxed materialized mode — QueryValue stores int/double inline without boxing
-    private readonly QueryValue[][]? _queryValueRows;
-    private readonly RowSet? _queryValueList;
-    private IEnumerator<QueryValue[]>? _queryValueEnumerator;
-
-    // Concatenating mode — streams two readers sequentially for UNION ALL
-    private readonly SharcDataReader? _concatFirst;
-    private readonly SharcDataReader? _concatSecond;
-    private bool _concatOnSecond;
-
-    // Dedup streaming mode — wraps an underlying reader and filters rows by index
-    private readonly SharcDataReader? _dedupUnderlying;
-    private readonly SetDedupMode _dedupMode;
-    private readonly IndexSet? _dedupRightIndex;
-    private readonly IndexSet? _dedupSeen;
 
     /// <summary>
     /// Pre-resolved scan mode for hot Read() dispatch. Set once in the constructor
@@ -134,9 +118,6 @@ public sealed class SharcDataReader : IDisposable
         _projection = config.Projection;
         _bTreeReader = config.BTreeReader;
         _tableIndexes = config.TableIndexes;
-        _filters = config.Filters;
-        _filterNode = config.FilterNode;
-        _concreteFilterNode = config.FilterNode as FilterNode;
         _columnCount = columns.Count;
 
         // Devirtualize cursor: store concrete reference for direct dispatch in Read()
@@ -197,11 +178,10 @@ public sealed class SharcDataReader : IDisposable
         _serialTypes.AsSpan(0, bufferSize).Clear();
         _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
-        // Pool serial type buffer for byte-level filter evaluation
-        if (_filterNode != null)
+        // Initialize filter state if filters are provided
+        if (config.FilterNode != null || config.Filters != null)
         {
-            _filterSerialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
-            _filterSerialTypes.AsSpan(0, bufferSize).Clear();
+            _filter = new FilterState(config.FilterNode, config.Filters, bufferSize);
         }
 
         // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
@@ -230,8 +210,7 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal SharcDataReader(QueryValue[][] rows, string[] columnNames)
     {
-        _queryValueRows = rows;
-        _materializedColumnNames = columnNames;
+        _composite = new CompositeState(rows, columnNames);
         _columnCount = columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
@@ -242,8 +221,7 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal SharcDataReader(RowSet rows, string[] columnNames)
     {
-        _queryValueList = rows;
-        _materializedColumnNames = columnNames;
+        _composite = new CompositeState(rows, columnNames);
         _columnCount = columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
@@ -254,8 +232,7 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal SharcDataReader(IEnumerable<QueryValue[]> rows, string[] columnNames)
     {
-        _queryValueEnumerator = rows.GetEnumerator();
-        _materializedColumnNames = columnNames;
+        _composite = new CompositeState(rows, columnNames);
         _columnCount = columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
@@ -266,9 +243,7 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal SharcDataReader(SharcDataReader first, SharcDataReader second, string[] columnNames)
     {
-        _concatFirst = first;
-        _concatSecond = second;
-        _materializedColumnNames = columnNames;
+        _composite = new CompositeState(first, second, columnNames);
         _columnCount = columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
@@ -281,11 +256,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(SharcDataReader underlying, SetDedupMode mode,
         IndexSet? rightIndex = null)
     {
-        _dedupUnderlying = underlying;
-        _dedupMode = mode;
-        _dedupRightIndex = rightIndex;
-        _dedupSeen = IndexSet.Rent();
-        _materializedColumnNames = underlying.GetColumnNames();
+        _composite = new CompositeState(underlying, mode, rightIndex);
         _columnCount = underlying.FieldCount;
         _rowidAliasOrdinal = -1;
     }
@@ -293,35 +264,14 @@ public sealed class SharcDataReader : IDisposable
     /// <summary>
     /// Gets the number of columns in the current result set.
     /// </summary>
-    public int FieldCount => _materializedColumnNames?.Length
+    public int FieldCount => _composite?.ColumnNames?.Length
         ?? _projection?.Length
         ?? _columns!.Count;
-
-    /// <summary>Returns true when the reader is in unboxed <see cref="QueryValue"/> mode.</summary>
-    private bool IsQueryValueMode => _queryValueRows != null || _queryValueList != null || _queryValueEnumerator != null;
-
-    /// <summary>Gets the current row in materialized mode (array or list).</summary>
-    private QueryValue[] CurrentMaterializedRow
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            if (_queryValueRows != null) return _queryValueRows[_materializedIndex];
-            if (_queryValueList != null) return _queryValueList[_materializedIndex];
-            return _queryValueEnumerator!.Current;
-        }
-    }
-
-    /// <summary>Returns true when the reader is in concatenating mode (streaming UNION ALL).</summary>
-    private bool IsConcatMode => _concatFirst != null;
-
-    /// <summary>Gets the currently active reader in concatenating mode.</summary>
-    private SharcDataReader ActiveConcatReader => _concatOnSecond ? _concatSecond! : _concatFirst!;
 
     /// <summary>
     /// Gets the rowid of the current row.
     /// </summary>
-    public long RowId => _dedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
+    public long RowId => _composite?.DedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
 
     /// <summary>
     /// Returns true if the underlying page source has been mutated since this reader
@@ -498,50 +448,9 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     private bool ReadDefault()
     {
-        // Dedup streaming mode: filter rows by index
-        if (_dedupUnderlying != null)
-        {
-            while (_dedupUnderlying.Read())
-            {
-                var fp = _dedupUnderlying.GetRowFingerprint();
-                bool pass = _dedupMode switch
-                {
-                    SetDedupMode.Union => _dedupSeen!.Add(fp),
-                    SetDedupMode.Intersect => _dedupRightIndex!.Contains(fp) && _dedupSeen!.Add(fp),
-                    SetDedupMode.Except => !_dedupRightIndex!.Contains(fp) && _dedupSeen!.Add(fp),
-                    _ => false,
-                };
-                if (pass) return true;
-            }
-            return false;
-        }
-
-        // Concatenating mode: stream from first reader, then second
-        if (_concatFirst != null)
-        {
-            if (!_concatOnSecond)
-            {
-                if (_concatFirst.Read()) return true;
-                _concatOnSecond = true;
-            }
-            return _concatSecond!.Read();
-        }
-
-        // Unboxed materialized mode: iterate QueryValue rows (array or list)
-        if (_queryValueRows != null)
-        {
-            _materializedIndex++;
-            return _materializedIndex < _queryValueRows.Length;
-        }
-        if (_queryValueList != null)
-        {
-            _materializedIndex++;
-            return _materializedIndex < _queryValueList.Count;
-        }
-        if (_queryValueEnumerator != null)
-        {
-            return _queryValueEnumerator.MoveNext();
-        }
+        // Composite mode: dedup, concat, materialized — dispatch through CompositeState
+        if (_composite != null)
+            return _composite.ReadComposite(this);
 
         // Devirtualized scan with filter dispatch
         if (_btreeCachedCursor != null)
@@ -593,14 +502,14 @@ public sealed class SharcDataReader : IDisposable
     private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
     {
         // ── Hot path: concrete FilterNode — write to _serialTypes directly (zero Array.Copy) ──
-        if (_concreteFilterNode != null)
+        if (_filter?.ConcreteFilterNode != null)
         {
             var st = _serialTypes!;
             var decoder = _recordDecoder!;
             int colCount = decoder.ReadSerialTypes(payload, st, out int bodyOffset);
             int stCount = Math.Min(colCount, st.Length);
 
-            if (!_concreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
+            if (!_filter.ConcreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
                 return false;
 
             _currentBodyOffset = bodyOffset;
@@ -613,13 +522,13 @@ public sealed class SharcDataReader : IDisposable
         }
 
         // ── Cold path: interface IFilterNode (non-concrete) ──
-        if (_filterNode != null)
+        if (_filter?.FilterNode != null)
         {
-            _filterColCount = _recordDecoder!.ReadSerialTypes(payload, _filterSerialTypes!, out _filterBodyOffset);
-            int stCount = Math.Min(_filterColCount, _filterSerialTypes!.Length);
+            _filterColCount = _recordDecoder!.ReadSerialTypes(payload, _filter.FilterSerialTypes!, out _filterBodyOffset);
+            int stCount = Math.Min(_filterColCount, _filter.FilterSerialTypes!.Length);
 
-            if (!_filterNode.Evaluate(payload,
-                _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, rowId))
+            if (!_filter.FilterNode.Evaluate(payload,
+                _filter.FilterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, rowId))
                 return false;
 
             DecodeCurrentRow(payload);
@@ -627,8 +536,8 @@ public sealed class SharcDataReader : IDisposable
         }
 
         // ── Legacy ResolvedFilter path ──
-        if (_filters != null && _filters.Length > 0 &&
-            !_recordDecoder!.Matches(payload, _filters, rowId, _rowidAliasOrdinal))
+        if (_filter?.Filters != null && _filter.Filters.Length > 0 &&
+            !_recordDecoder!.Matches(payload, _filter.Filters, rowId, _rowidAliasOrdinal))
         {
             return false;
         }
@@ -659,7 +568,7 @@ public sealed class SharcDataReader : IDisposable
                 ColumnValue.FromInt64(4, _cursor!.RowId);
         }
 
-        return FilterEvaluator.MatchesAll(_filters!, _reusableBuffer!);
+        return FilterEvaluator.MatchesAll(_filter!.Filters!, _reusableBuffer!);
     }
 
     /// <summary>
@@ -669,12 +578,12 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     private void DecodeCurrentRow(ReadOnlySpan<byte> payload)
     {
-        if (_filterNode != null)
+        if (_filter?.FilterNode != null)
         {
             // Reuse the pre-parsed serial types from the filter step.
             // Both arrays are Rent(_physicalColumnCount) — same capacity.
             int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
-            Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
+            Array.Copy(_filter.FilterSerialTypes!, _serialTypes, copyCount);
             _currentBodyOffset = _filterBodyOffset;
         }
         else
@@ -696,13 +605,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public bool IsNull(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.IsNull(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.IsNull(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].IsNull;
+        if (_composite != null)
+            return _composite.IsNull(this, ordinal);
 
         if (_currentRow == null)
             throw new InvalidOperationException("No current row. Call Read() first.");
@@ -731,13 +635,8 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public long GetInt64(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetInt64(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetInt64(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].AsInt64();
+        if (_composite != null)
+            return _composite.GetInt64(this, ordinal);
 
         // Fast path: decode directly from page span using precomputed O(1) offset
         if (_lazyMode)
@@ -765,16 +664,8 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public double GetDouble(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetDouble(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetDouble(ordinal);
-
-        if (IsQueryValueMode)
-        {
-            var qv = CurrentMaterializedRow[ordinal];
-            return qv.Type == QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
-        }
+        if (_composite != null)
+            return _composite.GetDouble(this, ordinal);
 
         // Fast path: decode directly from page span using precomputed O(1) offset
         if (_lazyMode)
@@ -792,13 +683,8 @@ public sealed class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string GetString(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetString(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetString(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].AsString();
+        if (_composite != null)
+            return _composite.GetString(this, ordinal);
 
         // Fast path: decode UTF-8 directly from page span using precomputed O(1) offset
         if (_lazyMode)
@@ -815,13 +701,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public byte[] GetBlob(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetBlob(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetBlob(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].AsBlob();
+        if (_composite != null)
+            return _composite.GetBlob(this, ordinal);
 
         return GetColumnValue(ordinal).AsBytes().ToArray();
     }
@@ -832,13 +713,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> GetBlobSpan(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetBlobSpan(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetBlobSpan(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].AsBlob();
+        if (_composite != null)
+            return _composite.GetBlobSpan(this, ordinal);
 
         return GetColumnValue(ordinal).AsBytes().Span;
     }
@@ -848,8 +724,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public string GetColumnName(int ordinal)
     {
-        if (_materializedColumnNames != null)
-            return _materializedColumnNames[ordinal];
+        if (_composite?.ColumnNames != null)
+            return _composite.ColumnNames[ordinal];
         if (_projection != null)
             return _columns![_projection[ordinal]].Name;
         return _columns![ordinal].Name;
@@ -861,7 +737,7 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal string[] GetColumnNames()
     {
-        if (_materializedColumnNames != null) return _materializedColumnNames;
+        if (_composite?.ColumnNames != null) return _composite.ColumnNames;
         if (_cachedColumnNames != null) return _cachedColumnNames;
         int count = FieldCount;
         var names = new string[count];
@@ -893,23 +769,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public SharcColumnType GetColumnType(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetColumnType(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetColumnType(ordinal);
-
-        if (IsQueryValueMode)
-        {
-            return CurrentMaterializedRow[ordinal].Type switch
-            {
-                QueryValueType.Null => SharcColumnType.Null,
-                QueryValueType.Int64 => SharcColumnType.Integral,
-                QueryValueType.Double => SharcColumnType.Real,
-                QueryValueType.Text => SharcColumnType.Text,
-                QueryValueType.Blob => SharcColumnType.Blob,
-                _ => SharcColumnType.Null,
-            };
-        }
+        if (_composite != null)
+            return _composite.GetColumnType(this, ordinal);
 
         var val = GetColumnValue(ordinal);
         return val.StorageClass switch
@@ -929,13 +790,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public object GetValue(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetValue(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetValue(ordinal);
-
-        if (IsQueryValueMode)
-            return CurrentMaterializedRow[ordinal].ToObject();
+        if (_composite != null)
+            return _composite.GetValue(this, ordinal);
 
         var val = GetColumnValue(ordinal);
         return val.StorageClass switch
@@ -989,13 +845,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> GetUtf8Span(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetUtf8Span(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetUtf8Span(ordinal);
-
-        if (IsQueryValueMode)
-            return System.Text.Encoding.UTF8.GetBytes(CurrentMaterializedRow[ordinal].AsString());
+        if (_composite != null)
+            return _composite.GetUtf8Span(this, ordinal);
 
         return GetColumnValue(ordinal).AsBytes().Span;
     }
@@ -1007,13 +858,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     public Guid GetGuid(int ordinal)
     {
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetGuid(ordinal);
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetGuid(ordinal);
-
-        if (IsQueryValueMode)
-            return Core.Primitives.GuidCodec.Decode(CurrentMaterializedRow[ordinal].AsBlob());
+        if (_composite != null)
+            return _composite.GetGuid(this, ordinal);
 
         // Merged column path: read two physical Int64 columns, combine into GUID.
         // Zero-alloc: DecodeInt64At reads directly from the page span using precomputed O(1) offset.
@@ -1043,17 +889,8 @@ public sealed class SharcDataReader : IDisposable
     /// </remarks>
     internal Fingerprint128 GetRowFingerprint()
     {
-        // Dedup mode: delegate to underlying
-        if (_dedupUnderlying != null)
-            return _dedupUnderlying.GetRowFingerprint();
-
-        // Concat mode: delegate to active reader
-        if (_concatFirst != null)
-            return ActiveConcatReader.GetRowFingerprint();
-
-        // Materialized mode: hash from QueryValue[]
-        if (IsQueryValueMode)
-            return GetMaterializedRowFingerprint();
+        if (_composite != null)
+            return _composite.GetRowFingerprint(this);
 
         // Cursor mode: hash raw payload bytes (zero string allocation)
         return GetCursorRowFingerprint();
@@ -1131,7 +968,7 @@ public sealed class SharcDataReader : IDisposable
 
     private Fingerprint128 GetMaterializedRowFingerprint()
     {
-        var row = CurrentMaterializedRow;
+        var row = _composite!.CurrentMaterializedRow;
         var hasher = new Fnv1aHasher();
         for (int i = 0; i < _columnCount && i < row.Length; i++)
         {
@@ -1166,30 +1003,8 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal Fingerprint128 GetColumnFingerprint(int ordinal)
     {
-        if (_dedupUnderlying != null) return _dedupUnderlying.GetColumnFingerprint(ordinal);
-        if (_concatFirst != null) return ActiveConcatReader.GetColumnFingerprint(ordinal);
-
-        if (IsQueryValueMode)
-        {
-            ref var val = ref CurrentMaterializedRow[ordinal];
-            var h = new Fnv1aHasher();
-            switch (val.Type)
-            {
-                case QueryValueType.Int64:
-                    h.AddTypeTag(0, 1);
-                    h.AppendLong(val.AsInt64()); break;
-                case QueryValueType.Double:
-                    h.AddTypeTag(0, 2);
-                    h.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
-                case QueryValueType.Text:
-                    h.AddTypeTag(0, 3);
-                    h.AppendString(val.AsString()); break;
-                default:
-                    h.AddTypeTag(0, 0);
-                    h.AppendLong(0); break;
-            }
-            return h.Hash;
-        }
+        if (_composite != null)
+            return _composite.GetColumnFingerprint(this, ordinal);
 
         // Cursor/lazy mode: hash raw column bytes without string allocation
         int physOrdinal = _projection != null ? _projection[ordinal] : ordinal;
@@ -1203,7 +1018,7 @@ public sealed class SharcDataReader : IDisposable
         }
 
         var payload = _cursor!.Payload;
-        var stSpan = _lazyMode ? _serialTypes! : _filterSerialTypes!;
+        var stSpan = _lazyMode ? _serialTypes! : _filter!.FilterSerialTypes!;
 
         // Use precomputed O(1) offset
         int offset = _columnOffsets![physOrdinal];
@@ -1370,14 +1185,16 @@ public sealed class SharcDataReader : IDisposable
         _cursor!.Reset();
 
         // Update filter (may change for parameterized queries)
-        _filterNode = filterNode;
-        _concreteFilterNode = filterNode as FilterNode;
-
-        // Allocate filter serial types buffer on first filtered reuse if not already rented
-        if (filterNode != null && _filterSerialTypes == null)
+        if (filterNode != null)
         {
-            _filterSerialTypes = ArrayPool<long>.Shared.Rent(_physicalColumnCount);
-            _filterSerialTypes.AsSpan(0, _physicalColumnCount).Clear();
+            if (_filter != null)
+                _filter.UpdateFilter(filterNode);
+            else
+                _filter = new FilterState(filterNode, null, _physicalColumnCount);
+        }
+        else
+        {
+            _filter = null;
         }
 
         // Reset per-scan state
@@ -1415,15 +1232,8 @@ public sealed class SharcDataReader : IDisposable
             return;
         }
 
-        _dedupUnderlying?.Dispose();
-        _dedupSeen?.Dispose();
-        _dedupRightIndex?.Dispose();
-        _concatFirst?.Dispose();
-        _concatSecond?.Dispose();
+        _composite?.Dispose();
         _cursor?.Dispose();
-
-        _queryValueEnumerator?.Dispose();
-        _queryValueEnumerator = null;
 
         if (_reusableBuffer is not null)
         {
@@ -1437,8 +1247,310 @@ public sealed class SharcDataReader : IDisposable
             ArrayPool<int>.Shared.Return(_decodedGenerations);
         if (_columnOffsets is not null)
             ArrayPool<int>.Shared.Return(_columnOffsets);
-        if (_filterSerialTypes is not null)
-            ArrayPool<long>.Shared.Return(_filterSerialTypes);
+
+        _filter?.Dispose();
+    }
+
+    // ─── Inner State Classes ─────────────────────────────────────
+
+    /// <summary>
+    /// Holds state for non-cursor modes: materialized (QueryValue), concat (UNION ALL),
+    /// and dedup (UNION/INTERSECT/EXCEPT). Null for cursor-mode readers, saving ~96 B
+    /// of dead reference fields on the hot PointLookup path.
+    /// </summary>
+    private sealed class CompositeState : IDisposable
+    {
+        // Materialized mode
+        internal readonly QueryValue[][]? QueryValueRows;
+        internal readonly RowSet? QueryValueList;
+        internal IEnumerator<QueryValue[]>? QueryValueEnumerator;
+        internal int MaterializedIndex = -1;
+
+        // Column names (shared across all composite modes)
+        internal readonly string[]? ColumnNames;
+
+        // Concat mode
+        internal readonly SharcDataReader? ConcatFirst;
+        internal readonly SharcDataReader? ConcatSecond;
+        internal bool ConcatOnSecond;
+
+        // Dedup mode
+        internal readonly SharcDataReader? DedupUnderlying;
+        internal readonly SetDedupMode DedupMode;
+        internal readonly IndexSet? DedupRightIndex;
+        internal readonly IndexSet? DedupSeen;
+
+        /// <summary>Materialized from array.</summary>
+        internal CompositeState(QueryValue[][] rows, string[] columnNames)
+        {
+            QueryValueRows = rows;
+            ColumnNames = columnNames;
+        }
+
+        /// <summary>Materialized from RowSet.</summary>
+        internal CompositeState(RowSet rows, string[] columnNames)
+        {
+            QueryValueList = rows;
+            ColumnNames = columnNames;
+        }
+
+        /// <summary>Materialized from streaming enumerator.</summary>
+        internal CompositeState(IEnumerable<QueryValue[]> rows, string[] columnNames)
+        {
+            QueryValueEnumerator = rows.GetEnumerator();
+            ColumnNames = columnNames;
+        }
+
+        /// <summary>Concat mode.</summary>
+        internal CompositeState(SharcDataReader first, SharcDataReader second, string[] columnNames)
+        {
+            ConcatFirst = first;
+            ConcatSecond = second;
+            ColumnNames = columnNames;
+        }
+
+        /// <summary>Dedup mode.</summary>
+        internal CompositeState(SharcDataReader underlying, SetDedupMode mode, IndexSet? rightIndex)
+        {
+            DedupUnderlying = underlying;
+            DedupMode = mode;
+            DedupRightIndex = rightIndex;
+            DedupSeen = IndexSet.Rent();
+            ColumnNames = underlying.GetColumnNames();
+        }
+
+        internal bool IsQueryValueMode => QueryValueRows != null || QueryValueList != null || QueryValueEnumerator != null;
+
+        internal QueryValue[] CurrentMaterializedRow
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                if (QueryValueRows != null) return QueryValueRows[MaterializedIndex];
+                if (QueryValueList != null) return QueryValueList[MaterializedIndex];
+                return QueryValueEnumerator!.Current;
+            }
+        }
+
+        private bool IsConcatMode => ConcatFirst != null;
+
+        private SharcDataReader ActiveConcatReader => ConcatOnSecond ? ConcatSecond! : ConcatFirst!;
+
+        /// <summary>ReadDefault dispatch for composite modes.</summary>
+        internal bool ReadComposite(SharcDataReader outer)
+        {
+            // Dedup streaming mode: filter rows by index
+            if (DedupUnderlying != null)
+            {
+                while (DedupUnderlying.Read())
+                {
+                    var fp = DedupUnderlying.GetRowFingerprint();
+                    bool pass = DedupMode switch
+                    {
+                        SetDedupMode.Union => DedupSeen!.Add(fp),
+                        SetDedupMode.Intersect => DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
+                        SetDedupMode.Except => !DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
+                        _ => false,
+                    };
+                    if (pass) return true;
+                }
+                return false;
+            }
+
+            // Concatenating mode: stream from first reader, then second
+            if (ConcatFirst != null)
+            {
+                if (!ConcatOnSecond)
+                {
+                    if (ConcatFirst.Read()) return true;
+                    ConcatOnSecond = true;
+                }
+                return ConcatSecond!.Read();
+            }
+
+            // Unboxed materialized mode: iterate QueryValue rows (array or list)
+            if (QueryValueRows != null)
+            {
+                MaterializedIndex++;
+                return MaterializedIndex < QueryValueRows.Length;
+            }
+            if (QueryValueList != null)
+            {
+                MaterializedIndex++;
+                return MaterializedIndex < QueryValueList.Count;
+            }
+            if (QueryValueEnumerator != null)
+            {
+                return QueryValueEnumerator.MoveNext();
+            }
+
+            return false;
+        }
+
+        // ── Accessor dispatch for composite modes ──
+
+        internal bool IsNull(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.IsNull(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.IsNull(ordinal);
+            return CurrentMaterializedRow[ordinal].IsNull;
+        }
+
+        internal long GetInt64(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetInt64(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetInt64(ordinal);
+            return CurrentMaterializedRow[ordinal].AsInt64();
+        }
+
+        internal double GetDouble(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetDouble(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetDouble(ordinal);
+            var qv = CurrentMaterializedRow[ordinal];
+            return qv.Type == QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
+        }
+
+        internal string GetString(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetString(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetString(ordinal);
+            return CurrentMaterializedRow[ordinal].AsString();
+        }
+
+        internal byte[] GetBlob(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetBlob(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetBlob(ordinal);
+            return CurrentMaterializedRow[ordinal].AsBlob();
+        }
+
+        internal ReadOnlySpan<byte> GetBlobSpan(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetBlobSpan(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetBlobSpan(ordinal);
+            return CurrentMaterializedRow[ordinal].AsBlob();
+        }
+
+        internal SharcColumnType GetColumnType(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetColumnType(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetColumnType(ordinal);
+            return CurrentMaterializedRow[ordinal].Type switch
+            {
+                QueryValueType.Null => SharcColumnType.Null,
+                QueryValueType.Int64 => SharcColumnType.Integral,
+                QueryValueType.Double => SharcColumnType.Real,
+                QueryValueType.Text => SharcColumnType.Text,
+                QueryValueType.Blob => SharcColumnType.Blob,
+                _ => SharcColumnType.Null,
+            };
+        }
+
+        internal object GetValue(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetValue(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetValue(ordinal);
+            return CurrentMaterializedRow[ordinal].ToObject();
+        }
+
+        internal ReadOnlySpan<byte> GetUtf8Span(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetUtf8Span(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetUtf8Span(ordinal);
+            return System.Text.Encoding.UTF8.GetBytes(CurrentMaterializedRow[ordinal].AsString());
+        }
+
+        internal Guid GetGuid(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetGuid(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetGuid(ordinal);
+            return Core.Primitives.GuidCodec.Decode(CurrentMaterializedRow[ordinal].AsBlob());
+        }
+
+        internal Fingerprint128 GetRowFingerprint(SharcDataReader outer)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetRowFingerprint();
+            if (IsConcatMode) return ActiveConcatReader.GetRowFingerprint();
+            if (IsQueryValueMode) return outer.GetMaterializedRowFingerprint();
+            return outer.GetCursorRowFingerprint();
+        }
+
+        internal Fingerprint128 GetColumnFingerprint(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetColumnFingerprint(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetColumnFingerprint(ordinal);
+
+            // Materialized mode
+            ref var val = ref CurrentMaterializedRow[ordinal];
+            var h = new Fnv1aHasher();
+            switch (val.Type)
+            {
+                case QueryValueType.Int64:
+                    h.AddTypeTag(0, 1);
+                    h.AppendLong(val.AsInt64()); break;
+                case QueryValueType.Double:
+                    h.AddTypeTag(0, 2);
+                    h.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
+                case QueryValueType.Text:
+                    h.AddTypeTag(0, 3);
+                    h.AppendString(val.AsString()); break;
+                default:
+                    h.AddTypeTag(0, 0);
+                    h.AppendLong(0); break;
+            }
+            return h.Hash;
+        }
+
+        public void Dispose()
+        {
+            DedupUnderlying?.Dispose();
+            DedupSeen?.Dispose();
+            DedupRightIndex?.Dispose();
+            ConcatFirst?.Dispose();
+            ConcatSecond?.Dispose();
+
+            QueryValueEnumerator?.Dispose();
+            QueryValueEnumerator = null;
+        }
+    }
+
+    /// <summary>
+    /// Holds filter-specific reference fields. Null when no filter is active.
+    /// Mutable per-row fields (_filterBodyOffset, _filterColCount) stay on the
+    /// main reader to avoid pointer indirection on the hot ProcessRow path.
+    /// </summary>
+    private sealed class FilterState : IDisposable
+    {
+        internal IFilterNode? FilterNode;
+        internal FilterNode? ConcreteFilterNode;
+        internal readonly ResolvedFilter[]? Filters;
+        internal long[]? FilterSerialTypes;
+
+        internal FilterState(IFilterNode? filterNode, ResolvedFilter[]? filters, int bufferSize)
+        {
+            FilterNode = filterNode;
+            ConcreteFilterNode = filterNode as FilterNode;
+            Filters = filters;
+
+            if (filterNode != null)
+            {
+                FilterSerialTypes = ArrayPool<long>.Shared.Rent(bufferSize);
+                FilterSerialTypes.AsSpan(0, bufferSize).Clear();
+            }
+        }
+
+        internal void UpdateFilter(IFilterNode filterNode)
+        {
+            FilterNode = filterNode;
+            ConcreteFilterNode = filterNode as FilterNode;
+        }
+
+        public void Dispose()
+        {
+            if (FilterSerialTypes is not null)
+                ArrayPool<long>.Shared.Return(FilterSerialTypes);
+        }
     }
 }
 
