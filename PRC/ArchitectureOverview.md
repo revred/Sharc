@@ -307,4 +307,4 @@ new SharcOpenOptions
 
 ### Current Test Status
 
-**2,260 tests passing** across 6 projects (unit + integration + query + graph + index + context).
+**2,570 tests passing** across 6 projects (unit + integration + query + graph + index + context).

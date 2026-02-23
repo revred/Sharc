@@ -4,35 +4,18 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
-## ADR-021: Multi-Overflow Write Limitation (Known)
+## ADR-021: Multi-Overflow Write Support (Resolved)
 
 **Date**: 2026-02-23
-**Status**: Accepted — Documented known limitation, tracked for Phase 2
+**Status**: Resolved — Multi-overflow page chains fully implemented
 
-**Context**: During stress testing of the write engine's overflow page handling, we discovered that the write path (`CellBuilder`) only chains a single overflow page per record. The SQLite file format supports arbitrary overflow chains (each overflow page links to the next via a 4-byte pointer at offset 0), and the Sharc **read** path (`BTreeCursor.AssembleOverflowPayload`) correctly follows multi-page overflow chains. However, the **write** path constructs at most one overflow page, limiting the maximum record payload to approximately `usableSize - 35` (cell header) + `usableSize - 4` (one overflow page) ≈ 8,147 bytes on a 4,096-byte page.
+**Context**: During stress testing of the write engine's overflow page handling, we discovered that the write path (`CellBuilder`) only chained a single overflow page per record. The SQLite file format supports arbitrary overflow chains (each overflow page links to the next via a 4-byte pointer at offset 0), and the Sharc **read** path (`BTreeCursor.AssembleOverflowPayload`) correctly follows multi-page overflow chains. However, the **write** path constructed at most one overflow page, limiting the maximum record payload to approximately `usableSize - 35` (cell header) + `usableSize - 4` (one overflow page) ≈ 8,147 bytes on a 4,096-byte page.
 
-Records larger than this threshold produce corrupted overflow chains: the first overflow page is written correctly, but subsequent overflow data is silently lost. This was confirmed by a stress test inserting a 20,480-byte payload — the 4,096-byte test passed, but the 20,480-byte test produced unreadable records.
+**Resolution**: Added `WriteOverflowChain` to `BTreeMutator` that allocates overflow pages in a loop, distributes payload bytes across pages (`usablePageSize - 4` bytes per page), writes 4-byte next-page pointers linking the chain, and patches the cell's overflow pointer to the first overflow page. Also added `AllocateOverflowPage` for lightweight page allocation without B-tree headers (overflow pages are raw data pages).
 
-**Decision**: Document as a known limitation. The write engine is designed for context-engineering workloads where records are typically small (agent attestations, ledger entries, graph edges, metadata). Multi-overflow writes are rare in the target domain. The limitation will be resolved in Phase 2 of the write engine.
+**Verification**: 10 stress tests covering 4 KB single-overflow, 20 KB (~5 pages), 50 KB (~13 pages), 5×15 KB batch, mixed inline/overflow, update-to-larger-overflow, delete+reinsert freelist recycling, seek by rowid across overflow rows. All 2,570 tests pass.
 
-**Rationale**:
-
-- The read path already handles multi-overflow correctly — no read-side changes needed
-- Target workloads (trust ledger, agent registry, graph storage) produce records well under 4 KB
-- Implementing multi-overflow writes requires: loop over remaining payload, chain overflow page pointers, update freelist accounting for N pages — non-trivial but straightforward
-- Fixing this is not a ship-blocker for the target use cases
-
-**Alternatives considered**:
-
-- **Fix now**: Would add ~100 lines to `CellBuilder.BuildTableLeafCell` and `CellBuilder.AllocateOverflowPages`. Deferred because the fix is isolated and won't affect existing code.
-- **Throw on oversized records**: Could throw `NotSupportedException` when payload exceeds single-overflow capacity. Not implemented because the silent corruption is the bug — a guard is separate from the fix.
-
-**Consequences**:
-
-- Records exceeding ~8 KB on 4,096-byte pages will produce corrupt data
-- A skipped stress test (`VeryLargePayload_MultiOverflowPages_Correct`) serves as the regression gate
-- Phase 2 TODO: implement overflow chain loop in `CellBuilder`, add corresponding stress tests
-- `docs/LIMITATIONS.md` updated with the restriction
+**Files modified**: `BTreeMutator.cs` (`WriteOverflowChain`, `AllocateOverflowPage`, updated `Insert` to call chain writer)
 
 ---
 

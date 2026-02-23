@@ -9,7 +9,6 @@ This document summarizes what is **missing**, **experimental**, or **intentional
 * **Remaining Limitations**:
   * **No Concurrency**: No WAL locking. Single writer at a time.
   * **No MVCC**: No snapshot isolation for concurrent readers + writers.
-  * **Single-Overflow Writes Only**: The write path chains at most one overflow page per record (~8 KB max payload on 4,096-byte pages). Records exceeding this limit produce corrupt overflow chains. The read path correctly handles multi-overflow chains. See ADR-021.
 
 ## 2. Querying Capabilities
 *   **Status**: `Sharq` parser + `JIT` filter + streaming query pipeline.

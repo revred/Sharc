@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-2%2C267_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-2%2C570_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -221,7 +221,7 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 2,260 tests
+dotnet test                                             # Run all 2,570 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -237,10 +237,10 @@ src/
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
-  Sharc.Tests/              1,356 unit tests
-  Sharc.IntegrationTests/   362 end-to-end tests
-  Sharc.Query.Tests/        446 query pipeline tests
-  Sharc.Graph.Tests.Unit/   60 graph tests
+  Sharc.Tests/              1,477 unit tests
+  Sharc.IntegrationTests/   528 end-to-end tests
+  Sharc.Query.Tests/        462 query pipeline tests
+  Sharc.Graph.Tests.Unit/   67 graph tests
   Sharc.Index.Tests/        22 index CLI tests
   Sharc.Context.Tests/      14 MCP context tests
 bench/
