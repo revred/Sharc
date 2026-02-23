@@ -3,6 +3,7 @@
 
 using Sharc.Query.Sharq;
 using Sharc.Query.Sharq.Ast;
+using ExecutionHint = global::Sharc.Query.Intent.ExecutionHint;
 using Xunit;
 
 namespace Sharc.Query.Tests.Sharq;
@@ -685,5 +686,65 @@ public class SharqSelectParserTests
         var keyword = Parse("SELECT * FROM t1 UNION ALL SELECT * FROM t2");
         Assert.Equal(keyword.CompoundOp, pipe.CompoundOp);
         Assert.Equal(keyword.CompoundRight!.From.Name, pipe.CompoundRight!.From.Name);
+    }
+
+    // ─── Execution Hint Prefix (DIRECT / CACHED / JIT) ──────────────
+
+    [Fact]
+    public void Parse_NoHint_DefaultsDirect()
+    {
+        var stmt = Parse("SELECT * FROM users");
+        Assert.Equal(ExecutionHint.Direct, stmt.Hint);
+    }
+
+    [Fact]
+    public void Parse_DirectHint_ExplicitDirect()
+    {
+        var stmt = Parse("DIRECT SELECT * FROM users");
+        Assert.Equal(ExecutionHint.Direct, stmt.Hint);
+    }
+
+    [Fact]
+    public void Parse_CachedHint_SetsCached()
+    {
+        var stmt = Parse("CACHED SELECT * FROM users WHERE age > 25");
+        Assert.Equal(ExecutionHint.Cached, stmt.Hint);
+        Assert.Equal("users", stmt.From.Name);
+        Assert.NotNull(stmt.Where);
+    }
+
+    [Fact]
+    public void Parse_JitHint_SetsJit()
+    {
+        var stmt = Parse("JIT SELECT name, age FROM users");
+        Assert.Equal(ExecutionHint.Jit, stmt.Hint);
+        Assert.Equal(2, stmt.Columns.Count);
+    }
+
+    [Fact]
+    public void Parse_CachedWithParameters_Succeeds()
+    {
+        var stmt = Parse("CACHED SELECT * FROM users WHERE age = $targetAge");
+        Assert.Equal(ExecutionHint.Cached, stmt.Hint);
+        Assert.NotNull(stmt.Where);
+    }
+
+    [Fact]
+    public void Parse_HintBeforeWith_Succeeds()
+    {
+        var stmt = Parse("CACHED WITH cte AS (SELECT * FROM users) SELECT * FROM cte");
+        Assert.Equal(ExecutionHint.Cached, stmt.Hint);
+        Assert.NotNull(stmt.Cotes);
+        Assert.Single(stmt.Cotes);
+    }
+
+    [Fact]
+    public void Parse_TableNamedCached_WorksAsIdentifier()
+    {
+        // "cached" as a table name — the hint is parsed first, then SELECT is expected.
+        // With no SELECT after "cached", this should parse "cached" as a table if used in FROM.
+        var stmt = Parse("SELECT * FROM cached");
+        Assert.Equal(ExecutionHint.Direct, stmt.Hint);
+        Assert.Equal("cached", stmt.From.Name);
     }
 }

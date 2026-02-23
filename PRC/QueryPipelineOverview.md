@@ -88,8 +88,8 @@ individual tables before the join to minimize rows entering the hash table.
 ### Filter Pipeline (Two Tiers)
 - **Tier 1 (PredicateNode):** Interprets filter predicates directly on raw record
   bytes. Zero allocation. Supports cross-type comparisons (int vs double).
-- **Tier 2 (JIT/Baked):** Compiles predicates into Expression Trees for repeated
-  evaluation. Same semantics, higher throughput on large scans.
+- **Tier 2 (Baked):** Composes predicates into closure-based delegates for repeated
+  evaluation. AOT-safe, same semantics, higher throughput on large scans.
 
 ### QueryPostProcessor
 Applies post-scan operations: aggregation (GROUP BY), DISTINCT, ORDER BY,

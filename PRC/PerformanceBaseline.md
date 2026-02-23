@@ -1,30 +1,30 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-22
-**Branch:** Arena.Fix
+**Date:** 2026-02-23
+**Branch:** local.MultiCache
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
-**Change:** Added `IPageSource.DataVersion` + `IBTreeCursor.IsStale` for multi-agent coordination (+8 B cursor construction)
+**Change:** v3 hot path optimizations — ScanMode jump table dispatch, generic specialization, batch single-byte varint decode, MoveNext branch elimination, zero-copy filter path
 
 ---
 
 ## Allocation Tier List
 
-### Tier 0 — Zero GC (cursor construction only, 664–912 B)
+### Tier 0 — Zero GC (cursor construction only, 640–912 B)
 
 | Benchmark | Mean | Allocated | GC | Notes |
 |-----------|------|-----------|-----|-------|
-| Sharc_PointLookup | 272 ns | 664 B | 0 | B-tree seek, single row |
+| Sharc_PointLookup | 282 ns | 640 B | 0 | B-tree seek, single row (97x faster than SQLite) |
 | Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
 | Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
 | Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
-| Sharc_FilterStar | 304 us | 800 B | 0 | JIT-compiled predicate scan |
+| Sharc_FilterStar | 304 us | 800 B | 0 | Closure-composed predicate scan |
 | Sharc_WhereFilter | 298 us | 912 B | 0 | SQL WHERE filter |
 | DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
 | SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |
 
-**Key insight:** All core read operations are flat 664–912 B (+8 B vs previous baseline from `_snapshotVersion` field for multi-agent staleness detection). This is cursor/reader construction only — the hot path (MoveNext + accessor) is truly zero-allocation.
+**Key insight:** All core read operations are flat 640–912 B. Point lookup allocation dropped 24 B (664→640 B) from generic specialization removing interface dispatch overhead. The hot path (MoveNext + accessor) is truly zero-allocation.
 
 ### Tier 0.5 — Index Seek (1,352–1,456 B)
 
@@ -98,7 +98,9 @@
 
 | Operation | Sharc | SQLite | Sharc/SQLite | Notes |
 |-----------|-------|--------|-------------|-------|
-| Point lookup | 272 ns / 664 B | 25.9 us / 728 B | **0.01x time** | Sharc 95x faster (direct B-tree seek, generic specialization) |
+| Point lookup | 282 ns / 640 B | 27.4 us / 728 B | **0.01x time** | Sharc **97x faster** (direct B-tree seek, generic specialization) |
+| 5-row read | 5.5 ns / 0 B | 23.0 us / 944 B | **0.0002x time** | Sharc **4,200x faster** (pre-decoded, zero-alloc) |
+| 100-int scan | 123 ns / 0 B | 46.1 us / 384 B | **0.003x time** | Sharc **375x faster** (in-memory varint decode) |
 | Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |
 | SELECT * (3 cols) | 105 us / 672 B | 637 us / 688 B | **0.16x time** | 6x faster, comparable allocation |
 | WHERE filter | 298 us / 912 B | 560 us / 720 B | **0.53x time** | 1.9x faster, similar allocation |
@@ -108,8 +110,12 @@
 | Insert 100 rows | 4.32 ms / 20.0 KB | 5.44 ms / 71.2 KB | **0.79x time, 0.28x alloc** | Sharc 3.6x less allocation |
 | Transaction 100 rows | 4.70 ms / 18.5 KB | 5.95 ms / 71.2 KB | **0.79x time, 0.26x alloc** | Sharc 3.9x less allocation |
 | Insert+Read 100 rows | 4.78 ms / 39.6 KB | 5.72 ms / 71.9 KB | **0.84x time, 0.55x alloc** | Read-back adds ~20 KB |
-| Graph BFS 2-hop | 2.4 us / 960 B | 80.8 us / 2,808 B | **0.03x time** | Sharc 34x faster |
-| Graph scan edges | 442 us / 640 B | 2,396 us / 696 B | **0.18x time** | Sharc 5.4x faster |
+| Graph node seek | 421 ns / 1,032 B | 26.0 us / 600 B | **0.016x time** | Sharc **62x faster** |
+| Graph batch seek (6) | 1.9 us / 3,368 B | 148.9 us / 3,024 B | **0.012x time** | Sharc **80x faster** |
+| Graph scan edges | 488 us / 656 B | 2,639 us / 696 B | **0.18x time** | Sharc **5.4x faster** |
+| Graph scan nodes | 556 us / 959 KB | 3,119 us / 959 KB | **0.18x time** | Sharc **5.6x faster**, same allocation |
+| 100K int scan | 3.8 ms / 18.7 KB | 25.4 ms / 704 B | **0.15x time** | Sharc **6.7x faster** |
+| Metadata parse | 7.8 ns / 0 B | 752 ns / 408 B | **0.01x time** | Sharc **96x faster** (struct parse, zero alloc) |
 
 **Note on SQLite allocation numbers:** SQLite's reported allocations only measure .NET GC-tracked objects (SqliteCommand/SqliteDataReader wrappers). SQLite's actual internal memory usage (native C hash tables, sort buffers) is invisible to BenchmarkDotNet's MemoryDiagnoser.
 
@@ -174,6 +180,63 @@ The `new AggState[2]` per group is the largest single allocator (1,040 B / 19%).
 ## Zero-Allocation Verification
 
 All non-filtered view operations show **zero Gen0/Gen1 collections** per 1,000 operations. The per-operation allocations (640–1,360 B) are cursor/reader construction costs, not per-row costs. The hot-path (MoveNext + accessor methods) remains zero-allocation as designed.
+
+---
+
+## Execution Tier Comparison (DIRECT vs CACHED vs JIT) — v3 Hot Path Optimized
+
+**Dataset:** 2,500 rows × 8 columns (id, name, email, age, score, active, dept, created)
+**Optimizations:** ScanMode jump table dispatch, generic cursor specialization, batch single-byte varint decode, MoveNext branch elimination, zero-copy filter path, cursor reuse (PreparedQuery)
+
+### Filtered Scan — `WHERE age > 30` (~2,000 matching rows)
+
+| Method | Mean | Ratio | Allocated | Alloc Ratio |
+|---|---|---|---|---|
+| DIRECT: `Query(sql)` | 82.78 us | 1.00 | 720 B | 1.00 |
+| CACHED: `Query(hint sql)` | 91.63 us | 1.11 | **0 B** | **0.00** |
+| JIT: `Query(hint sql)` | 96.29 us | 1.17 | **0 B** | **0.00** |
+| Manual `Prepare().Execute()` | 91.31 us | 1.11 | **0 B** | **0.00** |
+| Manual `Jit().Query()` | 87.55 us | 1.06 | 48 B | 0.07 |
+
+### Full Scan — `SELECT *` (5,000 rows, no filter)
+
+| Method | Mean | Ratio | Allocated | Alloc Ratio |
+|---|---|---|---|---|
+| DIRECT: `SELECT *` | 73.04 us | 1.00 | 720 B | 1.00 |
+| CACHED: `SELECT *` | 72.81 us | 1.00 | **0 B** | **0.00** |
+| JIT: `SELECT *` | **68.14 us** | **0.93** | **0 B** | **0.00** |
+
+### Narrow Projection — 3 string columns (5,000 rows)
+
+| Method | Mean | Ratio | Gen0 | Allocated | Alloc Ratio |
+|---|---|---|---|---|---|
+| DIRECT: narrow | 138.66 us | 1.00 | 7.57 | 97,968 B | 1.00 |
+| CACHED: narrow | 154.81 us | 1.12 | 7.57 | 97,248 B | 0.99 |
+| JIT: narrow | 155.13 us | 1.12 | 7.57 | 97,248 B | 0.99 |
+
+### Parameterized Filter — `WHERE age > @p0` (bound parameter)
+
+| Method | Mean | Ratio | Allocated | Alloc Ratio |
+|---|---|---|---|---|
+| DIRECT: parameterized | 81.47 us | 1.00 | 776 B | 1.00 |
+| CACHED: parameterized | 89.77 us | 1.11 | 56 B | 0.07 |
+| Manual Prepare: parameterized | 96.69 us | 1.19 | 56 B | 0.07 |
+
+### Key Allocation Achievement
+
+CACHED, JIT, and Manual Prepare achieve **true zero allocation** (0 B) for non-materialized queries — the BenchmarkDotNet MemoryDiagnoser reports no managed allocation at all. Cursor reuse + reader reset eliminates all per-call construction overhead. Only DIRECT (720 B for query parse + reader) and Manual Jit (48 B for column array) allocate on clean queries. Parameterized CACHED/Prepare allocate 56 B for parameter binding.
+
+Narrow projection is **string-allocation dominated** (~97 KB). The 720 B DIRECT overhead is invisible at this scale. CACHED saves 720 B of cursor construction but the 97 KB string materialization dwarfs any dispatch savings. Gen0 collections confirm this is all ephemeral (no Gen1/Gen2 pressure).
+
+### Timing Notes
+
+Absolute times are thermal-sensitive on laptop hardware (±15-20% baseline shift between runs). Ratios are more stable but also fluctuate. Across multiple runs:
+- **Full Scan**: JIT consistently achieves **0.93x** vs DIRECT — the clearest win, no filter evaluation noise
+- **Filtered Scan**: CACHED ranges **0.83-1.11x**, JIT ranges **0.76-1.17x** — highly thermal-dependent, no consistent winner
+- **Narrow Projection**: DIRECT consistently wins (~1.12x advantage) — string allocation cost dominates and DIRECT's simpler call stack has less overhead per materialization call
+- **Parameterized**: CACHED at **1.11x** with 93% allocation reduction (776→56 B) — parameter binding adds 56 B but eliminates parse + reader construction
+- Manual Prepare matches CACHED timing (identical code path via `PreparedQuery.Execute()`)
+- Manual Jit is fastest non-DIRECT path for filtered scans (no SQL parse, no plan cache lookup)
 
 ---
 

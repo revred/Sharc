@@ -570,4 +570,33 @@ public class SharqTokenizerTests
         Assert.Equal(SharqTokenKind.Exists, tokens[0].Kind);
         Assert.Equal(SharqTokenKind.LeftParen, tokens[1].Kind);
     }
+
+    // ─── Execution Hint Keywords: DIRECT, CACHED, JIT ────────────────
+
+    [Fact]
+    public void NextToken_DirectKeyword_ReturnsDirect()
+    {
+        Assert.Equal(SharqTokenKind.Direct, Tokenize("DIRECT").Kind);
+    }
+
+    [Fact]
+    public void NextToken_CachedKeyword_ReturnsCached()
+    {
+        Assert.Equal(SharqTokenKind.Cached, Tokenize("CACHED").Kind);
+    }
+
+    [Fact]
+    public void NextToken_JitKeyword_ReturnsJit()
+    {
+        Assert.Equal(SharqTokenKind.Jit, Tokenize("JIT").Kind);
+    }
+
+    [Fact]
+    public void NextToken_JitCaseInsensitive_ReturnsJit()
+    {
+        Assert.Equal(SharqTokenKind.Jit, Tokenize("jit").Kind);
+        Assert.Equal(SharqTokenKind.Jit, Tokenize("Jit").Kind);
+        Assert.Equal(SharqTokenKind.Cached, Tokenize("cached").Kind);
+        Assert.Equal(SharqTokenKind.Direct, Tokenize("direct").Kind);
+    }
 }

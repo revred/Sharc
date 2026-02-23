@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc.Query.Intent;
 using Sharc.Query.Sharq.Ast;
 
 namespace Sharc.Query.Sharq;
@@ -56,6 +57,9 @@ internal ref struct SharqParser
 
     private SelectStatement ParseStatement()
     {
+        // Optional execution hint prefix: DIRECT | CACHED | JIT
+        var hint = ParseOptionalHint();
+
         // Optional WITH cote_list
         IReadOnlyList<CoteDefinition>? cotes = null;
         if (_current.Kind == SharqTokenKind.With)
@@ -69,11 +73,12 @@ internal ref struct SharqParser
         // Optional trailing semicolon (moved from ParseSelect)
         Match(SharqTokenKind.Semicolon);
 
-        if (cotes != null)
+        if (hint != ExecutionHint.Direct || cotes != null)
         {
-            // Attach Cotes to the outermost statement
+            // Attach hint and/or Cotes to the outermost statement
             return new SelectStatement
             {
+                Hint = hint,
                 IsDistinct = stmt.IsDistinct,
                 Columns = stmt.Columns,
                 From = stmt.From,
@@ -91,6 +96,24 @@ internal ref struct SharqParser
         }
 
         return stmt;
+    }
+
+    private ExecutionHint ParseOptionalHint()
+    {
+        switch (_current.Kind)
+        {
+            case SharqTokenKind.Direct:
+                Advance();
+                return ExecutionHint.Direct;
+            case SharqTokenKind.Cached:
+                Advance();
+                return ExecutionHint.Cached;
+            case SharqTokenKind.Jit:
+                Advance();
+                return ExecutionHint.Jit;
+            default:
+                return ExecutionHint.Direct;
+        }
     }
 
     private List<CoteDefinition> ParseCoteList()
@@ -1017,7 +1040,8 @@ internal ref struct SharqParser
         SharqTokenKind.With or SharqTokenKind.Over or SharqTokenKind.Partition or
         SharqTokenKind.Nulls or SharqTokenKind.Union or SharqTokenKind.Intersect or
         SharqTokenKind.Except or SharqTokenKind.Exists or
-        SharqTokenKind.UnionAll => true,
+        SharqTokenKind.UnionAll or
+        SharqTokenKind.Direct or SharqTokenKind.Cached or SharqTokenKind.Jit => true,
         _ => false
     };
 }

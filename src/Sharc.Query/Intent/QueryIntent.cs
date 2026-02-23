@@ -51,6 +51,9 @@ public sealed class QueryIntent
     /// <summary>HAVING filter on aggregated results, or null.</summary>
     public PredicateIntent? HavingFilter { get; init; }
 
+    /// <summary>Execution hint controlling query tier routing. Default is Direct.</summary>
+    public ExecutionHint Hint { get; init; }
+
     /// <summary>True if the query contains any aggregate functions.</summary>
     public bool HasAggregates => Aggregates is { Count: > 0 };
 

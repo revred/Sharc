@@ -18,7 +18,7 @@ namespace Sharc.Views;
 /// or via <see cref="ViewPromoter"/> for automatic SQLite view conversion.
 /// </para>
 /// </summary>
-public sealed class SharcView
+public sealed class SharcView : ILayer
 {
     /// <summary>Human-readable name for this view.</summary>
     public string Name { get; }
@@ -46,27 +46,37 @@ public sealed class SharcView
     /// </summary>
     public Func<IRowAccessor, bool>? Filter { get; }
 
+    /// <summary>
+    /// Controls how rows are produced during cursor iteration.
+    /// Default is <see cref="MaterializationStrategy.Eager"/>.
+    /// </summary>
+    public MaterializationStrategy Strategy { get; }
+
     // Cached array form of ProjectedColumnNames — avoids per-Open .ToArray() allocation.
     private readonly string[]? _projectedColumnArray;
 
     /// <summary>Creates a table-sourced view.</summary>
-    internal SharcView(string name, string sourceTable, IReadOnlyList<string>? projectedColumnNames, Func<IRowAccessor, bool>? filter)
+    internal SharcView(string name, string sourceTable, IReadOnlyList<string>? projectedColumnNames,
+        Func<IRowAccessor, bool>? filter, MaterializationStrategy strategy = MaterializationStrategy.Eager)
     {
         Name = name;
         SourceTable = sourceTable;
         ProjectedColumnNames = projectedColumnNames;
         _projectedColumnArray = projectedColumnNames?.ToArray();
         Filter = filter;
+        Strategy = strategy;
     }
 
     /// <summary>Creates a view-sourced view (subview).</summary>
-    internal SharcView(string name, SharcView sourceView, IReadOnlyList<string>? projectedColumnNames, Func<IRowAccessor, bool>? filter)
+    internal SharcView(string name, SharcView sourceView, IReadOnlyList<string>? projectedColumnNames,
+        Func<IRowAccessor, bool>? filter, MaterializationStrategy strategy = MaterializationStrategy.Eager)
     {
         Name = name;
         SourceView = sourceView;
         ProjectedColumnNames = projectedColumnNames;
         _projectedColumnArray = projectedColumnNames?.ToArray();
         Filter = filter;
+        Strategy = strategy;
     }
 
     /// <summary>Maximum depth for subview chains to prevent stack overflow from circular references.</summary>

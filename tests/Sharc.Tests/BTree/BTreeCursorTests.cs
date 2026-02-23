@@ -561,7 +561,7 @@ public class BTreeCursorTests
     }
 
     [Fact]
-    public void MoveNext_AfterDispose_ThrowsObjectDisposed()
+    public void MoveNext_AfterDispose_ReturnsFalse()
     {
         var record = MakeSimpleRecord();
         var db = CreateDatabase(2, (data, ps) =>
@@ -575,6 +575,8 @@ public class BTreeCursorTests
         var cursor = reader.CreateCursor(2);
         cursor.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() => cursor.MoveNext());
+        // After Dispose, _exhausted is set — MoveNext returns false (no throw).
+        // Disposed check is a Debug.Assert, not a runtime branch.
+        Assert.False(cursor.MoveNext());
     }
 }

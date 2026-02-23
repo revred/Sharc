@@ -130,6 +130,18 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return _relations.CreateEdgeCursor(origin, kind);
     }
 
+    /// <summary>
+    /// Creates a <see cref="PreparedTraversal"/> that owns independent cursors and state,
+    /// enabling concurrent traversals from the same graph context. The policy is captured
+    /// at prepare time and reused on each <see cref="PreparedTraversal.Execute"/> call.
+    /// </summary>
+    /// <param name="policy">The traversal policy (direction, depth, fan-out, etc.).</param>
+    /// <returns>A <see cref="PreparedTraversal"/> handle. Call <see cref="PreparedTraversal.Execute"/> to run.</returns>
+    public PreparedTraversal PrepareTraversal(TraversalPolicy policy)
+    {
+        return new PreparedTraversal(_concepts, _relations, policy);
+    }
+
     /// <inheritdoc/>
     public GraphResult Traverse(NodeKey startKey, TraversalPolicy policy)
     {
