@@ -89,11 +89,10 @@ public sealed class OverflowAssemblyStressTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Multi-overflow page writes not yet supported — write path chains only one overflow page")]
+    [Fact]
     public void VeryLargePayload_MultiOverflowPages_Correct()
     {
         // 20KB text = ~5 overflow pages at 4096 page size
-        // Currently fails: write path only chains a single overflow page
         var data = TestDatabaseFactory.CreateUsersDatabase(0);
         File.WriteAllBytes(_dbPath, data);
 
@@ -116,6 +115,115 @@ public sealed class OverflowAssemblyStressTests : IDisposable
             using var reader = db.CreateReader("users", "name");
             Assert.True(reader.Read());
             Assert.Equal(hugeVal, reader.GetString(0));
+        }
+    }
+
+    [Fact]
+    public void VeryLargePayload_50KB_MultiOverflowChain()
+    {
+        // 50KB text = ~13 overflow pages at 4096 page size
+        var data = TestDatabaseFactory.CreateUsersDatabase(0);
+        File.WriteAllBytes(_dbPath, data);
+
+        string hugeVal = new('M', 50000);
+
+        using (var db = SharcDatabase.Open(_dbPath, new SharcOpenOptions { Writable = true }))
+        {
+            using var writer = SharcWriter.From(db);
+            writer.Insert("users",
+                ColumnValue.FromInt64(1, 1),
+                ColumnValue.Text(2 * System.Text.Encoding.UTF8.GetByteCount(hugeVal) + 13,
+                    System.Text.Encoding.UTF8.GetBytes(hugeVal)),
+                ColumnValue.FromInt64(2, 30),
+                ColumnValue.FromDouble(50.0),
+                ColumnValue.Null());
+        }
+
+        using (var db = SharcDatabase.Open(_dbPath))
+        {
+            using var reader = db.CreateReader("users", "name");
+            Assert.True(reader.Read());
+            Assert.Equal(hugeVal, reader.GetString(0));
+        }
+    }
+
+    [Fact]
+    public void MultipleVeryLargeRows_AllReadable()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(0);
+        File.WriteAllBytes(_dbPath, data);
+
+        const int rowCount = 5;
+        const int textSize = 15000;
+
+        using (var db = SharcDatabase.Open(_dbPath, new SharcOpenOptions { Writable = true }))
+        {
+            using var writer = SharcWriter.From(db);
+            for (int i = 1; i <= rowCount; i++)
+            {
+                string bigVal = new((char)('A' + (i % 26)), textSize);
+                writer.Insert("users",
+                    ColumnValue.FromInt64(1, i),
+                    ColumnValue.Text(2 * System.Text.Encoding.UTF8.GetByteCount(bigVal) + 13,
+                        System.Text.Encoding.UTF8.GetBytes(bigVal)),
+                    ColumnValue.FromInt64(2, i),
+                    ColumnValue.FromDouble(i * 1.5),
+                    ColumnValue.Null());
+            }
+        }
+
+        using (var db = SharcDatabase.Open(_dbPath))
+        {
+            using var reader = db.CreateReader("users", "name");
+            int count = 0;
+            while (reader.Read())
+            {
+                count++;
+                string name = reader.GetString(0);
+                Assert.Equal(textSize, name.Length);
+            }
+            Assert.Equal(rowCount, count);
+        }
+    }
+
+    [Fact]
+    public void UpdateToLargerOverflow_MultiChain_Correct()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(0);
+        File.WriteAllBytes(_dbPath, data);
+
+        using (var db = SharcDatabase.Open(_dbPath, new SharcOpenOptions { Writable = true }))
+        {
+            using var writer = SharcWriter.From(db);
+
+            // Insert a moderately large row (single overflow)
+            string oldVal = new('A', 4000);
+            writer.Insert("users",
+                ColumnValue.FromInt64(1, 1),
+                ColumnValue.Text(2 * System.Text.Encoding.UTF8.GetByteCount(oldVal) + 13,
+                    System.Text.Encoding.UTF8.GetBytes(oldVal)),
+                ColumnValue.FromInt64(2, 25),
+                ColumnValue.FromDouble(100.0),
+                ColumnValue.Null());
+
+            // Update to a much larger row (multi-overflow)
+            string newVal = new('B', 20000);
+            writer.Update("users", 1,
+                ColumnValue.FromInt64(1, 1),
+                ColumnValue.Text(2 * System.Text.Encoding.UTF8.GetByteCount(newVal) + 13,
+                    System.Text.Encoding.UTF8.GetBytes(newVal)),
+                ColumnValue.FromInt64(2, 30),
+                ColumnValue.FromDouble(200.0),
+                ColumnValue.Null());
+        }
+
+        using (var db = SharcDatabase.Open(_dbPath))
+        {
+            using var reader = db.CreateReader("users", "name");
+            Assert.True(reader.Read());
+            string result = reader.GetString(0);
+            Assert.Equal(20000, result.Length);
+            Assert.True(result.All(c => c == 'B'));
         }
     }
 
