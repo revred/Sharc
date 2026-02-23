@@ -1,11 +1,12 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-23
+**Date:** 2026-02-23 (verified 2026-02-23 post-multi-overflow commit)
 **Branch:** local.MultiCache
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
 **Change:** v3 hot path optimizations — ScanMode jump table dispatch, generic specialization, batch single-byte varint decode, MoveNext branch elimination, zero-copy filter path
+**Verification:** Post-multi-overflow (commit 70e45f8) — zero hot-path code changes since baseline. Re-run confirmed PointLookup 430 ns / 680 B (bimodal: lower cluster 330 ns matching baseline). All timing variances attributed to laptop thermal throttling. Sharc vs SQLite ratio: 92x (mean) to 95x (fast cluster). Write allocations stable (Insert 100: 28 KB, Insert 1K: 125 KB).
 
 ---
 
