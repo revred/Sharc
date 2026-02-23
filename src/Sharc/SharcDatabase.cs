@@ -420,6 +420,43 @@ public sealed class SharcDatabase : IDisposable
     public SharcDataReader CreateReader(string tableName, string[]? columns, IFilterStar filter) => CreateReader(tableName, columns, null, filter);
 
     /// <summary>
+    /// Creates a pre-resolved reader handle for zero-allocation repeated Seek/Read calls.
+    /// Schema, projection, and cursor are resolved once; subsequent <see cref="PreparedReader.CreateReader"/>
+    /// calls reuse the same reader and buffers with zero per-call allocation.
+    /// </summary>
+    /// <param name="tableName">The table to read from.</param>
+    /// <param name="columns">Optional column projection. If empty or null, all columns are returned.</param>
+    /// <returns>A <see cref="PreparedReader"/> that can produce zero-alloc readers.</returns>
+    public PreparedReader PrepareReader(string tableName, params string[]? columns)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+        var table = schema.GetTable(tableName) ?? throw new KeyNotFoundException($"Table '{tableName}' not found.");
+        var cursor = CreateTableCursor(table);
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                int ordinal = table.GetColumnOrdinal(columns[i]);
+                projection[i] = ordinal >= 0 ? ordinal : throw new ArgumentException($"Column '{columns[i]}' not found.");
+            }
+        }
+
+        var reader = new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        {
+            Columns = table.Columns,
+            Projection = projection,
+            BTreeReader = _bTreeReader,
+            TableIndexes = table.Indexes
+        });
+
+        return new PreparedReader(cursor, reader);
+    }
+
+    /// <summary>
     /// Executes a Sharq query string and returns a data reader.
     /// Compiled plans are cached for zero-overhead repeat queries.
     /// </summary>
