@@ -4,6 +4,38 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-021: Multi-Overflow Write Limitation (Known)
+
+**Date**: 2026-02-23
+**Status**: Accepted — Documented known limitation, tracked for Phase 2
+
+**Context**: During stress testing of the write engine's overflow page handling, we discovered that the write path (`CellBuilder`) only chains a single overflow page per record. The SQLite file format supports arbitrary overflow chains (each overflow page links to the next via a 4-byte pointer at offset 0), and the Sharc **read** path (`BTreeCursor.AssembleOverflowPayload`) correctly follows multi-page overflow chains. However, the **write** path constructs at most one overflow page, limiting the maximum record payload to approximately `usableSize - 35` (cell header) + `usableSize - 4` (one overflow page) ≈ 8,147 bytes on a 4,096-byte page.
+
+Records larger than this threshold produce corrupted overflow chains: the first overflow page is written correctly, but subsequent overflow data is silently lost. This was confirmed by a stress test inserting a 20,480-byte payload — the 4,096-byte test passed, but the 20,480-byte test produced unreadable records.
+
+**Decision**: Document as a known limitation. The write engine is designed for context-engineering workloads where records are typically small (agent attestations, ledger entries, graph edges, metadata). Multi-overflow writes are rare in the target domain. The limitation will be resolved in Phase 2 of the write engine.
+
+**Rationale**:
+
+- The read path already handles multi-overflow correctly — no read-side changes needed
+- Target workloads (trust ledger, agent registry, graph storage) produce records well under 4 KB
+- Implementing multi-overflow writes requires: loop over remaining payload, chain overflow page pointers, update freelist accounting for N pages — non-trivial but straightforward
+- Fixing this is not a ship-blocker for the target use cases
+
+**Alternatives considered**:
+
+- **Fix now**: Would add ~100 lines to `CellBuilder.BuildTableLeafCell` and `CellBuilder.AllocateOverflowPages`. Deferred because the fix is isolated and won't affect existing code.
+- **Throw on oversized records**: Could throw `NotSupportedException` when payload exceeds single-overflow capacity. Not implemented because the silent corruption is the bug — a guard is separate from the fix.
+
+**Consequences**:
+
+- Records exceeding ~8 KB on 4,096-byte pages will produce corrupt data
+- A skipped stress test (`VeryLargePayload_MultiOverflowPages_Correct`) serves as the regression gate
+- Phase 2 TODO: implement overflow chain loop in `CellBuilder`, add corresponding stress tests
+- `docs/LIMITATIONS.md` updated with the restriction
+
+---
+
 ## ADR-020: JitQuery View Support + JitSQL Design
 
 **Date**: 2026-02-22
