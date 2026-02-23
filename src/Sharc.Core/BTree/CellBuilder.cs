@@ -1,9 +1,5 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
-
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;

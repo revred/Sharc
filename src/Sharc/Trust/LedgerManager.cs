@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;

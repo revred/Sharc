@@ -88,7 +88,7 @@ These documents remain in the repo for historical context but are no longer auth
 
 | Document | Why Archived |
 |:---------|:-------------|
-| [**StatusReportPhase2.md**](StatusReportPhase2.md) | Phase 2 milestone snapshot (1,064 tests) — superseded by current 2,660+ tests |
+| [**StatusReportPhase2.md**](StatusReportPhase2.md) | Phase 2 milestone snapshot (1,064 tests) — superseded by current test suite |
 | [**BenchGraphSpec.md**](BenchGraphSpec.md) | SurrealDB competitive benchmark spec — comparison deprioritized |
 | [**ArenaUpgrade.md**](ArenaUpgrade.md) | Seven-page Arena redesign spec — not yet started, future work |
 

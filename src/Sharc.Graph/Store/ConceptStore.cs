@@ -10,6 +10,9 @@ using Sharc.Core.Schema;
 
 namespace Sharc.Graph.Store;
 
+/// <summary>
+/// Reads concept (node) records from the graph's concept table B-tree.
+/// </summary>
 internal sealed class ConceptStore
 {
     private readonly IBTreeReader _reader;

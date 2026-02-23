@@ -1,12 +1,12 @@
 # Performance Baseline — Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-23 (v4 Prepared Pattern + ThreadStatic Pool)
+**Date:** 2026-02-23 (v5 Leaf Cache + Random Lookup Proof)
 **Branch:** local.MultiCache
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
-**Change:** v4 Prepared Pattern — `PreparedReader`/`PreparedQuery` zero-allocation reuse + ThreadStatic 2-slot reader pool for `CreateReader()`. Cold path improved from 92x → 199x vs SQLite (252 ns / 368 B → 117 ns / 0 B). Hot path (prepared) achieves 0 B in every benchmark area.
-**Previous:** v3 hot path optimizations — ScanMode jump table, generic specialization, batch varint, MoveNext branch elimination, zero-copy filter. PointLookup was 282 ns / 640 B (97x).
+**Change:** v5 B-tree leaf range cache — same-rowid fast path (skip all traversal), same-leaf fast path (skip interior pages), 512-entry circular random buffer for honest benchmarking. Random rowid lookup achieves 276 ns / 0 B (109x vs SQLite). Same-rowid achieves 104 ns / 0 B (257x).
+**Previous:** v4 Prepared Pattern — `PreparedReader`/`PreparedQuery` zero-allocation reuse + ThreadStatic pool. PointLookup was 159 ns / 0 B (prepared) before leaf cache.
 
 ---
 
@@ -16,7 +16,8 @@
 
 | Benchmark | Hot (Prepared) | Cold (CreateReader) | Allocated (Hot) | Allocated (Cold) | GC | Notes |
 |-----------|---------------|---------------------|-----------------|------------------|----|-------|
-| Sharc_PointLookup | 106.5 ns | 117.4 ns (pooled) | **0 B** | **0 B** | 0 | 219x vs SQLite (hot), 199x (cold) |
+| Sharc_RandomLookup | 275.8 ns | — | **0 B** | — | 0 | **109x vs SQLite** (honest random rowid, 512-buf) |
+| Sharc_PointLookup | 103.7 ns | 82.4 ns (pooled) | **0 B** | **0 B** | 0 | 257x vs SQLite (same-rowid, leaf cache hit) |
 | Sharc_TypeDecode | 161.3 us | 151.7 us | **0 B** | 408 B | 0 | Full scan, type decode only |
 | Sharc_GcPressure | 168.0 us | 146.0 us | **0 B** | 408 B | 0 | Full scan, zero GC target |
 | Sharc_NullScan | 141.4 us | 148.2 us | **0 B** | 408 B | 0 | Full scan with NULL handling |
@@ -24,7 +25,7 @@
 | Sharc_WhereFilter | 236.1 us | 245.5 us | **0 B** | 680 B | 0 | SQL WHERE filter (PreparedQuery) |
 | Sharc_SequentialScan | 908.1 us | 922.7 us | 1.35 MB | 1.35 MB | Gen0 | String-dominated, reader overhead invisible |
 
-**Key insight:** The Prepared Pattern (`PreparedReader`/`PreparedQuery`) achieves **true 0 B allocation** in every benchmark area. The ThreadStatic reader pool also eliminates allocation on the cold `CreateReader()` path for no-projection, no-filter calls (PointLookup). Projected readers (TypeDecode, GcPressure, NullScan) show 408 B cold because they bypass the pool. SequentialScan is string-allocation dominated (5K `GetString()` calls = 1.35 MB) — reader overhead is invisible at that scale.
+**Key insight:** The Prepared Pattern (`PreparedReader`/`PreparedQuery`) achieves **true 0 B allocation** in every benchmark area. The B-tree leaf range cache adds same-rowid (257x) and same-leaf (skip interior pages) fast paths that bring random-rowid lookups to 276 ns / 0 B (109x vs SQLite). The ThreadStatic reader pool also eliminates allocation on the cold `CreateReader()` path for no-projection calls. SequentialScan is string-allocation dominated (5K `GetString()` calls = 1.35 MB) — reader overhead is invisible at that scale.
 
 ### Tier 0 (legacy) — Cold Path Only (408–680 B cursor construction)
 
@@ -107,8 +108,9 @@
 
 | Operation | Sharc | SQLite | Sharc/SQLite | Notes |
 |-----------|-------|--------|-------------|-------|
-| Point lookup (prepared) | 106.5 ns / **0 B** | 23.3 us / 728 B | **0.005x time** | Sharc **219x faster** (prepared + generic specialization) |
-| Point lookup (cold, pooled) | 117.4 ns / **0 B** | 23.3 us / 728 B | **0.005x time** | Sharc **199x faster** (ThreadStatic pool) |
+| Random lookup (prepared) | 275.8 ns / **0 B** | 30,135 ns / 832 B | **0.009x time** | Sharc **109x faster** (honest random rowid, 512-buf) |
+| Point lookup (prepared) | 103.7 ns / **0 B** | 26,738 ns / 408 B | **0.004x time** | Sharc **257x faster** (same-rowid, leaf cache) |
+| Point lookup (cold, pooled) | 82.4 ns / **0 B** | 30,229 ns / 728 B | **0.003x time** | Sharc **367x faster** (same-rowid, cold path) |
 | 5-row read | 5.5 ns / 0 B | 23.0 us / 944 B | **0.0002x time** | Sharc **4,200x faster** (pre-decoded, zero-alloc) |
 | 100-int scan | 123 ns / 0 B | 46.1 us / 384 B | **0.003x time** | Sharc **375x faster** (in-memory varint decode) |
 | Sequential scan 5K | 1,251 us / 1.4 MB | 5,895 us / 1.4 MB | **0.21x time** | Sharc 4.7x faster, same allocation |

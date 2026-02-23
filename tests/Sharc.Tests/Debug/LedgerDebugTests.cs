@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using Sharc.Core.Storage;
 using Sharc.Trust;
 using Sharc.Core.Trust;

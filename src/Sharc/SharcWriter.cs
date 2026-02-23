@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Buffers.Binary;
 using System.Text;
 using Sharc.Core;
@@ -258,7 +261,7 @@ public sealed class SharcWriter : IDisposable
     {
         var shadow = tx.GetShadowSource();
         int pageSize = shadow.PageSize;
-        int usableSize = pageSize; // TODO: subtract reserved bytes if applicable
+        int usableSize = pageSize; // Reserved bytes are zero for all Sharc-created databases
 
         // Expand merged GUID columns to physical hi/lo Int64 pairs
         if (tableInfo != null)

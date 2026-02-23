@@ -168,9 +168,6 @@ Sharc.Graph (graph storage)
 Sharc.Crypto (encryption)
   └── Sharc.Core (IPageTransform)
 
-Sharc.Scene (trust playground)
-  └── Sharc (Trust layer)
-
 Sharc.Tests
   ├── Sharc
   ├── Sharc.Core
@@ -183,7 +180,6 @@ Sharc.Benchmarks
 
 Sharc.Crypto is **optional** — unencrypted databases require only Sharc + Sharc.Core.
 Sharc.Graph is **optional** — graph storage adds ConceptStore/RelationStore over the B-tree engine.
-Sharc.Scene is **optional** — trust playground for visualizing agent interactions.
 
 ## 5. Threading Model
 
@@ -303,8 +299,7 @@ new SharcOpenOptions
 - Co-signature support for multi-agent endorsement
 - Governance policies for permission boundaries and scope control
 - Trust models (`AgentInfo`, `AgentClass`, `TrustPayload`, `LedgerEntry`) in `Sharc.Core.Trust`
-- `Sharc.Scene` trust playground for live agent simulation and visualization
 
 ### Current Test Status
 
-**2,570 tests passing** across 6 projects (unit + integration + query + graph + index + context).
+All tests passing across 6 projects (unit + integration + query + graph + index + context). Run `dotnet test` for current count.

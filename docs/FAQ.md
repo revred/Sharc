@@ -16,7 +16,7 @@ If you need views, triggers, or stored procedures, use SQLite. Sharc supports `J
 *   **Deployment matters:** You need a <50KB WASM binary (vs 1MB+ for SQLite WASM).
 
 ### Is this production-ready?
-The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with **2,570 tests** across 6 test projects.
+The **Core Read Engine**, **Write Engine**, **Graph Layer**, **Trust Layer**, and **JIT Filter** are production-ready with comprehensive test coverage across 6 test projects.
 
 The **Write Engine** supports:
 *   **Full CRUD**: `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`
