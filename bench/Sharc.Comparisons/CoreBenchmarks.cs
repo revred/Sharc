@@ -5,6 +5,7 @@
   Licensed under the MIT License — free for personal and commercial use.                           |
 --------------------------------------------------------------------------------------------------*/
 
+using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Data.Sqlite;
 using Sharc.Core.Query;
@@ -33,6 +34,23 @@ public class CoreBenchmarks
     private SqliteConnection _conn = null!;
     private SharcDatabase _sharcDb = null!;
     private IFilterNode _cachedFilterNode = null!;
+
+    // ── Prepared handles (zero-alloc hot paths) ──────────────────────
+    private PreparedReader _preparedReader = null!;       // PointLookup + BatchLookup
+    private SqliteCommand _sqlitePreparedPoint = null!;   // SQLite prepared PointLookup
+    private PreparedReader _preparedSeqScan = null!;      // SequentialScan (9 cols)
+    private PreparedReader _preparedTypeDecode = null!;   // TypeDecode + GcPressure ("id")
+    private PreparedReader _preparedNullScan = null!;     // NullScan ("bio")
+    private PreparedQuery _preparedWhereFilter = null!;   // WhereFilter (age > 30 AND score < 50)
+    private PreparedQuery _preparedFilterStar = null!;    // FilterStar (same filter, via Prepare)
+
+    // ── Random rowid buffer for fair point lookup benchmarks ────────
+    // 512-entry circular buffer: small enough to stay cache-friendly,
+    // large enough to defeat same-rowid/same-leaf fast paths.
+    private const int RandomBufSize = 512;
+    private long[] _randomBuf = null!;
+    private int _randomIdx;
+    private Random _rng = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -63,11 +81,41 @@ public class CoreBenchmarks
                 break;
             }
         }
+
+        // ── SQLite prepared command (skip parse + plan on hot path) ──
+        _sqlitePreparedPoint = _conn.CreateCommand();
+        _sqlitePreparedPoint.CommandText = "SELECT id FROM users WHERE rowid = 2500";
+        _sqlitePreparedPoint.Prepare();
+
+        // ── 512-entry random rowid buffer (fixed seed, no per-call alloc) ─
+        _rng = new Random(42);
+        _randomBuf = new long[RandomBufSize];
+        RefillRandomBuf();
+
+        // ── Prepared readers (resolve schema + cursor once) ──────────
+        _preparedReader = _sharcDb.PrepareReader("users");
+        _preparedSeqScan = _sharcDb.PrepareReader("users",
+            "id", "name", "email", "age", "score", "bio", "active", "dept", "created");
+        _preparedTypeDecode = _sharcDb.PrepareReader("users", "id");
+        _preparedNullScan = _sharcDb.PrepareReader("users", "bio");
+
+        // ── Prepared queries (resolve schema + filter + cursor once) ──
+        _preparedWhereFilter = _sharcDb.Prepare(
+            "SELECT id FROM users WHERE age > 30 AND score < 50");
+        _preparedFilterStar = _sharcDb.Prepare(
+            "SELECT id FROM users WHERE age > 30 AND score < 50");
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
+        _preparedReader?.Dispose();
+        _preparedSeqScan?.Dispose();
+        _preparedTypeDecode?.Dispose();
+        _preparedNullScan?.Dispose();
+        _preparedWhereFilter?.Dispose();
+        _preparedFilterStar?.Dispose();
+        _sqlitePreparedPoint?.Dispose();
         _conn?.Dispose();
         _sharcDb?.Dispose();
     }
@@ -139,6 +187,29 @@ public class CoreBenchmarks
     [BenchmarkCategory("SequentialScan")]
     public long Sharc_SequentialScan()
     {
+        using var reader = _preparedSeqScan.CreateReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);     // id
+            _ = reader.GetString(1);    // name
+            _ = reader.GetString(2);    // email
+            _ = reader.GetInt64(3);     // age
+            _ = reader.GetDouble(4);    // score
+            if (!reader.IsNull(5))
+                _ = reader.GetString(5); // bio (nullable)
+            _ = reader.GetInt64(6);     // active
+            _ = reader.GetString(7);    // dept
+            _ = reader.GetString(8);    // created
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("SequentialScan")]
+    public long Sharc_SequentialScan_Cold()
+    {
         var columns = new[] { "id", "name", "email", "age", "score", "bio", "active", "dept", "created" };
         using var reader = _sharcDb.CreateReader("users", columns);
         long count = 0;
@@ -186,17 +257,29 @@ public class CoreBenchmarks
 
     // ═══════════════════════════════════════════════════════════════
     //  4. POINT LOOKUP — single row by primary key (B-tree seek)
+    //
+    //  Single seek per invocation — BDN DefaultJob auto-selects a
+    //  high InvocationCount for sub-us methods (typically 32K-131K),
+    //  giving accurate per-op timing without manual batching.
     // ═══════════════════════════════════════════════════════════════
 
     [Benchmark]
     [BenchmarkCategory("PointLookup")]
     public long Sharc_PointLookup()
     {
+        using var reader = _preparedReader.CreateReader();
+        if (reader.Seek(2500))
+            return reader.GetInt64(0);
+        return -1;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("PointLookup")]
+    public long Sharc_PointLookup_Cold()
+    {
         using var reader = _sharcDb.CreateReader("users");
         if (reader.Seek(2500))
-        {
             return reader.GetInt64(0);
-        }
         return -1;
     }
 
@@ -206,6 +289,56 @@ public class CoreBenchmarks
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "SELECT id FROM users WHERE rowid = 2500";
+        return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("PointLookup")]
+    public long SQLite_PointLookup_Prepared()
+    {
+        return Convert.ToInt64(_sqlitePreparedPoint.ExecuteScalar());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  4b. RANDOM POINT LOOKUP — different rowid each invocation
+    //
+    //  Cycles through a 512-entry random rowid buffer.
+    //  Refills the same buffer (zero alloc) when exhausted.
+    //  Defeats same-rowid/same-leaf caching for honest measurement.
+    // ═══════════════════════════════════════════════════════════════
+
+    private void RefillRandomBuf()
+    {
+        for (int i = 0; i < RandomBufSize; i++)
+            _randomBuf[i] = _rng.NextInt64(1, 5001); // [1..5000]
+        _randomIdx = 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long NextRandomRowId()
+    {
+        if (_randomIdx >= RandomBufSize)
+            RefillRandomBuf();
+        return _randomBuf[_randomIdx++];
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("RandomLookup")]
+    public long Sharc_RandomLookup()
+    {
+        using var reader = _preparedReader.CreateReader();
+        if (reader.Seek(NextRandomRowId()))
+            return reader.GetInt64(0);
+        return -1;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("RandomLookup")]
+    public long SQLite_RandomLookup()
+    {
+        long rid = NextRandomRowId();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM users WHERE rowid = {rid}";
         return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
@@ -219,7 +352,7 @@ public class CoreBenchmarks
     [BenchmarkCategory("BatchLookup")]
     public long Sharc_BatchLookup()
     {
-        using var reader = _sharcDb.CreateReader("users");
+        using var reader = _preparedReader.CreateReader();
         long sum = 0;
         foreach (var target in BatchTargets)
         {
@@ -255,6 +388,20 @@ public class CoreBenchmarks
     [BenchmarkCategory("TypeDecode")]
     public long Sharc_TypeDecode()
     {
+        using var reader = _preparedTypeDecode.CreateReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("TypeDecode")]
+    public long Sharc_TypeDecode_Cold()
+    {
         using var reader = _sharcDb.CreateReader("users", "id");
         long count = 0;
         while (reader.Read())
@@ -289,6 +436,19 @@ public class CoreBenchmarks
     [BenchmarkCategory("NullScan")]
     public long Sharc_NullScan()
     {
+        using var reader = _preparedNullScan.CreateReader();
+        long nullCount = 0;
+        while (reader.Read())
+        {
+            if (reader.IsNull(0)) nullCount++;
+        }
+        return nullCount;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("NullScan")]
+    public long Sharc_NullScan_Cold()
+    {
         using var reader = _sharcDb.CreateReader("users", "bio");
         long nullCount = 0;
         while (reader.Read())
@@ -320,6 +480,20 @@ public class CoreBenchmarks
     [Benchmark]
     [BenchmarkCategory("WhereFilter")]
     public long Sharc_WhereFilter()
+    {
+        using var reader = _preparedWhereFilter.Execute();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("WhereFilter")]
+    public long Sharc_WhereFilter_Cold()
     {
         var filters = new[]
         {
@@ -356,10 +530,22 @@ public class CoreBenchmarks
     [BenchmarkCategory("FilterStar")]
     public long Sharc_FilterStar()
     {
-        // Use the pre-compiled node via an internal hack or by setting it on the reader.
-        // For benchmarking the 'Evaluate' speed, we want to bypass 'Compile' inside CreateReader.
+        using var reader = _preparedFilterStar.Execute();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("FilterStar")]
+    public long Sharc_FilterStar_Cold()
+    {
+        // Pre-compiled filter node — bypasses Compile overhead, only measures Evaluate speed
         using var reader = _sharcDb.CreateReader("users", ["id"], _cachedFilterNode);
-        
         long count = 0;
         while (reader.Read())
         {
@@ -376,6 +562,20 @@ public class CoreBenchmarks
     [Benchmark]
     [BenchmarkCategory("GcPressure")]
     public long Sharc_GcPressure()
+    {
+        using var reader = _preparedTypeDecode.CreateReader();
+        long count = 0;
+        while (reader.Read())
+        {
+            _ = reader.GetInt64(0);
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("GcPressure")]
+    public long Sharc_GcPressure_Cold()
     {
         using var reader = _sharcDb.CreateReader("users", "id");
         long count = 0;

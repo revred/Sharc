@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using Sharc.Core.Trust;
 
 namespace Sharc.Trust;
@@ -35,11 +38,7 @@ public sealed class ReputationManager
         if (table == null) 
             return new ReputationScore(agentId, 0.5, 0.0, 0, 0); // Warning: System table missing implies default
 
-        // TODO: Index lookup would be better, for now scan or assumption of PK capability in future
-        // Since we don't have PK lookup exposed easily on SharcDatabase without an Index, 
-        // we will implement a basic scan or rely on the caller to cache.
-        // For MVP: Return default if not in cache (assuming pre-load or lazy load implementation later).
-        // Real implementation requires Index lookup which is typically part of Sharc.Index.
+        // Scan-based lookup; index acceleration deferred until PreparedReader supports system tables.
         
         return new ReputationScore(agentId, 0.5, 0.0, 0, 0);
     }

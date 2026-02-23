@@ -46,6 +46,12 @@ public class TableScanBenchmarks
         _conn.Open();
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

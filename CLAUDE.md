@@ -196,15 +196,14 @@ sharc/
 │   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Write, Trust models)
 │   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
 │   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
-│   ├── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
-│   └── Sharc.Scene/                   ← Trust Playground (agent simulation & visualization)
+│   └── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
 ├── tests/
-│   ├── Sharc.Tests/                   ← Unit tests (1,356 tests: core + trust + write + crypto + GUID)
-│   ├── Sharc.IntegrationTests/        ← End-to-end tests (362 tests)
-│   ├── Sharc.Query.Tests/             ← Query pipeline tests (446 tests)
-│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests (60 tests)
-│   ├── Sharc.Context.Tests/           ← MCP context query tests (14 tests)
-│   └── Sharc.Index.Tests/             ← Index CLI tests (22 tests)
+│   ├── Sharc.Tests/                   ← Unit tests (core + trust + write + crypto + GUID)
+│   ├── Sharc.IntegrationTests/        ← End-to-end tests
+│   ├── Sharc.Query.Tests/             ← Query pipeline tests
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests
+│   ├── Sharc.Context.Tests/           ← MCP context query tests
+│   └── Sharc.Index.Tests/             ← Index CLI tests
 ├── bench/
 │   ├── Sharc.Benchmarks/              ← Core BenchmarkDotNet suite (Sharc vs SQLite)
 │   └── Sharc.Comparisons/             ← Graph + core benchmarks
@@ -215,7 +214,7 @@ sharc/
 
 ## Current Status
 
-**2,260 tests passing** across 6 test projects (unit + integration + query + graph + index + context).
+All tests passing across 6 test projects (unit + integration + query + graph + index + context). Run `dotnet test` for current count.
 
 All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads, generic specialization for JIT devirtualization — 95x faster point lookups), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (full CRUD: INSERT/UPDATE/DELETE with B-tree splits, ACID transactions, freelist recycling, vacuum), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring), Multi-Agent Access (DataVersion/IsStale passive change detection on IWritablePageSource). See README.md for benchmark results.
 

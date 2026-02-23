@@ -75,6 +75,12 @@ public class PageReadBenchmarks
         _selectAll.CommandText = "SELECT id, username, email, age, balance FROM users";
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

@@ -41,6 +41,13 @@ internal sealed class BTreeMutator : IDisposable
     private readonly Action<uint>? _freePageCallback;
     private CellRef[]? _cellRefBuffer; // lazy — only allocated when a split or defrag is needed
 
+    /// <summary>
+    /// Initializes a new mutator for the given writable page source.
+    /// </summary>
+    /// <param name="source">The writable page source to modify.</param>
+    /// <param name="usablePageSize">Usable bytes per page (page size minus reserved space).</param>
+    /// <param name="freePageAllocator">Optional delegate that returns a free page number from the freelist, or 0 if none available.</param>
+    /// <param name="freePageCallback">Optional delegate invoked when a page is freed during split/merge operations.</param>
     public BTreeMutator(IWritablePageSource source, int usablePageSize,
         Func<uint>? freePageAllocator = null, Action<uint>? freePageCallback = null)
     {
@@ -65,9 +72,17 @@ internal sealed class BTreeMutator : IDisposable
 
         // Build the cell bytes (stored in a rented/stack buffer)
         int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, recordPayload.Length, _usablePageSize);
-        Span<byte> cellBuf = cellSize <= 512 ? stackalloc byte[cellSize] : new byte[cellSize];
-        CellBuilder.BuildTableLeafCell(rowId, recordPayload, cellBuf, _usablePageSize);
-        ReadOnlySpan<byte> cellBytes = cellBuf[..cellSize];
+        byte[] cellArray = new byte[cellSize];
+        CellBuilder.BuildTableLeafCell(rowId, recordPayload, cellArray, _usablePageSize);
+
+        // If the record overflows, write overflow pages and patch the cell's pointer
+        int inlineSize = CellParser.CalculateInlinePayloadSize(recordPayload.Length, _usablePageSize);
+        if (inlineSize < recordPayload.Length)
+        {
+            WriteOverflowChain(cellArray.AsSpan(0, cellSize), recordPayload, inlineSize);
+        }
+
+        ReadOnlySpan<byte> cellBytes = cellArray.AsSpan(0, cellSize);
 
         // Navigate from root to the correct leaf, collecting the ancestor path.
         // Max B-tree depth for SQLite is ~20 (4096-byte pages, min 2 keys per interior page).
@@ -778,8 +793,82 @@ internal sealed class BTreeMutator : IDisposable
         BTreePageHeader.Write(pageSpan[hdrOff..], newHdr);
     }
 
+    // ── Overflow chain writing ────────────────────────────────────
+
+    /// <summary>
+    /// Writes the overflow portion of a record payload into a chain of overflow pages.
+    /// Each overflow page stores a 4-byte next-pointer at offset 0, followed by payload data.
+    /// Patches the cell buffer's overflow pointer (last 4 bytes) with the first overflow page number.
+    /// </summary>
+    private void WriteOverflowChain(Span<byte> cellBuf, ReadOnlySpan<byte> fullPayload, int inlineSize)
+    {
+        int overflowDataPerPage = _usablePageSize - 4; // 4 bytes reserved for next-page pointer
+        int remaining = fullPayload.Length - inlineSize;
+        int srcOffset = inlineSize;
+
+        uint firstOverflowPage = 0;
+        uint prevOverflowPage = 0;
+        byte[]? prevPageBuf = null;
+
+        while (remaining > 0)
+        {
+            uint overflowPage = AllocateOverflowPage();
+            if (firstOverflowPage == 0)
+                firstOverflowPage = overflowPage;
+
+            // Link previous page to this one
+            if (prevPageBuf != null)
+            {
+                BinaryPrimitives.WriteUInt32BigEndian(prevPageBuf, overflowPage);
+                WritePageBuffer(prevOverflowPage, prevPageBuf);
+            }
+
+            var pageBuf = RentPageBuffer();
+            int toCopy = Math.Min(remaining, overflowDataPerPage);
+            fullPayload.Slice(srcOffset, toCopy).CopyTo(pageBuf.AsSpan(4));
+
+            // Next-pointer is 0 (end of chain) until the next iteration patches it
+            BinaryPrimitives.WriteUInt32BigEndian(pageBuf, 0);
+
+            prevOverflowPage = overflowPage;
+            prevPageBuf = pageBuf;
+            srcOffset += toCopy;
+            remaining -= toCopy;
+        }
+
+        // Write the last overflow page (next-pointer stays 0 = end of chain)
+        if (prevPageBuf != null)
+            WritePageBuffer(prevOverflowPage, prevPageBuf);
+
+        // Patch the cell's overflow pointer (last 4 bytes of the cell)
+        BinaryPrimitives.WriteUInt32BigEndian(cellBuf[(cellBuf.Length - 4)..], firstOverflowPage);
+    }
+
+    /// <summary>
+    /// Allocates a page for overflow storage. Prefers freelist pages, falls back to extending the file.
+    /// Unlike <see cref="AllocateNewPage"/>, does NOT write a B-tree page header (overflow pages are raw).
+    /// </summary>
+    private uint AllocateOverflowPage()
+    {
+        uint page = _freePageAllocator?.Invoke() ?? 0;
+
+        if (page == 0)
+        {
+            if (_nextAllocPage == 0)
+                _nextAllocPage = (uint)_source.PageCount + 1;
+            page = _nextAllocPage++;
+        }
+
+        // Track a buffer for this page but don't write a B-tree header
+        var buf = RentPageBuffer();
+        _pageCache[page] = buf;
+
+        return page;
+    }
+
     // ── I/O helpers ────────────────────────────────────────────────
 
+    /// <summary>Reads a page into a cached buffer, renting from the pool if not already cached.</summary>
     private byte[] ReadPageBuffer(uint pageNumber)
     {
         if (_pageCache.TryGetValue(pageNumber, out var cached))
@@ -791,6 +880,7 @@ internal sealed class BTreeMutator : IDisposable
         return buf;
     }
 
+    /// <summary>Writes a page buffer to the underlying page source and caches it.</summary>
     private void WritePageBuffer(uint pageNumber, byte[] buffer)
     {
         _source.WritePage(pageNumber, buffer.AsSpan(0, _source.PageSize));
@@ -808,6 +898,9 @@ internal sealed class BTreeMutator : IDisposable
 
     private uint _nextAllocPage;
 
+    /// <summary>
+    /// Allocates a new page, first trying the freelist, then extending the file.
+    /// </summary>
     internal uint AllocateNewPage()
     {
         // Try reusing a free page from the freelist first

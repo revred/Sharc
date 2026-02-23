@@ -23,6 +23,18 @@ Welcome to the **Sharc Context Engine** documentation.
 ## 📊 Performance
 *   [**Benchmarks**](BENCHMARKS.md): Methodology and results vs. SQLite, DuckDB, and others.
 
+## 🔀 Comparisons & Alternatives
+
+*   [**Alternatives**](ALTERNATIVES.md): Honest comparison vs SQLite, LiteDB, DuckDB, SQLitePCLRaw.
+*   [**Graph DB Comparison**](GRAPH_DB_COMPARISON.md): Sharc vs SurrealDB, ArangoDB, Neo4j — when to use which.
+*   [**Integration Recipes**](INTEGRATION_RECIPES.md): 10 copy-paste integration recipes.
+*   [**API Quick Reference**](API_QUICK_REFERENCE.md): Full accessor and method table.
+
+## 🧠 JitSQL & Vector Search
+
+*   [**JitSQL Cross-Language**](JITSQL_CROSS_LANGUAGE.md): JitSQL patterns mapped to Prisma, SQLAlchemy, Knex, GORM.
+*   [**Vector Search**](VECTOR_SEARCH.md): Embedding storage, similarity search, RAG patterns, comparison vs Pinecone/pgvector.
+
 ## 🛠️ Contributing
 *   [**Coding Standards**](CodingStandards.md): Rules for contributing to the alloc-free codebase.
 *   [**Migration Guide**](MIGRATION.md): Coming from older versions.

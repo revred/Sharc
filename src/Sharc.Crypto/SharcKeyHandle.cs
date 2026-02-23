@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
@@ -30,8 +33,8 @@ internal sealed class SharcKeyHandle : IDisposable
     {
         var key = new byte[32];
         // Argon2id is not available in base .NET; use PBKDF2 with SHA-512 as a bridge.
-        // DECISION: Ship with Rfc2898DeriveBytes (PBKDF2-SHA512) for v0.1.
-        // Argon2id via Konscious.Security.Cryptography or libsodium deferred to v0.2.
+        // DECISION: Using PBKDF2-SHA512 (built-in .NET). Argon2id deferred until
+        // a zero-dependency managed implementation is available.
         var iterations = Math.Max(timeCost * 100_000, 100_000);
         Rfc2898DeriveBytes.Pbkdf2(password, salt, key, iterations, HashAlgorithmName.SHA512);
         return new SharcKeyHandle(key);

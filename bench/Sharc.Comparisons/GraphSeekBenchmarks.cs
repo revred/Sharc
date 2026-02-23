@@ -68,6 +68,12 @@ public class GraphSeekBenchmarks
         }
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

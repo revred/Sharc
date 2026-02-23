@@ -18,17 +18,16 @@ namespace Sharc;
 /// <para>Phase 1 supports simple single-table SELECT queries (with optional WHERE, ORDER BY,
 /// LIMIT, GROUP BY). Compound queries, CTEs, and JOINs throw <see cref="NotSupportedException"/>
 /// at prepare time.</para>
-/// <para>Cursor and reader are cached after the first Execute() call. Subsequent calls
-/// reset the cursor via <see cref="IBTreeCursor.Reset"/> and reuse the same ArrayPool
-/// buffers, eliminating per-call allocation and setup overhead.</para>
-/// <para>This type is <b>not thread-safe</b>. Each <see cref="PreparedQuery"/> instance
-/// should be used from a single thread.</para>
+/// <para>Thread-safe: each thread gets its own cursor+reader+paramCache via
+/// <see cref="ThreadLocal{T}"/>. A single <see cref="PreparedQuery"/> instance can be shared
+/// across N threads.</para>
 /// </remarks>
-public sealed class PreparedQuery : IDisposable
+public sealed class PreparedQuery : IPreparedReader
 {
-    private SharcDatabase? _db;
+    private readonly SharcDatabase _db;
+    private volatile bool _disposed;
 
-    // Pre-resolved at Prepare() time — never re-computed
+    // Pre-resolved at Prepare() time — immutable, shared across threads
     internal readonly TableInfo Table;
     internal readonly int[]? Projection;
     internal readonly int RowidAliasOrdinal;
@@ -39,14 +38,31 @@ public sealed class PreparedQuery : IDisposable
     // Pre-resolved at Prepare() time — avoids TryCreateIndexSeekCursor on every Execute()
     private readonly bool _hasIndexSeek;
 
-    // Cached cursor + reader: created on first Execute(), reused via Reset() on subsequent calls.
-    // Eliminates cursor allocation, ArrayPool rent/return, INTEGER PK detection, and
-    // merged column detection on every call after the first.
-    private IBTreeCursor? _cachedCursor;
-    private SharcDataReader? _cachedReader;
+    // Per-thread execution state
+    private readonly ThreadLocal<QuerySlot> _slot;
 
-    // Compact param cache (Dictionary, not ConcurrentDictionary — PreparedQuery is not thread-safe)
-    private Dictionary<long, IFilterNode>? _paramCache;
+    private sealed class QuerySlot : IDisposable
+    {
+        internal IBTreeCursor? Cursor;
+        internal SharcDataReader? Reader;
+        internal Dictionary<long, IFilterNode>? ParamCache;
+
+        public void Dispose()
+        {
+            if (Reader != null)
+            {
+                Reader.DisposeForReal();
+                Reader = null;
+            }
+            if (Cursor != null)
+            {
+                Cursor.Dispose();
+                Cursor = null;
+            }
+            ParamCache?.Clear();
+            ParamCache = null;
+        }
+    }
 
     internal PreparedQuery(
         SharcDatabase db,
@@ -64,14 +80,13 @@ public sealed class PreparedQuery : IDisposable
         StaticFilter = staticFilter;
         Intent = intent;
         NeedsPostProcessing = needsPostProcessing;
+        _slot = new ThreadLocal<QuerySlot>(trackAllValues: true);
 
         // Pre-resolve index seek at Prepare time — determines cursor type once
         var seekCursor = db.TryCreateIndexSeekCursorForPrepared(intent, table);
         if (seekCursor != null)
         {
             _hasIndexSeek = true;
-            // We don't cache the seek cursor itself (it can't be reset the same way),
-            // but we remember that index seek IS available so we skip the check on Execute.
             seekCursor.Dispose();
         }
     }
@@ -89,51 +104,49 @@ public sealed class PreparedQuery : IDisposable
 
     /// <summary>
     /// Executes the prepared query with the given parameters and returns a data reader.
-    /// On the first call, creates cursor and reader. On subsequent calls, reuses cached
-    /// cursor (via Reset) and reader (via ResetForReuse), eliminating all per-call
-    /// allocation and setup overhead.
+    /// Each thread gets its own cached cursor+reader. After the first call on a thread,
+    /// subsequent calls reset and reuse, eliminating per-call allocation.
     /// </summary>
     /// <param name="parameters">Named parameters to bind, or null for no parameters.</param>
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     /// <exception cref="ObjectDisposedException">The prepared query has been disposed.</exception>
     public SharcDataReader Execute(IReadOnlyDictionary<string, object>? parameters)
     {
-        ObjectDisposedException.ThrowIf(_db is null, this);
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
         var db = _db;
+        var slot = _slot.Value ??= new QuerySlot();
 
         // Determine filter node to use
         IFilterNode? node = StaticFilter;
 
         if (node == null && Intent.Filter.HasValue)
         {
-            // Parameterized filter — check param-level cache
-            _paramCache ??= new Dictionary<long, IFilterNode>();
+            // Parameterized filter — check per-thread param cache
+            slot.ParamCache ??= new Dictionary<long, IFilterNode>();
             long paramKey = ComputeParamCacheKey(parameters);
-            if (!_paramCache.TryGetValue(paramKey, out node))
+            if (!slot.ParamCache.TryGetValue(paramKey, out node))
             {
                 var filterStar = IntentToFilterBridge.Build(
                     Intent.Filter.Value, parameters, Intent.TableAlias);
                 node = FilterTreeCompiler.CompileBaked(
                     filterStar, Table.Columns, RowidAliasOrdinal);
-                _paramCache[paramKey] = node;
+                slot.ParamCache[paramKey] = node;
             }
         }
 
-        // Fast path: reuse cached cursor + reader (Reset instead of re-create)
-        if (_cachedReader != null)
+        // Fast path: reuse per-thread cached cursor + reader
+        if (slot.Reader != null)
         {
-            _cachedReader.ResetForReuse(node);
+            slot.Reader.ResetForReuse(node);
 
             if (NeedsPostProcessing)
-                return QueryPostProcessor.Apply(_cachedReader, Intent);
+                return QueryPostProcessor.Apply(slot.Reader, Intent);
 
-            return _cachedReader;
+            return slot.Reader;
         }
 
-        // First call: create cursor + reader, cache for reuse
-        // For non-index-seek queries (common case), use table cursor with Reset() support.
-        // Index seek cursors are re-created each time (their seek position varies).
+        // First call on this thread: create cursor + reader, cache in slot
         IBTreeCursor cursor;
         if (_hasIndexSeek)
         {
@@ -158,8 +171,8 @@ public sealed class PreparedQuery : IDisposable
         if (!_hasIndexSeek)
         {
             reader.MarkReusable();
-            _cachedCursor = cursor;
-            _cachedReader = reader;
+            slot.Cursor = cursor;
+            slot.Reader = reader;
         }
 
         if (NeedsPostProcessing)
@@ -171,21 +184,14 @@ public sealed class PreparedQuery : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        // Release cached cursor + reader resources
-        if (_cachedReader != null)
-        {
-            _cachedReader.DisposeForReal();
-            _cachedReader = null;
-        }
-        if (_cachedCursor != null)
-        {
-            _cachedCursor.Dispose();
-            _cachedCursor = null;
-        }
+        if (_disposed) return;
+        _disposed = true;
 
-        _paramCache?.Clear();
-        _paramCache = null;
-        _db = null;
+        // Clean up all per-thread slots
+        foreach (var slot in _slot.Values)
+            slot.Dispose();
+
+        _slot.Dispose();
     }
 
     private static long ComputeParamCacheKey(IReadOnlyDictionary<string, object>? parameters)

@@ -13,7 +13,7 @@ dotnet build
 dotnet test
 ```
 
-All 2,216 tests must pass before submitting a PR.
+All tests must pass before submitting a PR.
 
 ## Development Workflow
 

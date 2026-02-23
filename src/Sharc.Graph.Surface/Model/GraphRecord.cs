@@ -64,5 +64,4 @@ public readonly record struct GraphRecord
         Alias = alias;
     }
 
-    // Methods for JSON extraction will be added later
 }
