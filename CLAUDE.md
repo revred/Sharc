@@ -215,7 +215,7 @@ sharc/
 
 ## Current Status
 
-**2,570 tests passing** across 6 test projects (unit + integration + query + graph + index + context).
+**2,669 tests passing** across 6 test projects (unit + integration + query + graph + index + context).
 
 All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads, generic specialization for JIT devirtualization — 95x faster point lookups), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (full CRUD: INSERT/UPDATE/DELETE with B-tree splits, ACID transactions, freelist recycling, vacuum), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring), Multi-Agent Access (DataVersion/IsStale passive change detection on IWritablePageSource). See README.md for benchmark results.
 
