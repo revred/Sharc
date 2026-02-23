@@ -62,6 +62,7 @@ public sealed class SharcDatabase : IDisposable
     private SharcSchema? _schema;
     private bool _disposed;
     private QueryPlanCache? _queryCache;
+    private readonly ExecutionRouter _executionRouter = new();
 
     // ─── Registered programmatic views ────────────────────────────
     private readonly Views.ViewResolver _viewResolver;
@@ -426,7 +427,29 @@ public sealed class SharcDatabase : IDisposable
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     /// <exception cref="Sharc.Query.Sharq.SharqParseException">The query string is invalid.</exception>
     /// <exception cref="ArgumentException">Referenced table or column not found in schema.</exception>
-    public SharcDataReader Query(string sharqQuery) => QueryCore(null, sharqQuery, null);
+    public SharcDataReader Query(string sharqQuery)
+    {
+        // Fast hint bypass: detect "CACHED " or "JIT " prefix, route directly to
+        // cached PreparedQuery/JitQuery. Eliminates QueryCore frame, GetOrCompilePlan
+        // (ConcurrentDictionary), TryRoute switch, and intent-keyed Dictionary overhead.
+        // Returns null for unsupported queries (compound/CTE/JOIN) → fall through.
+        if (sharqQuery.Length > 4)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            char c = sharqQuery[0];
+            if ((c is 'C' or 'c') && sharqQuery.StartsWith("CACHED ", StringComparison.OrdinalIgnoreCase))
+            {
+                var result = _executionRouter.ExecuteCachedDirect(this, sharqQuery, null);
+                if (result != null) return result;
+            }
+            else if ((c is 'J' or 'j') && sharqQuery.StartsWith("JIT ", StringComparison.OrdinalIgnoreCase))
+            {
+                var result = _executionRouter.ExecuteJitDirect(this, sharqQuery, null);
+                if (result != null) return result;
+            }
+        }
+        return QueryCore(null, sharqQuery, null);
+    }
 
     /// <summary>
     /// Executes a Sharq query string with parameter bindings and returns a data reader.
@@ -436,7 +459,24 @@ public sealed class SharcDatabase : IDisposable
     /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT * FROM users WHERE age = $minAge").</param>
     /// <returns>A <see cref="SharcDataReader"/> positioned before the first matching row.</returns>
     public SharcDataReader Query(IReadOnlyDictionary<string, object>? parameters, string sharqQuery)
-        => QueryCore(parameters, sharqQuery, null);
+    {
+        if (sharqQuery.Length > 4)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            char c = sharqQuery[0];
+            if ((c is 'C' or 'c') && sharqQuery.StartsWith("CACHED ", StringComparison.OrdinalIgnoreCase))
+            {
+                var result = _executionRouter.ExecuteCachedDirect(this, sharqQuery, parameters);
+                if (result != null) return result;
+            }
+            else if ((c is 'J' or 'j') && sharqQuery.StartsWith("JIT ", StringComparison.OrdinalIgnoreCase))
+            {
+                var result = _executionRouter.ExecuteJitDirect(this, sharqQuery, parameters);
+                if (result != null) return result;
+            }
+        }
+        return QueryCore(parameters, sharqQuery, null);
+    }
 
     /// <summary>
     /// Executes a Sharq query string with agent entitlement enforcement.
@@ -469,6 +509,85 @@ public sealed class SharcDatabase : IDisposable
         => QueryCore(parameters, sharqQuery, agent);
 
     /// <summary>
+    /// Pre-compiles a Sharq query into a <see cref="PreparedQuery"/> that can be
+    /// executed repeatedly without re-parsing, re-resolving views, or re-compiling filters.
+    /// </summary>
+    /// <param name="sharqQuery">A Sharq SELECT statement (e.g. "SELECT name FROM users WHERE age = $targetAge").</param>
+    /// <returns>A <see cref="PreparedQuery"/> handle. Call <see cref="PreparedQuery.Execute()"/> to run.</returns>
+    /// <exception cref="NotSupportedException">
+    /// The query contains compound operations (UNION/INTERSECT/EXCEPT), CTEs, or JOINs.
+    /// Phase 1 only supports simple single-table SELECT queries.
+    /// </exception>
+    public PreparedQuery Prepare(string sharqQuery)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureSchemaUpToDate();
+
+        var plan = Intent.IntentCompiler.CompilePlan(sharqQuery);
+
+        if (plan.IsCompound || plan.HasCotes)
+            throw new NotSupportedException(
+                "PreparedQuery does not support compound queries (UNION/INTERSECT/EXCEPT) or CTEs. " +
+                "Use db.Query() for these query types.");
+
+        var intent = plan.Simple!;
+
+        if (intent.HasJoins)
+            throw new NotSupportedException(
+                "PreparedQuery does not support JOIN queries. Use db.Query() for joins.");
+
+        var schema = GetSchema();
+        var table = schema.GetTable(intent.TableName)
+            ?? throw new KeyNotFoundException($"Table '{intent.TableName}' not found.");
+
+        string[]? columns = intent.HasAggregates
+            ? AggregateProjection.Compute(intent)
+            : intent.ColumnsArray;
+
+        int[]? projection = null;
+        if (columns is { Length: > 0 })
+        {
+            projection = new int[columns.Length];
+            for (int i = 0; i < columns.Length; i++)
+            {
+                string colName = columns[i];
+                int ordinal = table.GetColumnOrdinal(colName);
+
+                if (ordinal < 0 && !string.IsNullOrEmpty(intent.TableAlias) &&
+                    colName.StartsWith(intent.TableAlias + ".", StringComparison.OrdinalIgnoreCase))
+                {
+                    var stripped = colName.Substring(intent.TableAlias.Length + 1);
+                    ordinal = table.GetColumnOrdinal(stripped);
+                }
+
+                projection[i] = ordinal >= 0 ? ordinal
+                    : throw new ArgumentException($"Column '{colName}' not found in table '{table.Name}'.");
+            }
+        }
+
+        int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
+
+        // Pre-compile filter for non-parameterized intents
+        IFilterNode? staticFilter = null;
+        if (intent.Filter.HasValue && !HasParameterNodes(intent.Filter.Value))
+        {
+            var filterStar = IntentToFilterBridge.Build(
+                intent.Filter.Value, null, intent.TableAlias);
+            staticFilter = FilterTreeCompiler.CompileBaked(filterStar, table.Columns, rowidAlias);
+        }
+
+        bool needsPostProcessing = intent.HasAggregates
+            || intent.IsDistinct
+            || intent.OrderBy is { Count: > 0 }
+            || intent.Limit.HasValue
+            || intent.Offset.HasValue;
+
+        return new PreparedQuery(
+            this, table, projection, rowidAlias,
+            staticFilter, intent, needsPostProcessing);
+    }
+
+    /// <summary>
     /// Core query execution pipeline: parse/cache → resolve views → enforce entitlements → dispatch.
     /// Simple queries go through the compiled-query cache for zero-overhead repeats.
     /// Compound/Cote queries are dispatched to <see cref="CompoundQueryExecutor"/>.
@@ -480,10 +599,21 @@ public sealed class SharcDatabase : IDisposable
         Core.Trust.AgentInfo? agent)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        EnsureSchemaUpToDate();
 
+        // Plan cache lookup BEFORE schema check — plan compilation only needs SQL text.
+        // CACHED/JIT hints return immediately, skipping EnsureSchemaUpToDate entirely.
+        // This eliminates the page-1 invalidation + re-read overhead (~2-3 us) for
+        // all hinted queries, since their schema was validated at Prepare/Jit time.
         var cache = _queryCache ??= new QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
+
+        // Hint routing: CACHED → auto-Prepare, JIT → auto-Jit
+        var hinted = _executionRouter.TryRoute(this, plan, sharqQuery, parameters);
+        if (hinted != null)
+            return hinted;
+
+        // DIRECT path: full schema validation required
+        EnsureSchemaUpToDate();
 
         // Resolve views (recursively rewrites view tables as Cotes)
         // Note: registered views with filters are NOT cacheable in the plan
@@ -630,7 +760,7 @@ public sealed class SharcDatabase : IDisposable
         });
     }
 
-    private static bool HasParameterNodes(Intent.PredicateIntent predicate)
+    internal static bool HasParameterNodes(Intent.PredicateIntent predicate)
     {
         foreach (ref readonly var node in predicate.Nodes.AsSpan())
         {
@@ -767,6 +897,59 @@ public sealed class SharcDatabase : IDisposable
         return _bTreeReader.CreateCursor((uint)table.RootPage);
     }
 
+    // ─── JitQuery factory ──────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a <see cref="JitQuery"/> bound to the specified table or view.
+    /// Tables take precedence over views with the same name. Pre-resolves
+    /// schema at creation time for reuse across all operations.
+    /// </summary>
+    /// <param name="name">The name of the table or view to bind to.</param>
+    /// <returns>A new <see cref="JitQuery"/> instance.</returns>
+    /// <exception cref="KeyNotFoundException">Neither a table nor a view with the given name exists.</exception>
+    public JitQuery Jit(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var schema = GetSchema();
+
+        // Try table first — tables take precedence over views
+        var table = schema.TryGetTable(name);
+        if (table != null)
+        {
+            int rowidAlias = FindIntegerPrimaryKeyOrdinal(table.Columns);
+            return new JitQuery(this, table, rowidAlias);
+        }
+
+        // Fall back to views (registered first, then SQLite schema)
+        var view = _viewResolver.TryResolveView(name)
+            ?? throw new KeyNotFoundException($"Table or view '{name}' not found.");
+        return new JitQuery(this, view);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="JitQuery"/> backed by the specified <see cref="Views.ILayer"/>.
+    /// Layer-backed JitQuery instances are read-only — mutations throw <see cref="NotSupportedException"/>.
+    /// </summary>
+    /// <param name="layer">The layer (view or custom source) to bind to.</param>
+    /// <returns>A new layer-backed <see cref="JitQuery"/> instance.</returns>
+    public JitQuery Jit(Views.ILayer layer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(layer);
+        return new JitQuery(this, layer);
+    }
+
+    // ─── Internal accessors for PreparedQuery / JitQuery ────────────
+    internal IRecordDecoder Decoder => _recordDecoder;
+    internal IBTreeReader BTreeReaderInternal => _bTreeReader;
+
+    internal IndexSeekCursor? TryCreateIndexSeekCursorForPrepared(
+        Intent.QueryIntent intent, TableInfo table)
+        => TryCreateIndexSeekCursor(intent, table);
+
+    internal IBTreeCursor CreateTableCursorForPrepared(TableInfo table)
+        => CreateTableCursor(table);
+
     private static int FindIntegerPrimaryKeyOrdinal(IReadOnlyList<ColumnInfo> columns)
     {
         for (int i = 0; i < columns.Count; i++)
@@ -882,6 +1065,7 @@ public sealed class SharcDatabase : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _executionRouter.Dispose();
         _activeTransaction?.Dispose();
         _proxySource.Dispose();
         _rawSource.Dispose();

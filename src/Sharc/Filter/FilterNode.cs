@@ -29,6 +29,9 @@ internal sealed class FilterNode : IFilterNode
     private readonly int[] _referencedOrdinals;
     private readonly int _maxOrdinal;
 
+    internal BakedDelegate CompiledDelegate => _compiledDelegate;
+    internal int[] ReferencedOrdinals => _referencedOrdinals;
+
     public FilterNode(BakedDelegate compiledDelegate, HashSet<int> referencedOrdinals)
     {
         _compiledDelegate = compiledDelegate;
