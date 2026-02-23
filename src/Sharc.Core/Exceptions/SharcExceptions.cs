@@ -43,7 +43,7 @@ public sealed class CorruptPageException : SharcException
 }
 
 /// <summary>
-/// Encryption/decryption error Ã¢â‚¬â€ wrong password, tampered data, or unsupported cipher.
+/// Encryption/decryption error — wrong password, tampered data, or unsupported cipher.
 /// </summary>
 public sealed class SharcCryptoException : SharcException
 {

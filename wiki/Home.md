@@ -32,6 +32,8 @@ while (reader.Read())
 | [Encryption](Encryption) | AES-256-GCM, Argon2id KDF, encrypted databases |
 | [Trust Layer](Trust-Layer) | Agent registry, ledger, ECDSA attestation, entitlements |
 | [Views](Views) | Programmatic views, SubViews, SQLite view auto-promotion, SQL integration |
+| [JitSQL & Prepared](JitSQL-and-Prepared) | JitQuery, PreparedReader, execution hints, FilterStar |
+| [Vector Search](Vector-Search) | Embedding storage, similarity search, distance metrics |
 | [Performance Guide](Performance-Guide) | Zero-allocation patterns, benchmarks, best practices |
 | [AI Agent Reference](AI-Agent-Reference) | Complete copy-paste patterns for LLM coding assistants |
 
@@ -53,3 +55,13 @@ AgentRegistry + LedgerManager       (trust path)
 ```
 
 All operations go through the B-tree layer, which reads SQLite pages directly from `IPageSource` (file, memory, or encrypted). No native SQLite bindings are involved.
+
+## Additional Resources
+
+| Guide | Description |
+| ----- | ----------- |
+| [JitSQL Cross-Language](../docs/JITSQL_CROSS_LANGUAGE.md) | JitSQL patterns for JS/TS/Python/Go developers |
+| [Graph DB Comparison](../docs/GRAPH_DB_COMPARISON.md) | Sharc vs SurrealDB, ArangoDB, Neo4j |
+| [Vector Search Guide](../docs/VECTOR_SEARCH.md) | Embedding storage, RAG, semantic cache patterns |
+| [Alternatives](../docs/ALTERNATIVES.md) | Honest comparison vs SQLite, LiteDB, DuckDB |
+| [Samples](../samples/) | 8 runnable sample projects including API comparison |

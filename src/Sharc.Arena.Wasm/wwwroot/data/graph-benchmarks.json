@@ -57,15 +57,15 @@
     "sectionId": "graph-ops",
     "scaleMode": "fixed",
     "defaultDensity": "md",
-    "methodology": "Look up node by integer key (rowid 2500/5000). Measured: Sharc 3,444ns vs SQLite 24,347ns (7.1x).",
-    "whyItMatters": "Single-concept lookups happen on every agent tool call. Sub-microsecond seeks keep tool latency imperceptible.",
+    "methodology": "Look up node by integer key via graph index seek (O(log N) ConceptStore). Measured: Sharc 421ns vs SQLite 26,000ns (62x).",
+    "whyItMatters": "Single-concept lookups happen on every agent tool call. Sub-microsecond index seeks keep tool latency imperceptible.",
     "densityTiers": [
       { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 24347, "allocation": "728 B", "note": "WHERE key = ? prepared" },
+      "sqlite":    { "value": 26000, "allocation": "600 B", "note": "WHERE key = ? prepared" },
       "indexeddb": { "notSupported": true },
-      "sharc":     { "value": 3444,  "allocation": "8,320 B", "note": "7.1x - sub-\u03bcs context lookup" }
+      "sharc":     { "value": 421,   "allocation": "1,032 B", "note": "62x - graph index seek" }
     }
   },
   {

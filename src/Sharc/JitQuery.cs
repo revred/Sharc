@@ -31,7 +31,7 @@ namespace Sharc;
 /// <see cref="NotSupportedException"/>.</para>
 /// <para>This type is <b>not thread-safe</b>. Each instance should be used from a single thread.</para>
 /// </remarks>
-public sealed class JitQuery : IDisposable
+public sealed class JitQuery : IPreparedReader, IPreparedWriter
 {
     private SharcDatabase? _db;
 
@@ -158,6 +158,12 @@ public sealed class JitQuery : IDisposable
 
         return QueryFromTable(columns);
     }
+
+    /// <summary>
+    /// Implements <see cref="IPreparedReader.Execute"/>. Delegates to <see cref="Query(string[])"/>
+    /// with no projection (all columns).
+    /// </summary>
+    SharcDataReader IPreparedReader.Execute() => Query();
 
     /// <summary>
     /// Re-executes the query with the same projection as the last <see cref="Query"/> call.

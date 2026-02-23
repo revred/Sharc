@@ -6,7 +6,7 @@ What to verify and update before committing changes to the Sharc repository.
 
 ## 1. Tests
 
-- [ ] `dotnet test` — all tests pass (currently 2,216 across 6 projects)
+- [ ] `dotnet test` — all tests pass (currently 2,660+ across 6 projects)
 - [ ] `dotnet build` — zero errors, zero warnings (except known CA1861 in test code)
 - [ ] New code has corresponding test(s) (TDD: red → green → refactor)
 

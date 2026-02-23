@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 namespace Sharc.Analysis;
 
 /// <summary>
@@ -12,7 +15,7 @@ public record AnomalyReport(string AgentId, string Type, string Description, lon
 /// <summary>
 /// Scans the ledger for suspicious patterns and anomalies.
 /// </summary>
-public class AnomalyScanner
+public sealed class AnomalyScanner
 {
     private readonly SharcDatabase _db;
     private const string LedgerTableName = "_sharc_ledger";
