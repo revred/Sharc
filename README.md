@@ -212,6 +212,9 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 | [Architecture](docs/ARCHITECTURE.md) | How Sharc achieves zero-allocation reads |
 | [Cookbook](docs/COOKBOOK.md) | 15 recipes for common patterns |
 | [Alternatives](docs/ALTERNATIVES.md) | Sharc vs SQLite vs LiteDB vs DuckDB |
+| [Graph DB Comparison](docs/GRAPH_DB_COMPARISON.md) | Sharc vs SurrealDB, ArangoDB, Neo4j |
+| [JitSQL Cross-Language](docs/JITSQL_CROSS_LANGUAGE.md) | JitSQL for JS/TS/Python/Go developers |
+| [Vector Search](docs/VECTOR_SEARCH.md) | Embedding storage, similarity search, RAG patterns |
 | [When NOT to Use](docs/WHEN_NOT_TO_USE.md) | Honest limitations |
 | [FAQ](docs/FAQ.md) | Common questions answered |
 | [Migration Guide](docs/MIGRATION.md) | Switching from Microsoft.Data.Sqlite |
@@ -221,7 +224,7 @@ AI agents don't need a SQL engine -- they need targeted, trusted context. Sharc 
 
 ```bash
 dotnet build                                            # Build everything
-dotnet test                                             # Run all 2,570 tests
+dotnet test                                             # Run all 2,669 tests
 dotnet run -c Release --project bench/Sharc.Benchmarks  # Run benchmarks
 ```
 
@@ -238,7 +241,7 @@ src/
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
 tests/
   Sharc.Tests/              1,477 unit tests
-  Sharc.IntegrationTests/   528 end-to-end tests
+  Sharc.IntegrationTests/   627 end-to-end tests
   Sharc.Query.Tests/        462 query pipeline tests
   Sharc.Graph.Tests.Unit/   67 graph tests
   Sharc.Index.Tests/        22 index CLI tests
@@ -246,6 +249,15 @@ tests/
 bench/
   Sharc.Benchmarks/         BenchmarkDotNet suite (Sharc vs SQLite)
   Sharc.Comparisons/        Graph + query benchmarks
+samples/
+  ApiComparison/            Sharc vs SQLite end-to-end timing comparison
+  BasicRead/                Minimal read example
+  BulkInsert/               Transactional batch insert
+  FilterAndProject/         Column projection + filtering
+  PointLookup/              B-tree Seek performance demo
+  EncryptedRead/            AES-256-GCM encrypted database read
+  ContextGraph/             Graph traversal example
+  TrustComplex/             Agent trust layer demo
 tools/
   Sharc.Context/            MCP Context Server
   Sharc.Index/              Git history → SQLite CLI
