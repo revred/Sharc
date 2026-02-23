@@ -78,7 +78,7 @@ internal static class BenchmarkTiers
         "*DatabaseHeaderBenchmarks.Parse_4096PageSize",
         // Comparative — Light ops only
         "*DatabaseOpenBenchmarks.Sharc_Memory*",
-        "*RealysticWorkloadBenchmarks.Sharc_OpenReadClose*", // Typo fix if needed, but keeping standard
+        "*RealisticWorkloadBenchmarks.Sharc_OpenReadClose*",
     ];
 
     // ── Standard: ~80 benchmarks, ~20 min ──

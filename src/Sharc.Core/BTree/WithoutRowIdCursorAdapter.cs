@@ -69,15 +69,12 @@ internal sealed class WithoutRowIdCursorAdapter : IBTreeCursor
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Not supported for WITHOUT ROWID tables — the index B-tree is ordered by PRIMARY KEY,
+    /// not by insertion order, so "last" has no meaningful rowid semantics.
+    /// </remarks>
     public bool MoveLast()
     {
-        // For WITHOUT ROWID tables, "Last" depends on index order.
-        // We can technically move to the last entry in the index tree.
-        // However, since we don't have a numeric rowid sequence, this might not be what callers expect
-        // if they want "newest" entry. Callers should use specific index scans if order matters.
-        // For Audit Log, we use ROWID table, so this adapter is not used.
-        // We can invoke _inner.MoveLast() if IIndexBTreeCursor had it?
-        // IIndexBTreeCursor doesn't have it either.
         throw new NotSupportedException("MoveLast is not supported for WITHOUT ROWID tables.");
     }
 

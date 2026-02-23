@@ -35,7 +35,7 @@ public readonly record struct NodeKey(long Value)
         
         if (start == BufferSize) return "0";
 
-        // BUG-05: Validate that all bytes are printable ASCII (0x20 - 0x7E)
+        // Validate that all bytes are printable ASCII (0x20 - 0x7E)
         for (int i = start; i < BufferSize; i++)
         {
             byte b = bytes[i];

@@ -10,6 +10,9 @@ using Sharc.Core.Schema;
 
 namespace Sharc.Graph.Store;
 
+/// <summary>
+/// Reads relation (edge) records from the graph's relation table B-tree.
+/// </summary>
 internal sealed class RelationStore
 {
     private readonly IBTreeReader _reader;

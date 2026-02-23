@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 ﻿using System.Diagnostics;
 
 if (args.Length == 0)

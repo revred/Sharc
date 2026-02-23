@@ -41,6 +41,13 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     private ReadOnlyMemory<byte> _cachedLeafMemory;
     private uint _cachedLeafPageNum;
 
+    // Same-leaf fast path: rowid range of cached leaf. When _cachedLeafMaxRowId == long.MinValue
+    // the range is invalid. Uses _cachedLeafPageNum != 0 as secondary guard.
+    // These two longs piggyback on the existing _cachedLeafMemory/PageNum cache —
+    // same lifecycle, same invalidation path. No extra validity flag needed.
+    private long _cachedLeafMinRowId;
+    private long _cachedLeafMaxRowId = long.MinValue;
+
     // Current cell data
     private long _rowId;
     private int _payloadSize;
@@ -54,6 +61,12 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     private readonly IWritablePageSource? _writableSource;
     private long _snapshotVersion;
 
+    /// <summary>
+    /// Initializes a new cursor positioned before the first row of the table B-tree.
+    /// </summary>
+    /// <param name="pageSource">The page source for reading B-tree pages.</param>
+    /// <param name="rootPage">The root page number of the table B-tree.</param>
+    /// <param name="usablePageSize">Usable bytes per page (page size minus reserved space).</param>
     public BTreeCursor(TPageSource pageSource, uint rootPage, int usablePageSize)
     {
         _pageSource = pageSource;
@@ -103,9 +116,10 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         ReturnAssembledPayload();
         _stackTop = 0;
         _state = 0;
-        _currentLeafPage = 0;
-        _cachedLeafPageNum = 0;
-        _cachedLeafMemory = default;
+        // Don't clear _currentLeafPage — it's used by Seek() same-rowid fast path.
+        // MoveNext() uses StateInitialized (cleared above) so it will re-descend properly.
+        // Preserve _cachedLeafPageNum, _cachedLeafMemory, _cachedLeafMinRowId, _cachedLeafMaxRowId
+        // so that Seek() can use the same-leaf fast path after Reset().
         _snapshotVersion = _writableSource?.DataVersion ?? 0;
     }
 
@@ -172,9 +186,80 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     {
         ObjectDisposedException.ThrowIf((_state & StateDisposed) != 0, this);
         ReturnAssembledPayload();
+
+        // Check data version for writable sources — must run before fast paths
+        // so that IsStale is always refreshed and leaf cache is invalidated on writes.
+        bool versionChanged = false;
+        if (_writableSource != null)
+        {
+            long ver = _writableSource.DataVersion;
+            versionChanged = ver != _snapshotVersion;
+            _snapshotVersion = ver;
+            if (versionChanged)
+            {
+                // Data changed — invalidate leaf cache
+                _cachedLeafMaxRowId = long.MinValue;
+                _cachedLeafPageNum = 0;
+            }
+        }
+
+        // ── Same-rowid fast path ─────────────────────────────────────
+        // If seeking to the exact same rowid as the last successful Seek
+        // and data hasn't changed, the cell data is still valid — skip all traversal.
+        // Uses _currentLeafPage != 0 to verify a prior Seek() actually landed on a cell.
+        if (!versionChanged && _currentLeafPage != 0 && _rowId == rowId
+            && _currentCellIndex < _leafCellCount && _assembledPayload == null)
+        {
+            _state = (byte)((_state & ~StateExhausted) | StateInitialized);
+            return true;
+        }
+
         _stackTop = 0;
         _state = (byte)((_state & ~StateExhausted) | StateInitialized);
-        _snapshotVersion = _writableSource?.DataVersion ?? 0;
+
+        // ── Same-leaf fast path ──────────────────────────────────────
+        // If the cached leaf page has a valid rowid range and the target falls
+        // within it, skip interior page traversal entirely and binary search
+        // only within the cached leaf. Saves 2+ GetPage() calls (interior pages).
+        if (_cachedLeafPageNum != 0 && rowId >= _cachedLeafMinRowId && rowId <= _cachedLeafMaxRowId)
+        {
+            _currentLeafPage = _cachedLeafPageNum;
+            var page = _cachedLeafMemory.Span;
+
+            // We know this is a leaf page — skip full header parse.
+            // Leaf cell pointer array starts at headerOffset + 8 (TableLeafHeaderSize).
+            int headerOffset = _currentLeafPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+            int cellPtrBase = headerOffset + SQLiteLayout.TableLeafHeaderSize;
+
+            // Binary search within the cached leaf
+            int low = 0;
+            int high = _leafCellCount - 1;
+            while (low <= high)
+            {
+                int mid = low + ((high - low) >> 1);
+                int cellOffset = BinaryPrimitives.ReadUInt16BigEndian(page[(cellPtrBase + mid * 2)..]);
+                CellParser.ParseTableLeafCell(page[cellOffset..], out int _, out long cellRowId);
+
+                if (cellRowId < rowId)
+                    low = mid + 1;
+                else if (cellRowId > rowId)
+                    high = mid - 1;
+                else
+                {
+                    _currentCellIndex = mid;
+                    ParseCurrentLeafCell();
+                    return true;
+                }
+            }
+
+            _currentCellIndex = low;
+            if (_currentCellIndex < _leafCellCount)
+            {
+                ParseCurrentLeafCell();
+                return false;
+            }
+            // Target not in this leaf after all — fall through to full descent
+        }
 
         bool exactMatch = DescendToLeaf(_rootPage, rowId);
 
@@ -256,6 +341,19 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
                 _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
                 _cachedLeafPageNum = pageNumber;
                 page = _cachedLeafMemory.Span;
+
+                // Cache the rowid range for same-leaf fast path on next Seek()
+                if (header.CellCount > 0)
+                {
+                    int firstCellOff = header.GetCellPointer(page[headerOffset..], 0);
+                    CellParser.ParseTableLeafCell(page[firstCellOff..], out _, out _cachedLeafMinRowId);
+                    int lastCellOff = header.GetCellPointer(page[headerOffset..], header.CellCount - 1);
+                    CellParser.ParseTableLeafCell(page[lastCellOff..], out _, out _cachedLeafMaxRowId);
+                }
+                else
+                {
+                    _cachedLeafMaxRowId = long.MinValue;
+                }
 
                 // Binary search leaf cells using on-demand pointer reads
                 int low = 0;

@@ -176,7 +176,7 @@ Heap: 0 B
 ## Verification
 
 1. `dotnet build` — zero errors
-2. `dotnet test` — all 2,570 tests pass
+2. `dotnet test` — all 2,669 tests pass
 3. PointLookup benchmark → 680 B → ~488 B
 4. SequentialScan → no regression (re-parse ~1.5 μs out of 3 ms)
 5. Seek correctness — exact match, near miss, exhaustion all covered by existing tests

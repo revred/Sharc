@@ -4,6 +4,38 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-022: B-Tree Leaf Range Cache + Random Lookup 109x (Achieved)
+
+**Date**: 2026-02-23
+**Status**: Achieved — 109x random lookup, 257x same-rowid, 0 B allocation
+
+**Context**: After PreparedReader + Seek devirtualization (v4), point lookup was 159.5 ns / 0 B prepared. However, the benchmark always sought the same rowid (2500), which wasn't representative of real workloads. Random-rowid benchmarks were needed to prove honest performance.
+
+**Problem**: Every `Seek()` call descended from B-tree root through all interior pages, requiring 3× `CachedPageSource.GetPage()` lock acquisitions per lookup on a 5,000-row, 3-level B-tree. Each lock + LRU update costs ~20 ns.
+
+**Decision**: Three-tier Seek optimization in `BTreeCursor.Seek()`:
+
+1. **Same-rowid fast path**: If `_currentLeafPage != 0 && _rowId == rowId` and no data version change → return immediately (~2 ns). Guards: `_currentLeafPage` set by prior Seek, `DataVersion` checked for writable sources.
+
+2. **Same-leaf fast path**: Cache min/max rowid range (`_cachedLeafMinRowId`/`_cachedLeafMaxRowId`) of current leaf page. If target rowid falls in range → skip interior page descent, binary search within cached leaf only. Saves 2+ GetPage() lock acquisitions.
+
+3. **Full descent**: Cache miss → `DescendToLeaf()` populates leaf range on landing for next call.
+
+**Memory cost**: Two `long` fields (16 bytes) with `long.MinValue` sentinel for invalid state — no extra bool field. Matches existing naming convention (`_cachedLeafPageNum`, `_cachedLeafMemory`).
+
+**Benchmark methodology**: 512-entry Fisher-Yates shuffled circular buffer, deterministic seed (42), `RefillRandomBuf()` reuses same array — zero allocation. Both Sharc and SQLite use identical random sequence.
+
+**Results**:
+| Pattern | Sharc | SQLite | Speedup |
+|---------|-------|--------|---------|
+| Random rowid (prepared, 512-buf) | 275.8 ns / 0 B | 30,135 ns / 832 B | **109x** |
+| Same-rowid (prepared) | 103.7 ns / 0 B | 26,738 ns / 408 B | **257x** |
+| Same-rowid (cold, pooled) | 82.4 ns / 0 B | 30,229 ns / 728 B | **367x** |
+
+**Files modified**: `BTreeCursor.cs` (leaf cache fields, three-tier Seek), `CoreBenchmarks.cs` (random lookup benchmarks). All 2,566 tests GREEN.
+
+---
+
 ## ADR-021: Multi-Overflow Write Support (Resolved)
 
 **Date**: 2026-02-23
@@ -13,7 +45,7 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 **Resolution**: Added `WriteOverflowChain` to `BTreeMutator` that allocates overflow pages in a loop, distributes payload bytes across pages (`usablePageSize - 4` bytes per page), writes 4-byte next-page pointers linking the chain, and patches the cell's overflow pointer to the first overflow page. Also added `AllocateOverflowPage` for lightweight page allocation without B-tree headers (overflow pages are raw data pages).
 
-**Verification**: 10 stress tests covering 4 KB single-overflow, 20 KB (~5 pages), 50 KB (~13 pages), 5×15 KB batch, mixed inline/overflow, update-to-larger-overflow, delete+reinsert freelist recycling, seek by rowid across overflow rows. All 2,570 tests pass.
+**Verification**: 10 stress tests covering 4 KB single-overflow, 20 KB (~5 pages), 50 KB (~13 pages), 5×15 KB batch, mixed inline/overflow, update-to-larger-overflow, delete+reinsert freelist recycling, seek by rowid across overflow rows. All 2,669 tests pass.
 
 **Files modified**: `BTreeMutator.cs` (`WriteOverflowChain`, `AllocateOverflowPage`, updated `Insert` to call chain writer)
 

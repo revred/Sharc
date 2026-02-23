@@ -41,6 +41,13 @@ internal sealed class BTreeMutator : IDisposable
     private readonly Action<uint>? _freePageCallback;
     private CellRef[]? _cellRefBuffer; // lazy — only allocated when a split or defrag is needed
 
+    /// <summary>
+    /// Initializes a new mutator for the given writable page source.
+    /// </summary>
+    /// <param name="source">The writable page source to modify.</param>
+    /// <param name="usablePageSize">Usable bytes per page (page size minus reserved space).</param>
+    /// <param name="freePageAllocator">Optional delegate that returns a free page number from the freelist, or 0 if none available.</param>
+    /// <param name="freePageCallback">Optional delegate invoked when a page is freed during split/merge operations.</param>
     public BTreeMutator(IWritablePageSource source, int usablePageSize,
         Func<uint>? freePageAllocator = null, Action<uint>? freePageCallback = null)
     {
@@ -65,7 +72,7 @@ internal sealed class BTreeMutator : IDisposable
 
         // Build the cell bytes (stored in a rented/stack buffer)
         int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, recordPayload.Length, _usablePageSize);
-        byte[] cellArray = cellSize <= 512 ? new byte[cellSize] : new byte[cellSize];
+        byte[] cellArray = new byte[cellSize];
         CellBuilder.BuildTableLeafCell(rowId, recordPayload, cellArray, _usablePageSize);
 
         // If the record overflows, write overflow pages and patch the cell's pointer
@@ -861,6 +868,7 @@ internal sealed class BTreeMutator : IDisposable
 
     // ── I/O helpers ────────────────────────────────────────────────
 
+    /// <summary>Reads a page into a cached buffer, renting from the pool if not already cached.</summary>
     private byte[] ReadPageBuffer(uint pageNumber)
     {
         if (_pageCache.TryGetValue(pageNumber, out var cached))
@@ -872,6 +880,7 @@ internal sealed class BTreeMutator : IDisposable
         return buf;
     }
 
+    /// <summary>Writes a page buffer to the underlying page source and caches it.</summary>
     private void WritePageBuffer(uint pageNumber, byte[] buffer)
     {
         _source.WritePage(pageNumber, buffer.AsSpan(0, _source.PageSize));
@@ -889,6 +898,9 @@ internal sealed class BTreeMutator : IDisposable
 
     private uint _nextAllocPage;
 
+    /// <summary>
+    /// Allocates a new page, first trying the freelist, then extending the file.
+    /// </summary>
     internal uint AllocateNewPage()
     {
         // Try reusing a free page from the freelist first

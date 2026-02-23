@@ -9,12 +9,16 @@ namespace Sharc.Core.BTree;
 /// Result of a B-tree mutation (delete or update) indicating whether the target row
 /// was found and the (possibly new) root page number.
 /// </summary>
+/// <param name="Found">Whether the target row was found in the B-tree.</param>
+/// <param name="RootPage">The root page number after the operation (may change due to splits).</param>
 internal readonly record struct MutationResult(bool Found, uint RootPage);
 
 /// <summary>
 /// Tracks a position in the B-tree ancestor path during insertion.
 /// Used with <c>stackalloc</c> to avoid heap allocation during tree descent.
 /// </summary>
+/// <param name="PageNum">The page number of the ancestor node.</param>
+/// <param name="CellIndex">The cell index within the ancestor page where the child pointer was followed.</param>
 internal readonly record struct InsertPathEntry(uint PageNum, int CellIndex);
 
 /// <summary>
@@ -42,6 +46,7 @@ internal struct CursorStack
 {
     private ulong _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
 
+    /// <summary>Gets or sets a packed frame at the given stack depth.</summary>
     internal ulong this[int index]
     {
         get => index switch
