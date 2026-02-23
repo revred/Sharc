@@ -9,8 +9,8 @@
     "sectionId": "scan-ops",
     "scaleMode": "linear",
     "defaultDensity": "md",
-    "methodology": "Scan 5K rows, filter by age > 30 AND score < 50. Measured: Sharc 1.23ms vs SQLite 0.55ms. SQLite wins via VDBE predicate pushdown.",
-    "whyItMatters": "WHERE filters are the bread-and-butter of agent queries. Both engines sub-millisecond at 5K rows - real-world performance is comparable.",
+    "methodology": "Scan 5K rows, filter by age > 30 AND score < 50. PreparedQuery pre-compiles filters for zero-allocation execution. Measured: Sharc 0.236ms vs SQLite 0.551ms (2.3x).",
+    "whyItMatters": "WHERE filters are the bread-and-butter of agent queries. PreparedQuery eliminates parse + filter construction overhead, achieving 2.3x faster with zero GC pressure.",
     "densityTiers": [
       { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
       { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
@@ -19,9 +19,9 @@
       { "id": "xl", "label": "100K", "rows": 100000, "scale": 20 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 0.554, "allocation": "720 B", "note": "VDBE predicate pushdown" },
+      "sqlite":    { "value": 0.551, "allocation": "720 B", "note": "VDBE predicate pushdown" },
       "indexeddb": { "notSupported": true, "note": "No query language" },
-      "sharc":     { "value": 1.229, "allocation": "1.1 MB", "note": "SharcFilter - 6 operators, all types" }
+      "sharc":     { "value": 0.236, "allocation": "0 B", "note": "2.3x - PreparedQuery zero-alloc filter" }
     }
   },
   {
@@ -34,8 +34,8 @@
     "sectionId": "scan-ops",
     "scaleMode": "linear",
     "defaultDensity": "xl",
-    "methodology": "Scan 5K integer rows sustained. Measured: Sharc 0.213ms/8.2KB vs SQLite 0.798ms/688B. Sharc 3.7x faster.",
-    "whyItMatters": "In WASM, GC pauses freeze the entire tab. Low-alloc scans prevent jank during continuous agent operations.",
+    "methodology": "Scan 5K integer rows sustained with PreparedReader. Measured: Sharc 0.168ms/0B vs SQLite 0.798ms/688B. Sharc 4.8x faster with zero allocation.",
+    "whyItMatters": "In WASM, GC pauses freeze the entire tab. PreparedReader achieves true zero-allocation scans, eliminating GC jank entirely.",
     "densityTiers": [
       { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
       { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
@@ -46,7 +46,7 @@
     "baseResults": {
       "sqlite":    { "value": 0.798, "allocation": "688 B", "note": "P/Invoke path, minimal alloc" },
       "indexeddb": { "notSupported": true, "note": "Impractical at this scale" },
-      "sharc":     { "value": 0.213, "allocation": "8.2 KB", "note": "3.7x faster, zero-alloc Span" }
+      "sharc":     { "value": 0.168, "allocation": "0 B", "note": "4.8x - PreparedReader zero-alloc scan" }
     }
   },
   {

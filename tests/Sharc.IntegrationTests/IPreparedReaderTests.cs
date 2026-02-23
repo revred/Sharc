@@ -8,6 +8,8 @@
 using Sharc.IntegrationTests.Helpers;
 using Xunit;
 
+#pragma warning disable CA1859 // Intentionally testing interface polymorphism
+
 namespace Sharc.IntegrationTests;
 
 public sealed class IPreparedReaderTests

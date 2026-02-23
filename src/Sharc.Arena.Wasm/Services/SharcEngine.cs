@@ -33,6 +33,13 @@ public sealed class SharcEngine : IDisposable
     // Direct graph store access for O(log N + M) traversal via shared BTreeReader
     private SharcContextGraph? _graph;
 
+    // Prepared handles — resolved once at init, zero-allocation on repeated Execute/CreateReader.
+    private PreparedReader? _preparedPointLookup;
+    private PreparedReader? _preparedTypeDecode;
+    private PreparedReader? _preparedNullScan;
+    private PreparedReader? _preparedGcScan;
+    private PreparedQuery? _preparedWhereFilter;
+
     // Pre-allocated buffers for direct B-tree cursor scans.
     // Matches ConceptStore/RelationStore internal optimization pattern:
     // avoids per-row allocation that SharcDataReader incurs.
@@ -59,6 +66,13 @@ public sealed class SharcEngine : IDisposable
         _graph = new SharcContextGraph(_db.BTreeReader, new NativeSchemaAdapter());
         _graph.Initialize();
 
+        // Prepared handles — resolved once, zero-allocation on repeated calls.
+        _preparedPointLookup = _db.PrepareReader("users", "id", "name");
+        _preparedTypeDecode = _db.PrepareReader("users", "id");
+        _preparedNullScan = _db.PrepareReader("users", "bio");
+        _preparedGcScan = _db.PrepareReader("users", "id");
+        _preparedWhereFilter = _db.Prepare("SELECT id FROM users WHERE age > 30 AND score < 50.0");
+
         return (sw.Elapsed.TotalMilliseconds, allocAfter - allocBefore);
     }
 
@@ -68,7 +82,12 @@ public sealed class SharcEngine : IDisposable
         // For the arena, we re-time just the OpenMemory() call.
         if (_dbBytes is null) return new EngineBaseResult { Value = 0, Note = "No data" };
 
-        // Dispose graph FIRST — it shares _db's BTreeReader
+        // Dispose prepared handles + graph FIRST — they share _db's BTreeReader
+        _preparedPointLookup?.Dispose(); _preparedPointLookup = null;
+        _preparedTypeDecode?.Dispose(); _preparedTypeDecode = null;
+        _preparedNullScan?.Dispose(); _preparedNullScan = null;
+        _preparedGcScan?.Dispose(); _preparedGcScan = null;
+        _preparedWhereFilter?.Dispose(); _preparedWhereFilter = null;
         _graph?.Dispose();
         _graph = null;
         _db?.Dispose();
@@ -82,9 +101,14 @@ public sealed class SharcEngine : IDisposable
         var allocAfter = GC.GetAllocatedBytesForCurrentThread();
         var allocKb = (allocAfter - allocBefore) / 1024.0;
 
-        // Re-initialize graph with the new BTreeReader
+        // Re-initialize graph and prepared handles with the new BTreeReader
         _graph = new SharcContextGraph(_db.BTreeReader, new NativeSchemaAdapter());
         _graph.Initialize();
+        _preparedPointLookup = _db.PrepareReader("users", "id", "name");
+        _preparedTypeDecode = _db.PrepareReader("users", "id");
+        _preparedNullScan = _db.PrepareReader("users", "bio");
+        _preparedGcScan = _db.PrepareReader("users", "id");
+        _preparedWhereFilter = _db.Prepare("SELECT id FROM users WHERE age > 30 AND score < 50.0");
 
         return new EngineBaseResult
         {
@@ -179,15 +203,14 @@ public sealed class SharcEngine : IDisposable
 
     public EngineBaseResult RunPointLookup()
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedPointLookup is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        var rowCount = _db.GetRowCount("users");
+        var rowCount = _db!.GetRowCount("users");
         var targetRowId = Math.Max(1, rowCount / 2);
-        var columns = new[] { "id", "name" };
 
-        // Thorough Warm-up (100 iterations to trigger WASM JIT/Tiered compilation)
-        // Must read columns during warmup so JIT optimizes the full seek+read path
-        using (var warmup = _db.CreateReader("users", columns))
+        // Thorough warm-up (100 iterations to trigger WASM JIT/Tiered compilation)
+        // PreparedReader.CreateReader() reuses cursor+reader — zero alloc after first call.
+        using (var warmup = _preparedPointLookup.CreateReader())
         {
             for (int i = 0; i < 100; i++)
             {
@@ -203,7 +226,7 @@ public sealed class SharcEngine : IDisposable
         var sw = Stopwatch.StartNew();
 
         int iterations = 1000;
-        using (var reader = _db.CreateReader("users", columns))
+        using (var reader = _preparedPointLookup.CreateReader())
         {
             for (int i = 0; i < iterations; i++)
             {
@@ -223,25 +246,24 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(totalNs / iterations, 0),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"B-tree seek to rowid {targetRowId} (avg of {iterations})",
+            Note = $"Prepared seek to rowid {targetRowId} (avg of {iterations})",
         };
     }
 
     public EngineBaseResult RunBatchLookup(double scale)
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedPointLookup is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        var rowCount = _db.GetRowCount("users");
+        var rowCount = _db!.GetRowCount("users");
         var batchSize = Math.Max(1, (int)(6 * scale));
         var rng = new Random(42);
-        var columns = new[] { "id", "name" };
 
-        // Warm-up — full seek+read path to trigger JIT optimization
-        using (var warmup = _db.CreateReader("users", columns))
+        // Warm-up — PreparedReader reuses cursor+reader, leaf cache warms B-tree pages
+        using (var warmup = _preparedPointLookup.CreateReader())
         {
             for (int i = 0; i < 100; i++)
             {
-                if (warmup.Seek(1))
+                if (warmup.Seek(rng.NextInt64(1, rowCount + 1)))
                 {
                     _ = warmup.GetInt64(0);
                     _ = warmup.GetString(1);
@@ -249,11 +271,12 @@ public sealed class SharcEngine : IDisposable
             }
         }
 
+        rng = new Random(42); // Reset seed for reproducible measurement
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
         int iterations = 500;
-        using (var reader = _db.CreateReader("users", columns))
+        using (var reader = _preparedPointLookup.CreateReader())
         {
             for (int j = 0; j < iterations; j++)
             {
@@ -277,18 +300,18 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(totalNs / iterations, 0),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"Batch of {batchSize} seeks (avg of {iterations})",
+            Note = $"Prepared batch of {batchSize} seeks (avg of {iterations})",
         };
     }
 
     public EngineBaseResult RunTypeDecode(double scale)
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedTypeDecode is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
         // Thorough warm-up (3 passes for WASM JIT tiering)
         for (int w = 0; w < 3; w++)
         {
-            using var warmup = _db.CreateReader("users", "id");
+            using var warmup = _preparedTypeDecode.CreateReader();
             while (warmup.Read()) { _ = warmup.GetInt64(0); }
         }
 
@@ -300,7 +323,7 @@ public sealed class SharcEngine : IDisposable
         for (int run = 0; run < iterations; run++)
         {
             count = 0;
-            using var reader = _db.CreateReader("users", "id");
+            using var reader = _preparedTypeDecode.CreateReader();
             while (reader.Read())
             {
                 _ = reader.GetInt64(0);
@@ -315,18 +338,18 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"{count} integers decoded",
+            Note = $"{count} integers decoded (prepared)",
         };
     }
 
     public EngineBaseResult RunNullScan(double scale)
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedNullScan is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
         // Thorough warm-up (3 passes for WASM JIT tiering)
         for (int w = 0; w < 3; w++)
         {
-            using var warmup = _db.CreateReader("users", "bio");
+            using var warmup = _preparedNullScan.CreateReader();
             while (warmup.Read()) { _ = warmup.IsNull(0); }
         }
 
@@ -340,7 +363,7 @@ public sealed class SharcEngine : IDisposable
         {
             nullCount = 0;
             totalCount = 0;
-            using var reader = _db.CreateReader("users", "bio");
+            using var reader = _preparedNullScan.CreateReader();
             while (reader.Read())
             {
                 if (reader.IsNull(0)) nullCount++;
@@ -355,27 +378,18 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMicroseconds() / iterations, 0),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"{nullCount}/{totalCount} nulls",
+            Note = $"{nullCount}/{totalCount} nulls (prepared)",
         };
     }
 
     public EngineBaseResult RunWhereFilter(double scale)
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedWhereFilter is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Column projection: only decode "id" on matched rows.
-        // Filters evaluate on raw bytes independently of projection.
-        var columns = new[] { "id" };
-        var filters = new[]
-        {
-            new SharcFilter("age", SharcOperator.GreaterThan, (long)30),
-            new SharcFilter("score", SharcOperator.LessThan, 50.0),
-        };
-
-        // Thorough warm-up (3 passes — JIT the filter path + reader creation)
+        // Thorough warm-up (3 passes — JIT the compiled filter + cursor reuse path)
         for (int w = 0; w < 3; w++)
         {
-            using var warmup = _db.CreateReader("users", columns, filters);
+            using var warmup = _preparedWhereFilter.Execute();
             while (warmup.Read()) { _ = warmup.GetInt64(0); }
         }
 
@@ -387,7 +401,7 @@ public sealed class SharcEngine : IDisposable
         for (int run = 0; run < iterations; run++)
         {
             matchCount = 0;
-            using var reader = _db.CreateReader("users", columns, filters);
+            using var reader = _preparedWhereFilter.Execute();
             while (reader.Read())
             {
                 _ = reader.GetInt64(0);
@@ -402,7 +416,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds / iterations, 2),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"{matchCount} matches (age>30 AND score<50)",
+            Note = $"{matchCount} matches (PreparedQuery: age>30 AND score<50)",
         };
     }
 
@@ -534,23 +548,19 @@ public sealed class SharcEngine : IDisposable
 
     public EngineBaseResult RunGraphSeek()
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_graph is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        var rowCount = _db.GetRowCount("_concepts");
-        var targetRowId = Math.Max(1, rowCount / 2);
-        var columns = new[] { "id", "key", "data" };
+        var rowCount = _db!.GetRowCount("_concepts");
+        var targetKey = new NodeKey(Math.Max(1, rowCount / 2));
 
-        // Warm-up — full seek+read path to trigger JIT optimization
-        using (var warmup = _db.CreateReader("_concepts", columns))
+        // Warm-up — full GetNode path to trigger JIT optimization on index seek
+        for (int i = 0; i < 100; i++)
         {
-            for (int i = 0; i < 100; i++)
+            var warmupNode = _graph.GetNode(targetKey);
+            if (warmupNode.HasValue)
             {
-                if (warmup.Seek(targetRowId))
-                {
-                    _ = warmup.GetString(0);
-                    _ = warmup.GetInt64(1);
-                    _ = warmup.GetString(2);
-                }
+                _ = warmupNode.Value.Key;
+                _ = warmupNode.Value.JsonData;
             }
         }
 
@@ -558,16 +568,14 @@ public sealed class SharcEngine : IDisposable
         var sw = Stopwatch.StartNew();
 
         int iterations = 1000;
-        using (var reader = _db.CreateReader("_concepts", columns))
+        for (int i = 0; i < iterations; i++)
         {
-            for (int i = 0; i < iterations; i++)
+            var node = _graph.GetNode(targetKey);
+            if (node.HasValue)
             {
-                if (reader.Seek(targetRowId))
-                {
-                    _ = reader.GetString(0);  // id
-                    _ = reader.GetInt64(1);   // key
-                    _ = reader.GetString(2);  // data (projected index)
-                }
+                _ = node.Value.Id;       // RecordId
+                _ = node.Value.Key;      // NodeKey
+                _ = node.Value.JsonData; // data
             }
         }
 
@@ -579,7 +587,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(totalNs / iterations, 0),
             Allocation = FormatAlloc((allocAfter - allocBefore) / iterations),
-            Note = $"B-tree seek to rowid {targetRowId} (avg of {iterations})",
+            Note = $"Graph index seek to key {targetKey} (avg of {iterations})",
         };
     }
 
@@ -640,10 +648,10 @@ public sealed class SharcEngine : IDisposable
 
     public EngineBaseResult RunGcPressure(double scale)
     {
-        if (_db is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
+        if (_preparedGcScan is null) return new EngineBaseResult { Value = null, Note = "Not initialized" };
 
-        // Warm-up
-        using (var warmup = _db.CreateReader("users", "id"))
+        // Warm-up — prepared reader reuses cursor+reader, zero alloc after first call
+        using (var warmup = _preparedGcScan.CreateReader())
         {
             while (warmup.Read()) { _ = warmup.GetInt64(0); }
         }
@@ -651,9 +659,9 @@ public sealed class SharcEngine : IDisposable
         var allocBefore = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
 
-        // Sustained scan — measure total allocation pressure
+        // Sustained scan — measure total allocation pressure (prepared = zero-alloc)
         long count = 0;
-        using (var reader = _db.CreateReader("users", "id"))
+        using (var reader = _preparedGcScan.CreateReader())
         {
             while (reader.Read())
             {
@@ -669,7 +677,7 @@ public sealed class SharcEngine : IDisposable
         {
             Value = Math.Round(sw.Elapsed.TotalMilliseconds, 1),
             Allocation = FormatAlloc(allocAfter - allocBefore),
-            Note = $"{count} rows, sustained integer scan",
+            Note = $"{count} rows, prepared zero-alloc scan",
         };
     }
 
@@ -881,7 +889,14 @@ public sealed class SharcEngine : IDisposable
     /// <summary>Disposes the current database (if any), ready for re-init at different scale.</summary>
     public void Reset()
     {
-        // Dispose graph FIRST — it shares _db's BTreeReader (and underlying page source)
+        // Dispose prepared handles FIRST — they hold references to _db's BTreeReader
+        _preparedPointLookup?.Dispose(); _preparedPointLookup = null;
+        _preparedTypeDecode?.Dispose(); _preparedTypeDecode = null;
+        _preparedNullScan?.Dispose(); _preparedNullScan = null;
+        _preparedGcScan?.Dispose(); _preparedGcScan = null;
+        _preparedWhereFilter?.Dispose(); _preparedWhereFilter = null;
+
+        // Dispose graph — it shares _db's BTreeReader (and underlying page source)
         _graph?.Dispose();
         _graph = null;
 

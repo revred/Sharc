@@ -441,7 +441,7 @@ public sealed class JitSqlPerformanceTests : IDisposable
         return count;
     }
 
-    private static int CountPrepared(IPreparedReader prepared)
+    private static int CountPrepared(PreparedQuery prepared)
     {
         using var reader = prepared.Execute();
         int count = 0;

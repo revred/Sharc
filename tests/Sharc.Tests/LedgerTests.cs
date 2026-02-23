@@ -31,7 +31,9 @@ public class LedgerTests : IDisposable
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
+        GC.SuppressFinalize(this);
     }
+
     [Fact]
     public void SharcSigner_SignAndVerify_Works()
     {

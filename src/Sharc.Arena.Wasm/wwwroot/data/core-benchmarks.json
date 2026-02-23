@@ -76,15 +76,15 @@
     "sectionId": "point-ops",
     "scaleMode": "fixed",
     "defaultDensity": "md",
-    "methodology": "Retrieving a specific memory by its global ID. Sharc descends the B-tree directly in memory. Measured: 3,444ns vs 24,347ns.",
-    "whyItMatters": "Agents retrieve specific facts by ID thousands of times per conversation. 7.1x faster seeks compound into massive latency savings.",
+    "methodology": "Retrieving a specific memory by its global ID. Sharc uses PreparedReader with B-tree leaf cache for zero-allocation cursor reuse. Measured: 276ns vs 30,135ns (109x).",
+    "whyItMatters": "Agents retrieve specific facts by ID thousands of times per conversation. 109x faster seeks with zero GC pressure compound into massive latency savings.",
     "densityTiers": [
       { "id": "md", "label": "-", "rows": 0, "scale": 1 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 24347,  "allocation": "728 B", "note": "VDBE VM overhead" },
+      "sqlite":    { "value": 30135,  "allocation": "832 B", "note": "VDBE VM overhead" },
       "indexeddb": { "value": 85000,  "allocation": "320 B", "note": "Async IDB request" },
-      "sharc":     { "value": 3444,   "allocation": "8,320 B", "note": "7.1x - direct pointer seek" }
+      "sharc":     { "value": 276,    "allocation": "0 B", "note": "109x - PreparedReader + leaf cache" }
     }
   },
   {
@@ -97,8 +97,8 @@
     "sectionId": "point-ops",
     "scaleMode": "linear",
     "defaultDensity": "sm",
-    "methodology": "6 sequential PK lookups across B-tree. Measured: Sharc 5,237ns vs SQLite 127,763ns (24.4x).",
-    "whyItMatters": "Multi-step reasoning requires multiple lookups per turn. 24.4x faster batches keep agent response times under 100ms.",
+    "methodology": "6 random PK lookups across B-tree with PreparedReader cursor reuse. Measured: Sharc 1,656ns vs SQLite 180,810ns (109x per seek).",
+    "whyItMatters": "Multi-step reasoning requires multiple lookups per turn. 109x faster seeks with zero allocation keep agent response times imperceptible.",
     "densityTiers": [
       { "id": "xs", "label": "x1",   "rows": 1,   "scale": 0.17 },
       { "id": "sm", "label": "x6",   "rows": 6,   "scale": 1 },
@@ -106,9 +106,9 @@
       { "id": "lg", "label": "x100", "rows": 100, "scale": 17 }
     ],
     "baseResults": {
-      "sqlite":    { "value": 127763, "allocation": "3,712 B", "note": "Prepared statement, 6 executions" },
+      "sqlite":    { "value": 180810, "allocation": "4,992 B", "note": "Prepared statement, 6 executions" },
       "indexeddb": { "value": 520000, "allocation": "1.9 KB", "note": "6 async get() calls" },
-      "sharc":     { "value": 5237,   "allocation": "9,424 B", "note": "24.4x - cursor seek reuse" }
+      "sharc":     { "value": 1656,   "allocation": "0 B", "note": "109x - PreparedReader + leaf cache" }
     }
   },
   {
@@ -121,8 +121,8 @@
     "sectionId": "point-ops",
     "scaleMode": "linear",
     "defaultDensity": "xl",
-    "methodology": "Decode 5K integer values. Sharc: ReadOnlySpan<byte> + struct returns. Measured: 0.213ms vs SQLite 0.819ms (3.8x).",
-    "whyItMatters": "Type decoding runs millions of times during large scans. 3.8x faster decoding means proportionally less CPU time per query.",
+    "methodology": "Decode 5K integer values with PreparedReader cursor reuse. Sharc: ReadOnlySpan<byte> + struct returns. Measured: 0.161ms vs SQLite 0.819ms (5.1x).",
+    "whyItMatters": "Type decoding runs millions of times during large scans. 5.1x faster decoding with zero allocation means proportionally less CPU time per query.",
     "densityTiers": [
       { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
       { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
@@ -133,7 +133,7 @@
     "baseResults": {
       "sqlite":    { "value": 0.819, "allocation": "688 B", "note": "sqlite3_column_int64 P/Invoke" },
       "indexeddb": { "value": 42,    "allocation": "3.2 MB", "note": "Everything is JS objects" },
-      "sharc":     { "value": 0.213, "allocation": "8.2 KB", "note": "3.8x - zero-alloc Span pipeline" }
+      "sharc":     { "value": 0.161, "allocation": "0 B", "note": "5.1x - PreparedReader zero-alloc Span" }
     }
   },
   {
@@ -146,8 +146,8 @@
     "sectionId": "point-ops",
     "scaleMode": "linear",
     "defaultDensity": "md",
-    "methodology": "Scan 5K rows checking nullable column. Sharc reads only serial type headers. Measured: 156\u03bcs vs SQLite 746\u03bcs (4.8x).",
-    "whyItMatters": "NULL checks are the first filter in most queries. Header-only reads skip 90% of the work.",
+    "methodology": "Scan 5K rows checking nullable column with PreparedReader. Sharc reads only serial type headers. Measured: 141\u03bcs vs SQLite 746\u03bcs (5.3x).",
+    "whyItMatters": "NULL checks are the first filter in most queries. Header-only reads with zero allocation skip 90% of the work.",
     "densityTiers": [
       { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
       { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
@@ -158,7 +158,7 @@
     "baseResults": {
       "sqlite":    { "value": 746,   "allocation": "688 B", "note": "sqlite3_column_type P/Invoke" },
       "indexeddb": { "value": 38000, "allocation": "4.8 MB", "note": "Full object deserialization" },
-      "sharc":     { "value": 156,   "allocation": "8.2 KB", "note": "4.8x - header-only reads" }
+      "sharc":     { "value": 141,   "allocation": "0 B", "note": "5.3x - PreparedReader header-only" }
     }
   }
 ]

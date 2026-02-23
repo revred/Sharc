@@ -33,6 +33,7 @@ public class EntitlementGapTests : IDisposable
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
+        GC.SuppressFinalize(this);
     }
 
     private static void SetupGapJoinSchema(SqliteConnection connection)
