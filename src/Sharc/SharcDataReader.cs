@@ -7,7 +7,6 @@ using System.Runtime.CompilerServices;
 using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.IO;
-using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 using Sharc.Core.Query;
 using Sharc.Query;
@@ -29,70 +28,297 @@ namespace Sharc;
 /// }
 /// </code>
 /// </remarks>
-public sealed class SharcDataReader : IDisposable
+public sealed partial class SharcDataReader : IDisposable
 {
-    private readonly IBTreeCursor? _cursor;
+    // ══════════════════════════════════════════════════════════════════════
+    // FIELD LAYOUT & FILE ORGANIZATION
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // This partial class supports 5 mutually exclusive reader modes. Fields are
+    // carefully sized and grouped to minimize object layout on the x64 CLR
+    // (16 B header, refs grouped first at 8 B each, then value types by
+    // descending alignment: int=4, short=2, byte=1, padded to 8-byte boundary).
+    //
+    // ── File Organization ──────────────────────────────────────────────
+    //
+    //   SharcDataReader.cs            — Fields, constructors, scan/decode, accessors, lifecycle
+    //   SharcDataReader.Fingerprint.cs — Row/column fingerprinting (partial class)
+    //   Fnv1aHasher.cs                — 128-bit FNV-1a hasher (ref struct)
+    //   Fingerprint128.cs             — 128-bit fingerprint (readonly struct)
+    //   IndexSet.cs                   — Pooled open-addressing set + SetDedupMode enum
+    //
+    //   Composed inner classes (mode-projected, null when inactive):
+    //     CompositeState — materialized/concat/dedup mode fields
+    //     FilterState    — filter-specific reference fields
+    //
+    // ── Modes ────────────────────────────────────────────────────────────
+    //
+    //   1. CURSOR MODE (PointLookup, scans):
+    //      _cursor + _recordDecoder + _columns + devirt cursors + lazy arrays.
+    //      _composite = null, _filter = null or non-null (filtered scan).
+    //      This is the hot path — PointLookup allocates only this object +
+    //      BTreeCursor (~368 B total).
+    //
+    //   2. MATERIALIZED MODE (aggregates, subqueries):
+    //      _composite != null (holds QueryValueRows/List/Enumerator).
+    //      _cursor = null, _filter = null, all lazy arrays = null.
+    //
+    //   3. CONCAT MODE (UNION ALL):
+    //      _composite != null (holds ConcatFirst/ConcatSecond).
+    //      _cursor = null, _filter = null.
+    //
+    //   4. DEDUP MODE (UNION/INTERSECT/EXCEPT):
+    //      _composite != null (holds DedupUnderlying/Seen/RightIndex).
+    //      _cursor = null, _filter = null.
+    //
+    //   5. FILTERED CURSOR MODE: same as (1) but _filter != null.
+    //      _filter holds reference fields (FilterNode, ConcreteFilterNode,
+    //      Filters, FilterSerialTypes). Mutable per-row ints stay on main
+    //      reader to avoid pointer indirection in the ProcessRow hot loop.
+    //
+    // ── Mode-Projected Composition ───────────────────────────────────────
+    //
+    //   Before: 29 reference fields lived directly on this class. For cursor
+    //   mode (PointLookup), 13 refs from modes 2-4 were always null = 104 B
+    //   of dead weight. Two inner classes now hold mode-specific state:
+    //
+    //   CompositeState: 9 refs + 1 int + 1 enum + 1 bool for modes 2-4.
+    //     Replaces those 11 fields with a single _composite reference.
+    //     Null in cursor mode → 0 B overhead on PointLookup.
+    //
+    //   FilterState: 4 refs for filter config (FilterNode, ConcreteFilterNode,
+    //     Filters, FilterSerialTypes). Replaces those 4 fields with a single
+    //     _filter reference. Null when unfiltered → 0 B on PointLookup.
+    //
+    // ── _scanMode + _decodedGeneration ──────────────────────────────────
+    //
+    //   _scanMode (byte): encodes dispatch mode + lifecycle flags.
+    //     Bits 0-1: DispatchMode (Default=0, TypedCached=1, TypedMemory=2, Disposed=3)
+    //     Bit 2:    IsLazy (row header parsed, body decoded on demand)
+    //     Bit 3:    IsReusable (owned by PreparedQuery, Dispose resets only)
+    //
+    //   _decodedGeneration (int): 32-bit per-row counter for lazy decode.
+    //     Incremented once per row (ProcessRow, DecodeCurrentRow, ResetForReuse).
+    //     Compared per-column against _decodedGenerations[ordinal] stamps.
+    //     Full 32-bit range = ~4.3 billion row cycle before wrap. Wrap requires
+    //     a column to go unaccessed for 4.3B consecutive rows — unreachable in
+    //     practice. Starts at 1 (constructor) so initial stamp 0 never falsely matches.
+    //
+    //   INVARIANT: Reusable flag survives Dispose(). When Dispose() is called
+    //   on a reusable reader, it sets ScanFlags = Disposed|Reusable.
+    //   ResetForReuse() preserves Reusable and replaces dispatch bits.
+    //   DisposeForReal() clears all flags before calling Dispose() to release.
+    //
+    // ── Field Sizing (short vs int) ──────────────────────────────────────
+    //
+    //   Five fields are short (2 B) instead of int (4 B), saving 10 B total:
+    //
+    //   _rowidAliasOrdinal: column ordinal of INTEGER PRIMARY KEY alias.
+    //     Range: -1 (none) to ~2000 (SQLite max columns). short is safe.
+    //
+    //   _columnCount: logical column count for this reader.
+    //     Range: 0 to ~2000. short is safe.
+    //
+    //   PhysicalColumnCount: derived property — equals _columnCount when no
+    //     GUID merges, otherwise read from _physicalOrdinals[_columnCount] sentinel.
+    //     No longer stored as a field — saves one short (2 B).
+    //
+    //   _filterBodyOffset: byte offset into payload where body data starts.
+    //     Set per-row by ReadSerialTypes(). Range: 0 to max payload header
+    //     size (~4000 columns × 9-byte varint = ~36 KB, but typical <100 B).
+    //     SQLite max page size is 65536 B, so short (max 32767) suffices for
+    //     all practical payloads. Cast from int is safe.
+    //
+    //   _filterColCount: number of serial types read from the filter pass.
+    //     Range: 0 to ~2000. short is safe.
+    //
+    //   _currentBodyOffset: same as _filterBodyOffset but for the main decode
+    //     pass. Same range and safety analysis.
+    //
+    // ── Valid State Combinations ─────────────────────────────────────────
+    //
+    //   Cursor mode:
+    //     _cursor != null, _composite == null
+    //     _recordDecoder != null, _columns != null
+    //     _reusableBuffer != null, _serialTypes != null (ArrayPool rentals)
+    //     _filter: null (unfiltered) or non-null (filtered scan)
+    //     _scanMode base: TypedCached | TypedMemory | Default (interface cursor)
+    //
+    //   Materialized mode:
+    //     _composite != null (QueryValueRows or QueryValueList or QueryValueEnumerator set)
+    //     _cursor == null, _filter == null
+    //     _reusableBuffer == null, _serialTypes == null (no ArrayPool rentals)
+    //     _scanMode base: Default (falls through to composite dispatch)
+    //
+    //   Concat mode:
+    //     _composite != null (ConcatFirst + ConcatSecond set)
+    //     _cursor == null, _filter == null
+    //     _scanMode base: Default
+    //
+    //   Dedup mode:
+    //     _composite != null (DedupUnderlying + DedupSeen set)
+    //     _cursor == null, _filter == null
+    //     _scanMode base: Default
+    //
+    //   Disposed:
+    //     _scanMode base: Disposed (bits 0-1 = 3)
+    //     _currentRow == null
+    //     If Reusable: _scanMode = Disposed|Reusable, resources preserved
+    //     If not Reusable: resources released, ArrayPool returned
+    //
+    //   CONFLICT INVARIANTS (must never occur):
+    //     _composite != null && _cursor != null  — modes are exclusive
+    //     _filter != null && _composite != null   — filters only apply to cursors
+    //     Disposed base mode && _currentRow != null — disposed clears current row
+    //     Reusable && _composite != null — reuse only applies to cursor readers
+    //
+    // ── Object Layout (x64, .NET 10, LayoutKind.Auto) ──────────────────
+    //
+    //   CLR auto-layout reorders fields for optimal packing. Declaration
+    //   order does not affect physical layout. The runtime places:
+    //     1. All reference fields first (8 B each, contiguous)
+    //     2. Value types by descending alignment: int(4), short(2)
+    //     3. Padding to 8-byte boundary
+    //
+    //   SharcDataReader (176 B):
+    //   ├── Object header + MT pointer                  16 B
+    //   ├── 18 reference fields × 8 B                 144 B
+    //   │   (CLR groups all refs contiguously regardless of declaration order)
+    //   │   _cursor, _btreeCachedCursor, _btreeMemoryCursor,
+    //   │   _recordDecoder, _columns, _projection,
+    //   │   _mergedColumns, _physicalOrdinals, _currentRow, _reusableBuffer,
+    //   │   _bTreeReader, _tableIndexes, _composite, _filter,
+    //   │   _serialTypes, _decodedGenerations, _columnOffsets,
+    //   │   _cachedColumnNames
+    //   ├── _decodedGeneration int (4 B) + 2 shorts (4 B)  8 B  ← first 8 B value slot
+    //   │   └── _decodedGeneration(4) + _rowidAliasOrdinal(2) + _columnCount(2)
+    //   ├── 3 shorts (6 B) + _scanMode byte (1 B) + 1 B pad  8 B  ← second 8 B value slot
+    //   │   └── _filterBodyOffset(2) + _filterColCount(2) + _currentBodyOffset(2) + _scanMode(1) + pad(1)
+    //   └── Total: 16 + 144 + 8 + 8 = 176 B
+    //
+    //   int(4) + 5×short(10) + byte(1) = 15 B → 16 B padded → 2 × 8 B slots.
+    //
+    // ══════════════════════════════════════════════════════════════════════
 
-    // Concrete cursor reference for devirtualization — the JIT emits direct calls
-    // for sealed class methods, eliminating interface dispatch overhead (~5 ns/call).
-    // Set once in constructor; null for non-BTreeCursor cursors (IndexSeek, etc.)
-    private readonly BTreeCursor<CachedPageSource>? _btreeCachedCursor;
-    private readonly BTreeCursor<MemoryPageSource>? _btreeMemoryCursor;
+    // ── Reference fields (18 × 8 B = 144 B) ────────────────────────────
+    //
+    // CLR LayoutKind.Auto (default for classes) reorders fields for optimal
+    // packing regardless of declaration order. We group by logical concern
+    // for readability; the runtime places all refs first, then value types
+    // by descending alignment (int=4, short=2, byte=1), then pads to 8 B.
+
+    // Cursor core (set in cursor constructor, null for composite modes)
+    private readonly IBTreeCursor? _cursor;
+    private readonly BTreeCursor<CachedPageSource>? _btreeCachedCursor;  // Devirtualized: JIT emits direct calls (~5 ns saved/call)
+    private readonly BTreeCursor<MemoryPageSource>? _btreeMemoryCursor;  // Devirtualized: same as above for memory-backed databases
     private readonly IRecordDecoder? _recordDecoder;
     private readonly IReadOnlyList<ColumnInfo>? _columns;
     private readonly int[]? _projection;
-    private readonly int _rowidAliasOrdinal;
-    private readonly int _columnCount;
-    private readonly int _physicalColumnCount;
     private readonly Dictionary<int, int[]>? _mergedColumns;
     private readonly int[]? _physicalOrdinals;
     private ColumnValue[]? _currentRow;
     private ColumnValue[]? _reusableBuffer;
-    private ScanMode _scanMode;
-
-    // Reuse support: when owned by PreparedQuery, Dispose() resets state instead of releasing resources.
-    private bool _isReusable;
 
     // Index seek support
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
 
-    // Mode-projected composition: non-cursor modes (materialized, concat, dedup)
-    // are consolidated into a single inner object, null for cursor mode.
-    // Saves ~96 B on cursor-mode readers (PointLookup, scans).
+    // Mode-projected composition (null in cursor mode → 0 B overhead on PointLookup)
     private readonly CompositeState? _composite;
 
-    // Filter state: held separately from CompositeState because filters
-    // apply to cursor mode. Null when no filter is active.
+    // Filter state (null when unfiltered → 0 B overhead on unfiltered PointLookup)
     private FilterState? _filter;
 
-    // Per-row filter fields kept on main reader (hot writes every row in ProcessRow)
-    private int _filterBodyOffset;
-    private int _filterColCount;
-
-    // Lazy decode support for projection path — avoids decoding TEXT/BLOB
-    // body data until the caller actually requests the value.
+    // Lazy decode arrays (ArrayPool rentals, null for composite modes)
     private readonly long[]? _serialTypes;
     private readonly int[]? _decodedGenerations;
-    private readonly int[]? _columnOffsets; // Precomputed cumulative byte offsets — O(K) once per row, O(1) per access
-    private int _decodedGeneration;
-    private bool _lazyMode;
-    private int _currentBodyOffset;
+    private readonly int[]? _columnOffsets;
 
     // Cached column names — built once on first call to GetColumnNames()
     private string[]? _cachedColumnNames;
 
+    // ── Value-type fields ───────────────────────────────────────────────
+    //
+    // Physical layout (CLR auto): int(4) + 5×short(10) + byte(1) = 15 B → 16 B padded.
+    // Eliminating _physicalColumnCount (derived via PhysicalColumnCount property)
+    // crosses the padding boundary: 17 B → 15 B → same 16 B padded → 176 B total.
+
+    // Per-row generation counter for lazy decode (full 32-bit, ~4.3B row cycle)
+    private int _decodedGeneration;
+
+    // Scan mode flags — byte enum with 4 flag bits
+    private ScanMode _scanMode;
+
+    // shorts (2 B each) — all values ≤ ~2000 or ≤ ~32K, safe for short
+    private readonly short _rowidAliasOrdinal;   // INTEGER PRIMARY KEY alias ordinal, or -1
+    private readonly short _columnCount;          // Logical column count
+    private short _filterBodyOffset;              // Per-row: payload body offset from filter pass
+    private short _filterColCount;                // Per-row: serial type count from filter pass
+    private short _currentBodyOffset;             // Per-row: payload body offset from main decode pass
+
     /// <summary>
-    /// Pre-resolved scan mode for hot Read() dispatch. Set once in the constructor
-    /// (or ResetForReuse) based on cursor type. Eliminates 6+ branch checks per
-    /// Read() call by routing directly to a devirtualized generic scan method.
+    /// Scan mode flags stored in <see cref="_scanMode"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>Bits 0–1: dispatch mode (0=Default, 1=TypedCached, 2=TypedMemory, 3=Disposed).</para>
+    /// <para>Bit 2: Lazy (row header parsed, body decoded on demand via Get*).</para>
+    /// <para>Bit 3: Reusable (owned by PreparedQuery, Dispose resets instead of releasing).</para>
+    /// </remarks>
+    [Flags]
     private enum ScanMode : byte
     {
-        Default,        // Composite/dedup/concat/materialized/interface — existing cascade
-        TypedCached,    // BTreeCursor<CachedPageSource> — devirtualized via generic specialization
-        TypedMemory,    // BTreeCursor<MemoryPageSource> — devirtualized via generic specialization
-        Disposed,       // Reader has been disposed — Read() throws without field check
+        Default     = 0, // Composite/dedup/concat/materialized/interface — existing cascade
+        TypedCached = 1, // BTreeCursor<CachedPageSource> — devirtualized via generic specialization
+        TypedMemory = 2, // BTreeCursor<MemoryPageSource> — devirtualized via generic specialization
+        Disposed    = 3, // Reader has been disposed — Read() throws without field check
+        Lazy        = 4, // bit 2: lazy decode active
+        Reusable    = 8, // bit 3: owned by PreparedQuery
+    }
+
+    private const byte DispatchMask = 0x3;  // bits 0-1: dispatch mode
+    private const byte FlagsMask    = 0xF;  // bits 0-3: all 4 flag bits
+
+    /// <summary>Dispatch mode (bits 0-1): Default, TypedCached, TypedMemory, or Disposed.</summary>
+    private ScanMode DispatchMode
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (ScanMode)((byte)_scanMode & DispatchMask);
+    }
+
+    /// <summary>All flag bits (bits 0-3). Set replaces flags.</summary>
+    private ScanMode ScanFlags
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (ScanMode)((byte)_scanMode & FlagsMask);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => _scanMode = value;
+    }
+
+    private bool IsLazy
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (_scanMode & ScanMode.Lazy) != 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => _scanMode = value ? (_scanMode | ScanMode.Lazy) : (_scanMode & ~ScanMode.Lazy);
+    }
+
+    private bool IsReusable
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (_scanMode & ScanMode.Reusable) != 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => _scanMode = value ? (_scanMode | ScanMode.Reusable) : (_scanMode & ~ScanMode.Reusable);
+    }
+
+    /// <summary>
+    /// Physical column count — equals _columnCount for normal tables,
+    /// or larger when merged GUID columns (__hi/__lo pairs) exist.
+    /// Derived from _physicalOrdinals to avoid storing a redundant field.
+    /// </summary>
+    private int PhysicalColumnCount
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _physicalOrdinals != null ? _physicalOrdinals[_columnCount] : _columnCount;
     }
 
     internal readonly record struct CursorReaderConfig
@@ -118,7 +344,7 @@ public sealed class SharcDataReader : IDisposable
         _projection = config.Projection;
         _bTreeReader = config.BTreeReader;
         _tableIndexes = config.TableIndexes;
-        _columnCount = columns.Count;
+        _columnCount = (short)columns.Count;
 
         // Devirtualize cursor: store concrete reference for direct dispatch in Read()
         if (cursor is BTreeCursor<CachedPageSource> cc)
@@ -128,7 +354,7 @@ public sealed class SharcDataReader : IDisposable
 
         // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
         // When merged columns exist, buffers must be sized to physical column count.
-        _physicalColumnCount = columns.Count;
+        int physicalColumnCount = columns.Count;
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].IsMergedGuidColumn)
@@ -138,16 +364,16 @@ public sealed class SharcDataReader : IDisposable
                 _mergedColumns[i] = mergedOrdinals;
                 // Compute physical column count from max physical ordinal
                 int maxPhys = Math.Max(mergedOrdinals[0], mergedOrdinals[1]);
-                _physicalColumnCount = Math.Max(_physicalColumnCount, maxPhys + 1);
+                physicalColumnCount = Math.Max(physicalColumnCount, maxPhys + 1);
             }
         }
 
         // Build logical → physical ordinal mapping when merges exist.
-        // Also update _physicalColumnCount to cover all remapped ordinals
-        // (e.g. columns after a merged GUID pair shift right).
+        // Allocate one extra slot at [_columnCount] to store physical column count
+        // so PhysicalColumnCount property can derive it without a separate field.
         if (_mergedColumns != null)
         {
-            _physicalOrdinals = new int[columns.Count];
+            _physicalOrdinals = new int[columns.Count + 1]; // +1 for physical count sentinel
             for (int i = 0; i < columns.Count; i++)
             {
                 var phys = columns[i].MergedPhysicalOrdinals;
@@ -156,14 +382,15 @@ public sealed class SharcDataReader : IDisposable
                 else if (phys is { Length: 1 })
                 {
                     _physicalOrdinals[i] = phys[0]; // direct physical ordinal
-                    _physicalColumnCount = Math.Max(_physicalColumnCount, phys[0] + 1);
+                    physicalColumnCount = Math.Max(physicalColumnCount, phys[0] + 1);
                 }
                 else
                     _physicalOrdinals[i] = i; // fallback (no merge)
             }
+            _physicalOrdinals[columns.Count] = physicalColumnCount; // sentinel for PhysicalColumnCount
         }
 
-        int bufferSize = _physicalColumnCount;
+        int bufferSize = physicalColumnCount;
 
         // Rent a reusable buffer from ArrayPool — returned in Dispose()
         _reusableBuffer = ArrayPool<ColumnValue>.Shared.Rent(bufferSize);
@@ -193,13 +420,14 @@ public sealed class SharcDataReader : IDisposable
                 columns[i].DeclaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase))
             {
                 // Use physical ordinal for rowid alias so it matches buffer indices
-                _rowidAliasOrdinal = _physicalOrdinals != null
+                _rowidAliasOrdinal = (short)(_physicalOrdinals != null
                     ? _physicalOrdinals[i]
-                    : columns[i].Ordinal;
+                    : columns[i].Ordinal);
                 break;
             }
         }
 
+        _decodedGeneration = 1;
         _scanMode = ResolveScanMode();
     }
 
@@ -211,7 +439,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(QueryValue[][] rows, string[] columnNames)
     {
         _composite = new CompositeState(rows, columnNames);
-        _columnCount = columnNames.Length;
+        _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
 
@@ -222,7 +450,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(RowSet rows, string[] columnNames)
     {
         _composite = new CompositeState(rows, columnNames);
-        _columnCount = columnNames.Length;
+        _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
 
@@ -233,7 +461,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(IEnumerable<QueryValue[]> rows, string[] columnNames)
     {
         _composite = new CompositeState(rows, columnNames);
-        _columnCount = columnNames.Length;
+        _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
 
@@ -244,7 +472,7 @@ public sealed class SharcDataReader : IDisposable
     internal SharcDataReader(SharcDataReader first, SharcDataReader second, string[] columnNames)
     {
         _composite = new CompositeState(first, second, columnNames);
-        _columnCount = columnNames.Length;
+        _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
     }
 
@@ -257,7 +485,7 @@ public sealed class SharcDataReader : IDisposable
         IndexSet? rightIndex = null)
     {
         _composite = new CompositeState(underlying, mode, rightIndex);
-        _columnCount = underlying.FieldCount;
+        _columnCount = (short)underlying.FieldCount;
         _rowidAliasOrdinal = -1;
     }
 
@@ -290,7 +518,7 @@ public sealed class SharcDataReader : IDisposable
     /// <returns>True if an exact match was found; false otherwise.</returns>
     public bool Seek(long rowId)
     {
-        ObjectDisposedException.ThrowIf(_scanMode == ScanMode.Disposed, this);
+        ObjectDisposedException.ThrowIf(DispatchMode == ScanMode.Disposed, this);
 
         bool found = _cursor!.Seek(rowId);
 
@@ -301,7 +529,7 @@ public sealed class SharcDataReader : IDisposable
         else
         {
             _currentRow = null;
-            _lazyMode = false;
+            IsLazy = false;
         }
 
         return found;
@@ -318,7 +546,7 @@ public sealed class SharcDataReader : IDisposable
     /// <exception cref="ArgumentException">The index was not found or the reader was not created with index support.</exception>
     public bool SeekIndex(string indexName, params object[] keyValues)
     {
-        ObjectDisposedException.ThrowIf(_scanMode == ScanMode.Disposed, this);
+        ObjectDisposedException.ThrowIf(DispatchMode == ScanMode.Disposed, this);
 
         if (_bTreeReader == null || _tableIndexes == null)
             throw new ArgumentException("Reader was not created with index support.");
@@ -352,7 +580,7 @@ public sealed class SharcDataReader : IDisposable
                     if (i == 0 && IndexKeyIsPastTarget(indexRecord[0], keyValues[0], firstColumnDescending))
                     {
                         _currentRow = null;
-                        _lazyMode = false;
+                        IsLazy = false;
                         return false;
                     }
 
@@ -368,7 +596,7 @@ public sealed class SharcDataReader : IDisposable
         }
 
         _currentRow = null;
-        _lazyMode = false;
+        IsLazy = false;
         return false;
     }
 
@@ -433,7 +661,7 @@ public sealed class SharcDataReader : IDisposable
         // Hot scan mode: single switch dispatch replaces 7+ branch checks per call
         // (ObjectDisposedException + 6 mode null checks). ScanMode is pre-resolved
         // in constructor/ResetForReuse; Disposed state is encoded as a case.
-        return _scanMode switch
+        return DispatchMode switch
         {
             ScanMode.TypedCached => ScanTyped(_btreeCachedCursor!),
             ScanMode.TypedMemory => ScanTyped(_btreeMemoryCursor!),
@@ -473,7 +701,7 @@ public sealed class SharcDataReader : IDisposable
                 return true;
         }
         _currentRow = null;
-        _lazyMode = false;
+        IsLazy = false;
         return false;
     }
 
@@ -489,7 +717,7 @@ public sealed class SharcDataReader : IDisposable
                 return true;
         }
         _currentRow = null;
-        _lazyMode = false;
+        IsLazy = false;
         return false;
     }
 
@@ -512,11 +740,11 @@ public sealed class SharcDataReader : IDisposable
             if (!_filter.ConcreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
                 return false;
 
-            _currentBodyOffset = bodyOffset;
-            int cols = Math.Min(_physicalColumnCount, st.Length);
+            _currentBodyOffset = (short)bodyOffset;
+            int cols = Math.Min(PhysicalColumnCount, st.Length);
             decoder.ComputeColumnOffsets(st.AsSpan(0, cols), cols, bodyOffset, _columnOffsets.AsSpan(0, cols));
             _decodedGeneration++;
-            _lazyMode = true;
+            IsLazy = true;
             _currentRow = _reusableBuffer;
             return true;
         }
@@ -524,7 +752,9 @@ public sealed class SharcDataReader : IDisposable
         // ── Cold path: interface IFilterNode (non-concrete) ──
         if (_filter?.FilterNode != null)
         {
-            _filterColCount = _recordDecoder!.ReadSerialTypes(payload, _filter.FilterSerialTypes!, out _filterBodyOffset);
+            int filterColCount = _recordDecoder!.ReadSerialTypes(payload, _filter.FilterSerialTypes!, out int filterBodyOff);
+            _filterColCount = (short)filterColCount;
+            _filterBodyOffset = (short)filterBodyOff;
             int stCount = Math.Min(_filterColCount, _filter.FilterSerialTypes!.Length);
 
             if (!_filter.FilterNode.Evaluate(payload,
@@ -554,10 +784,10 @@ public sealed class SharcDataReader : IDisposable
     {
         // Filters require full column values. When in lazy mode (projection),
         // force a full decode so filter columns are available.
-        if (_lazyMode)
+        if (IsLazy)
         {
             _recordDecoder!.DecodeRecord(_cursor!.Payload, _reusableBuffer!);
-            _lazyMode = false;
+            IsLazy = false;
         }
 
         // Resolve INTEGER PRIMARY KEY alias — the record stores NULL,
@@ -581,22 +811,23 @@ public sealed class SharcDataReader : IDisposable
         if (_filter?.FilterNode != null)
         {
             // Reuse the pre-parsed serial types from the filter step.
-            // Both arrays are Rent(_physicalColumnCount) — same capacity.
+            // Both arrays are Rent(PhysicalColumnCount) — same capacity.
             int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
             Array.Copy(_filter.FilterSerialTypes!, _serialTypes, copyCount);
             _currentBodyOffset = _filterBodyOffset;
         }
         else
         {
-            _recordDecoder!.ReadSerialTypes(payload, _serialTypes!, out _currentBodyOffset);
+            _recordDecoder!.ReadSerialTypes(payload, _serialTypes!, out int bodyOff);
+            _currentBodyOffset = (short)bodyOff;
         }
 
         // Precompute cumulative column offsets — O(K) once per row.
-        int colCount = Math.Min(_physicalColumnCount, _serialTypes!.Length);
+        int colCount = Math.Min(PhysicalColumnCount, _serialTypes!.Length);
         _recordDecoder!.ComputeColumnOffsets(_serialTypes.AsSpan(0, colCount), colCount, _currentBodyOffset, _columnOffsets.AsSpan(0, colCount));
 
         _decodedGeneration++;
-        _lazyMode = true;
+        IsLazy = true;
         _currentRow = _reusableBuffer;
     }
 
@@ -618,7 +849,7 @@ public sealed class SharcDataReader : IDisposable
 
         // Fast path: in lazy mode, check serial type directly (no body decode needed).
         // _serialTypes is already populated by DecodeCurrentRow() — no re-parse needed.
-        if (_lazyMode)
+        if (IsLazy)
         {
             // INTEGER PRIMARY KEY stores NULL in record; real value is rowid — not actually null
             if (actualOrdinal == _rowidAliasOrdinal && _serialTypes![actualOrdinal] == 0)
@@ -639,7 +870,7 @@ public sealed class SharcDataReader : IDisposable
             return _composite.GetInt64(this, ordinal);
 
         // Fast path: decode directly from page span using precomputed O(1) offset
-        if (_lazyMode)
+        if (IsLazy)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
             if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
@@ -668,7 +899,7 @@ public sealed class SharcDataReader : IDisposable
             return _composite.GetDouble(this, ordinal);
 
         // Fast path: decode directly from page span using precomputed O(1) offset
-        if (_lazyMode)
+        if (IsLazy)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
             if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
@@ -687,7 +918,7 @@ public sealed class SharcDataReader : IDisposable
             return _composite.GetString(this, ordinal);
 
         // Fast path: decode UTF-8 directly from page span using precomputed O(1) offset
-        if (_lazyMode)
+        if (IsLazy)
         {
             int actualOrdinal = _projection != null ? _projection[ordinal] : ordinal;
             if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
@@ -822,7 +1053,7 @@ public sealed class SharcDataReader : IDisposable
             : logicalOrdinal;
 
         // Lazy decode: decode this column on first access using precomputed O(1) offset
-        if (_lazyMode && _decodedGenerations![actualOrdinal] != _decodedGeneration)
+        if (IsLazy && _decodedGenerations![actualOrdinal] != _decodedGeneration)
         {
             _reusableBuffer![actualOrdinal] = _recordDecoder!.DecodeColumnAt(
                 _cursor!.Payload, _serialTypes![actualOrdinal], _columnOffsets![actualOrdinal]);
@@ -876,294 +1107,7 @@ public sealed class SharcDataReader : IDisposable
         return Core.Primitives.GuidCodec.Decode(GetColumnValue(ordinal).AsBytes().Span);
     }
 
-    // ─── Fingerprinting ──────────────────────────────────────────
-
-    /// <summary>
-    /// Computes a 64-bit FNV-1a fingerprint of the current row's projected columns
-    /// from raw cursor payload bytes. Zero string allocation — hashes raw UTF-8 bytes
-    /// directly from page spans. Used for set operation dedup (UNION/INTERSECT/EXCEPT).
-    /// </summary>
-    /// <remarks>
-    /// Collision probability: for N rows, P ≈ N²/2⁶⁵. At 5000 rows: ~10⁻¹¹%.
-    /// Stays below 0.0001% up to ~6 million rows.
-    /// </remarks>
-    internal Fingerprint128 GetRowFingerprint()
-    {
-        if (_composite != null)
-            return _composite.GetRowFingerprint(this);
-
-        // Cursor mode: hash raw payload bytes (zero string allocation)
-        return GetCursorRowFingerprint();
-    }
-
-    private Fingerprint128 GetCursorRowFingerprint()
-    {
-        var payload = _cursor!.Payload;
-
-        if (_serialTypes != null && _lazyMode && _columnOffsets != null)
-        {
-            // Fast path: reuse precomputed offsets from DecodeCurrentRow() — zero recomputation
-            int colCount = Math.Min(_columnCount, _serialTypes.Length);
-            return ComputeFingerprint(payload, _serialTypes.AsSpan(0, colCount), _columnOffsets.AsSpan(0, colCount));
-        }
-
-        // Non-projection path: parse serial types on the fly (stackalloc — zero alloc)
-        Span<long> stackSt = stackalloc long[Math.Min(_columnCount, 64)];
-        _recordDecoder!.ReadSerialTypes(payload, stackSt, out int bodyOffset);
-        return ComputeFingerprint(payload, stackSt.Slice(0, Math.Min(_columnCount, stackSt.Length)), bodyOffset);
-    }
-
-    private Fingerprint128 ComputeFingerprint(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes, int bodyOffset)
-    {
-        // Compute cumulative byte offsets for all physical columns (single pass)
-        Span<int> offsets = stackalloc int[serialTypes.Length];
-        int runningOffset = bodyOffset;
-        for (int c = 0; c < serialTypes.Length; c++)
-        {
-            offsets[c] = runningOffset;
-            runningOffset += SerialTypeCodec.GetContentSize(serialTypes[c]);
-        }
-
-        return ComputeFingerprint(payload, serialTypes, offsets);
-    }
-
-    private Fingerprint128 ComputeFingerprint(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes, ReadOnlySpan<int> offsets)
-    {
-        // Hash projected columns
-        var hasher = new Fnv1aHasher();
-        int projectedCount = _projection?.Length ?? _columnCount;
-
-        for (int i = 0; i < projectedCount; i++)
-        {
-            int physOrdinal = _projection != null ? _projection[i] : i;
-
-            // INTEGER PRIMARY KEY: hash rowid instead of the NULL stored in the record
-            if (physOrdinal == _rowidAliasOrdinal)
-            {
-                hasher.AddTypeTag(i, 1); // 1 = integer
-                hasher.AppendLong(_cursor!.RowId);
-                continue;
-            }
-
-            if (physOrdinal >= serialTypes.Length) continue;
-
-            long st = serialTypes[physOrdinal];
-            int size = SerialTypeCodec.GetContentSize(st);
-
-            // Type tag: 0=null, 1=int, 2=float, 3=text, 4=blob
-            hasher.AddTypeTag(i, st == 0 ? (byte)0
-                : st <= 6 ? (byte)1
-                : st == 7 ? (byte)2
-                : (st >= 13 && (st & 1) == 1) ? (byte)3
-                : (byte)4);
-
-            // Hash serial type (encodes type info) + column body bytes (encodes value)
-            hasher.AppendLong(st);
-            if (size > 0)
-                hasher.Append(payload.Slice(offsets[physOrdinal], size));
-        }
-
-        return hasher.Hash;
-    }
-
-    private Fingerprint128 GetMaterializedRowFingerprint()
-    {
-        var row = _composite!.CurrentMaterializedRow;
-        var hasher = new Fnv1aHasher();
-        for (int i = 0; i < _columnCount && i < row.Length; i++)
-        {
-            ref var val = ref row[i];
-            switch (val.Type)
-            {
-                case QueryValueType.Null:
-                    hasher.AddTypeTag(i, 0);
-                    hasher.AppendLong(0); break;
-                case QueryValueType.Int64:
-                    hasher.AddTypeTag(i, 1);
-                    hasher.AppendLong(val.AsInt64()); break;
-                case QueryValueType.Double:
-                    hasher.AddTypeTag(i, 2);
-                    hasher.AppendLong(BitConverter.DoubleToInt64Bits(val.AsDouble())); break;
-                case QueryValueType.Text:
-                    hasher.AddTypeTag(i, 3);
-                    hasher.AppendString(val.AsString()); break;
-                default:
-                    hasher.AddTypeTag(i, 4);
-                    hasher.AppendLong(val.ObjectValue?.GetHashCode() ?? 0); break;
-            }
-        }
-        return hasher.Hash;
-    }
-
-    /// <summary>
-    /// Computes a 64-bit FNV-1a fingerprint of a single column from the current row.
-    /// Zero string allocation — hashes raw bytes directly from cursor payload.
-    /// Used for group-key matching in streaming aggregation to avoid materializing
-    /// text columns for rows in existing groups.
-    /// </summary>
-    internal Fingerprint128 GetColumnFingerprint(int ordinal)
-    {
-        if (_composite != null)
-            return _composite.GetColumnFingerprint(this, ordinal);
-
-        // Cursor/lazy mode: hash raw column bytes without string allocation
-        int physOrdinal = _projection != null ? _projection[ordinal] : ordinal;
-
-        if (physOrdinal == _rowidAliasOrdinal)
-        {
-            var h = new Fnv1aHasher();
-            h.AddTypeTag(0, 1); // integer
-            h.AppendLong(_cursor!.RowId);
-            return h.Hash;
-        }
-
-        var payload = _cursor!.Payload;
-        var stSpan = _lazyMode ? _serialTypes! : _filter!.FilterSerialTypes!;
-
-        // Use precomputed O(1) offset
-        int offset = _columnOffsets![physOrdinal];
-
-        long st = stSpan[physOrdinal];
-        int size = Core.Primitives.SerialTypeCodec.GetContentSize(st);
-
-        var hasher = new Fnv1aHasher();
-        // Type tag for single-column fingerprint
-        hasher.AddTypeTag(0, st == 0 ? (byte)0
-            : st <= 6 ? (byte)1
-            : st == 7 ? (byte)2
-            : (st >= 13 && (st & 1) == 1) ? (byte)3
-            : (byte)4);
-        hasher.AppendLong(st);
-        if (size > 0) hasher.Append(payload.Slice(offset, size));
-        return hasher.Hash;
-    }
-
-    /// <summary>
-    /// 128-bit FNV-1a hasher with metadata tracking. Zero allocation (ref struct, stack-only).
-    /// Computes dual FNV-1a hashes (64-bit primary + 32-bit guard from second lane)
-    /// while accumulating payload byte count and column type tags.
-    /// Collision probability: P ≈ N²/2⁹⁷ ≈ 10⁻¹⁶ at 6M rows.
-    /// </summary>
-    internal ref struct Fnv1aHasher
-    {
-        private ulong _hashLo;
-        private ulong _hashHi;
-        private int _byteCount;
-        private ushort _typeMask;
-        private const ulong FnvOffsetBasis = 14695981039346656037UL;
-        private const ulong FnvPrime = 1099511628211UL;
-        // Second seed: FNV offset XOR a large prime to ensure independence
-        private const ulong FnvOffsetBasis2 = 0x6C62272E07BB0142UL;
-        private const ulong FnvPrime2 = 0x100000001B3UL;
-
-        public Fnv1aHasher()
-        {
-            _hashLo = FnvOffsetBasis;
-            _hashHi = FnvOffsetBasis2;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Append(scoped ReadOnlySpan<byte> data)
-        {
-            _byteCount += data.Length;
-            for (int i = 0; i < data.Length; i++)
-            {
-                _hashLo ^= data[i]; _hashLo *= FnvPrime;
-                _hashHi ^= data[i]; _hashHi *= FnvPrime2;
-            }
-        }
-
-        /// <summary>
-        /// Hashes a string as UTF-8 bytes — matches the cursor path which hashes
-        /// raw UTF-8 payload bytes directly from the SQLite record. Required for
-        /// correct UNION/EXCEPT/INTERSECT dedup when mixing materialized (QueryValue)
-        /// and cursor-backed rows.
-        /// </summary>
-        public void AppendString(string s)
-        {
-            // Short strings: stackalloc avoids allocation (128 chars * 3 bytes/char = 384 max)
-            if (s.Length <= 128)
-            {
-                Span<byte> utf8 = stackalloc byte[384];
-                int written = System.Text.Encoding.UTF8.GetBytes(s, utf8);
-                Append(utf8.Slice(0, written));
-            }
-            else
-            {
-                byte[] rented = ArrayPool<byte>.Shared.Rent(
-                    System.Text.Encoding.UTF8.GetMaxByteCount(s.Length));
-                int written = System.Text.Encoding.UTF8.GetBytes(s, rented);
-                Append(rented.AsSpan(0, written));
-                ArrayPool<byte>.Shared.Return(rented);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void AppendLong(long value)
-        {
-            _byteCount += 8;
-            ulong v = (ulong)value;
-            for (int shift = 0; shift < 64; shift += 8)
-            {
-                ulong b = (v >> shift) & 0xFF;
-                _hashLo ^= b; _hashLo *= FnvPrime;
-                _hashHi ^= b; _hashHi *= FnvPrime2;
-            }
-        }
-
-        /// <summary>
-        /// Adds a column type tag to the structural signature.
-        /// Uses rotating XOR over 16 bits — each column shifts left by (colIndex * 2) mod 16,
-        /// so up to 8 columns get distinct bit positions for instant structural rejection.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void AddTypeTag(int colIndex, byte typeId)
-        {
-            int shift = (colIndex * 2) & 0xF; // mod 16
-            _typeMask ^= (ushort)(typeId << shift);
-        }
-
-        public readonly Fingerprint128 Hash =>
-            new(_hashLo, (uint)_hashHi, (ushort)Math.Min(_byteCount, 65535), _typeMask);
-    }
-
-    /// <summary>
-    /// 128-bit fingerprint with packed metadata. Every bit serves a purpose:
-    /// <list type="bullet">
-    ///   <item>Lo [64 bits] — Primary FNV-1a hash (bucket selection + primary comparison)</item>
-    ///   <item>Guard [32 bits] — Secondary FNV-1a hash (96-bit total collision resistance)</item>
-    ///   <item>PayloadLen [16 bits] — Total payload byte length (fast structural rejection)</item>
-    ///   <item>TypeTag [16 bits] — Column type signature (structural fingerprint)</item>
-    /// </list>
-    /// Collision probability at 6M rows: P ≈ N²/2⁹⁷ ≈ 10⁻¹⁶. Practically collision-free.
-    /// PayloadLen and TypeTag provide instant rejection for structurally different rows
-    /// before the hash comparison is even reached.
-    /// </summary>
-    internal readonly struct Fingerprint128 : IEquatable<Fingerprint128>
-    {
-        public readonly ulong Lo;
-        public readonly ulong Hi;
-
-        /// <summary>Construct from raw lo/hi (used by Fnv1aHasher).</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Fingerprint128(ulong lo, uint guard, ushort payloadLen, ushort typeTag)
-        {
-            Lo = lo;
-            Hi = ((ulong)guard << 32) | ((ulong)payloadLen << 16) | typeTag;
-        }
-
-        /// <summary>32-bit secondary hash guard for collision resistance.</summary>
-        public uint Guard => (uint)(Hi >> 32);
-        /// <summary>Total payload byte length — instant structural rejection.</summary>
-        public ushort PayloadLen => (ushort)(Hi >> 16);
-        /// <summary>Column type signature — structural fingerprint.</summary>
-        public ushort TypeTag => (ushort)Hi;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(Fingerprint128 other) => Lo == other.Lo && Hi == other.Hi;
-        public override bool Equals(object? obj) => obj is Fingerprint128 f && Equals(f);
-        public override int GetHashCode() => HashCode.Combine(Lo, Hi);
-    }
+    // ─── Fingerprinting → SharcDataReader.Fingerprint.cs ──────────────
 
     // ── Reuse Support (PreparedQuery cursor+reader caching) ─────────
 
@@ -1172,7 +1116,7 @@ public sealed class SharcDataReader : IDisposable
     /// Dispose resets traversal state instead of releasing resources,
     /// allowing the same cursor + ArrayPool buffers to be reused across Execute() calls.
     /// </summary>
-    internal void MarkReusable() => _isReusable = true;
+    internal void MarkReusable() => IsReusable = true;
 
     /// <summary>
     /// Resets the reader for another iteration pass. Calls <see cref="IBTreeCursor.Reset"/>
@@ -1190,21 +1134,20 @@ public sealed class SharcDataReader : IDisposable
             if (_filter != null)
                 _filter.UpdateFilter(filterNode);
             else
-                _filter = new FilterState(filterNode, null, _physicalColumnCount);
+                _filter = new FilterState(filterNode, null, PhysicalColumnCount);
         }
         else
         {
             _filter = null;
         }
 
-        // Reset per-scan state
+        // Reset per-scan state — preserve Reusable flag, clear Lazy
         _currentRow = null;
-        _lazyMode = false;
         _decodedGeneration++;
         _cachedColumnNames = null;
 
-        // Recompute scan mode (filter may change for parameterized queries)
-        _scanMode = ResolveScanMode();
+        // Recompute scan mode — preserve generation and Reusable flag, replace dispatch bits
+        ScanFlags = (ScanFlags & ScanMode.Reusable) | ResolveScanMode();
     }
 
     /// <summary>
@@ -1213,24 +1156,25 @@ public sealed class SharcDataReader : IDisposable
     /// </summary>
     internal void DisposeForReal()
     {
-        _isReusable = false;
-        _scanMode = ScanMode.Default; // Allow Dispose() to run
+        IsReusable = false;
+        ScanFlags = ScanMode.Default; // Clear all flags — allow Dispose() to run
         Dispose();
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_scanMode == ScanMode.Disposed) return;
-        _scanMode = ScanMode.Disposed;
+        if (DispatchMode == ScanMode.Disposed) return;
 
-        // Reusable readers: keep cursor and ArrayPool buffers alive for next Execute()
-        if (_isReusable)
+        // Reusable readers: mark Disposed but preserve Reusable flag for ResetForReuse
+        if (IsReusable)
         {
+            ScanFlags = ScanMode.Disposed | ScanMode.Reusable;
             _currentRow = null;
-            _lazyMode = false;
             return;
         }
+
+        ScanFlags = ScanMode.Disposed;
 
         _composite?.Dispose();
         _cursor?.Dispose();
@@ -1554,188 +1498,5 @@ public sealed class SharcDataReader : IDisposable
     }
 }
 
-/// <summary>
-/// Mode for index-based streaming dedup in set operations.
-/// </summary>
-internal enum SetDedupMode
-{
-    /// <summary>UNION: emit row if index not yet seen.</summary>
-    Union,
-    /// <summary>INTERSECT: emit row if index exists in right set and not yet emitted.</summary>
-    Intersect,
-    /// <summary>EXCEPT: emit row if index NOT in right set and not yet emitted.</summary>
-    Except,
-}
-
-/// <summary>
-/// Pooled open-addressing index set for Fingerprint128 values.
-/// Lo and Hi stored in separate contiguous arrays (distributed, cache-friendly probing).
-/// Arrays rented from <see cref="ArrayPool{T}.Shared"/>; instances pooled via ThreadStatic.
-/// After warmup: zero managed allocation — both arrays and instances are reused.
-/// </summary>
-internal sealed class IndexSet : IDisposable
-{
-    // Per-thread instance pool — avoids class allocation after warmup.
-    // 2 slots covers INTERSECT/EXCEPT (rightSet + seenSet).
-    [ThreadStatic] private static IndexSet? s_pool1;
-    [ThreadStatic] private static IndexSet? s_pool2;
-
-    // Maximum capacity: 16M entries. Beyond this, throw to prevent OOM.
-    // At 75% load in a 16M table: 2 arrays × 16M × 8 bytes = 256 MB.
-    private const int MaxCapacity = 1 << 24;
-
-    private ulong[]? _lo;   // Fingerprint128.Lo — primary index key (probe)
-    private ulong[]? _hi;   // Fingerprint128.Hi — packed guard+meta (verification)
-    private int _count;
-    private int _mask;       // capacity - 1 (power of 2 for branchless modulo)
-
-    private IndexSet() { }
-
-    /// <summary>
-    /// Rents an IndexSet from the thread-local pool, or creates a new one.
-    /// Arrays from previous use are preserved (pre-sized) — zero allocation after warmup.
-    /// </summary>
-    internal static IndexSet Rent()
-    {
-        var set = s_pool1;
-        if (set != null) { s_pool1 = null; return set; }
-        set = s_pool2;
-        if (set != null) { s_pool2 = null; return set; }
-        return new IndexSet();
-    }
-
-    // Sentinel handling: (0,0) marks empty slots. FNV-1a's non-zero offset basis
-    // makes Lo=0 astronomically unlikely, and Hi=0 requires guard=0 AND
-    // payloadLen=0 AND typeTag=0 simultaneously. As a safety net, if a real
-    // index entry is (0,0), we flip bit 0 of Lo to distinguish from empty.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void EscapeSentinel(ref ulong lo, ref ulong hi)
-    {
-        if (lo == 0 & hi == 0) { lo = 1; hi = 1; }
-    }
-
-    /// <summary>
-    /// Adds an entry. Returns true if new, false if already present.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool Add(in SharcDataReader.Fingerprint128 fp)
-    {
-        if (_lo == null || _count >= ((_mask + 1) * 3) >> 2) // 75% load factor
-            Grow();
-
-        ulong fpLo = fp.Lo, fpHi = fp.Hi;
-        EscapeSentinel(ref fpLo, ref fpHi);
-
-        int slot = (int)(fpLo >> 1) & _mask;
-        int capacity = _mask + 1;
-        // Bounded probe: at 75% load, average probe ≤ 2.5. Capacity bound
-        // is a safety net — prevents infinite loop if table is corrupted.
-        for (int probe = 0; probe < capacity; probe++)
-        {
-            ulong lo = _lo![slot];
-            ulong hi = _hi![slot];
-            // Bitwise & intentional: both sides are trivial ulong comparisons
-            // with no side effects; avoids branch prediction overhead.
-            if (lo == 0 & hi == 0)
-            {
-                _lo[slot] = fpLo;
-                _hi[slot] = fpHi;
-                _count++;
-                return true;
-            }
-            if (lo == fpLo & hi == fpHi)
-                return false;
-            slot = (slot + 1) & _mask;
-        }
-        throw new InvalidOperationException("IndexSet probe sequence exhausted.");
-    }
-
-    /// <summary>
-    /// Checks if an entry is present.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool Contains(in SharcDataReader.Fingerprint128 fp)
-    {
-        if (_lo == null || _hi == null) return false;
-
-        ulong fpLo = fp.Lo, fpHi = fp.Hi;
-        EscapeSentinel(ref fpLo, ref fpHi);
-
-        int slot = (int)(fpLo >> 1) & _mask;
-        int capacity = _mask + 1;
-        for (int probe = 0; probe < capacity; probe++)
-        {
-            ulong lo = _lo[slot];
-            ulong hi = _hi[slot];
-            if (lo == 0 & hi == 0) return false;
-            if (lo == fpLo & hi == fpHi) return true;
-            slot = (slot + 1) & _mask;
-        }
-        return false;
-    }
-
-    private void Grow()
-    {
-        int oldCapacity = _lo != null ? _mask + 1 : 0;
-        int newCapacity = oldCapacity == 0 ? 16 : oldCapacity << 1;
-
-        if (newCapacity > MaxCapacity)
-            throw new InvalidOperationException(
-                $"IndexSet exceeded maximum capacity ({MaxCapacity:N0}).");
-
-        var oldLo = _lo;
-        var oldHi = _hi;
-
-        _lo = ArrayPool<ulong>.Shared.Rent(newCapacity);
-        _hi = ArrayPool<ulong>.Shared.Rent(newCapacity);
-        Array.Clear(_lo, 0, newCapacity);
-        Array.Clear(_hi, 0, newCapacity);
-        _mask = newCapacity - 1;
-        _count = 0;
-
-        // Rehash existing entries into new arrays.
-        // New table is at most 37.5% full, so probing always terminates.
-        if (oldLo != null)
-        {
-            int oldMask = oldCapacity - 1;
-            for (int i = 0; i <= oldMask; i++)
-            {
-                ulong lo = oldLo[i];
-                ulong hi = oldHi![i];
-                if (lo != 0 | hi != 0)
-                {
-                    int slot = (int)(lo >> 1) & _mask;
-                    while (_lo[slot] != 0 | _hi[slot] != 0)
-                        slot = (slot + 1) & _mask;
-                    _lo[slot] = lo;
-                    _hi[slot] = hi;
-                    _count++;
-                }
-            }
-            ArrayPool<ulong>.Shared.Return(oldLo);
-            ArrayPool<ulong>.Shared.Return(oldHi!);
-        }
-    }
-
-    /// <summary>
-    /// Returns this instance to the thread-local pool for reuse.
-    /// Arrays are cleared but kept — next Rent() gets pre-sized arrays.
-    /// If pool is full, arrays are returned to ArrayPool.
-    /// </summary>
-    public void Dispose()
-    {
-        // Clear data but keep arrays for reuse
-        if (_lo != null) Array.Clear(_lo, 0, _mask + 1);
-        if (_hi != null) Array.Clear(_hi, 0, _mask + 1);
-        _count = 0;
-
-        // Return instance to pool
-        if (s_pool1 == null) { s_pool1 = this; return; }
-        if (s_pool2 == null) { s_pool2 = this; return; }
-
-        // Pool full — release arrays to ArrayPool
-        if (_lo != null) { ArrayPool<ulong>.Shared.Return(_lo); _lo = null; }
-        if (_hi != null) { ArrayPool<ulong>.Shared.Return(_hi); _hi = null; }
-        _mask = 0;
-    }
-}
+// SetDedupMode (enum) → IndexSet.cs
+// IndexSet (sealed class) → IndexSet.cs

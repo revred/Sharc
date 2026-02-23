@@ -30,7 +30,7 @@ internal static class StreamingAggregateProcessor
         // when there are only ~10 unique groups. Typical saving: ~75 KB.
         int groupKeyCount = intent.GroupBy?.Count ?? 0;
         bool hasTextGroupKeys = false;
-        Dictionary<SharcDataReader.Fingerprint128, string>[]? textPools = null;
+        Dictionary<Fingerprint128, string>[]? textPools = null;
         bool[]? isTextGroupCol = null;
 
         if (groupKeyCount > 0)
@@ -64,11 +64,11 @@ internal static class StreamingAggregateProcessor
                 }
                 if (hasTextGroupKeys)
                 {
-                    textPools = new Dictionary<SharcDataReader.Fingerprint128, string>[fieldCount];
+                    textPools = new Dictionary<Fingerprint128, string>[fieldCount];
                     for (int i = 0; i < Math.Min(groupKeyCount, fieldCount); i++)
                     {
                         if (isTextGroupCol![i])
-                            textPools[i] = new Dictionary<SharcDataReader.Fingerprint128, string>();
+                            textPools[i] = new Dictionary<Fingerprint128, string>();
                     }
                 }
             }
