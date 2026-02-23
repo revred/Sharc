@@ -4,6 +4,7 @@
 
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using Sharc.Core.Format;
 using Sharc.Exceptions;
 
@@ -106,13 +107,13 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     /// <inheritdoc />
     public bool MoveNext()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
         // Return any previously assembled overflow buffer
         ReturnAssembledPayload();
 
         if (_exhausted)
             return false;
+
+        Debug.Assert(!_disposed, "MoveNext called on disposed cursor");
 
         if (!_initialized)
         {
@@ -471,6 +472,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     {
         if (_disposed) return;
         _disposed = true;
+        _exhausted = true; // Ensures MoveNext() returns false without branching on _disposed
         ReturnAssembledPayload();
     }
 }
