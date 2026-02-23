@@ -12,26 +12,32 @@ namespace Sharc.Core.BTree;
 
 /// <summary>
 /// Forward-only cursor that traverses a table b-tree in rowid order.
-/// Uses a stack to track position through interior pages and descends to leaf pages.
+/// Uses an inline union stack to track position through interior pages and descends to leaf pages.
 /// </summary>
 internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     where TPageSource : class, IPageSource
 {
     private readonly TPageSource _pageSource;
     private readonly int _usablePageSize;
-    private CursorStackFrame[] _stack = new CursorStackFrame[8];
+
+    // Inline union stack — 8 packed ulongs, zero heap allocation
+    private CursorStack _stack;
+    private ulong[]? _stackOverflow;
     private int _stackTop;
+    private const int StackCapacity = 8;
 
-    // Current leaf page state
+    // Current leaf page state — union-projected: only CellCount from full header
     private uint _currentLeafPage;
-    private int _currentHeaderOffset;
-    private BTreePageHeader _currentHeader;
+    private ushort _leafCellCount;
     private int _currentCellIndex;
-    private bool _initialized;
-    private bool _exhausted;
-    private bool _disposed;
 
-    // Leaf page cache — avoids redundant GetPage() calls for cells on the same leaf
+    // State flags — union of 3 bools into 1 byte
+    private byte _state;
+    private const byte StateInitialized = 1;
+    private const byte StateExhausted = 2;
+    private const byte StateDisposed = 4;
+
+    // Leaf page cache — self-healing via _cachedLeafPageNum
     private ReadOnlyMemory<byte> _cachedLeafMemory;
     private uint _cachedLeafPageNum;
 
@@ -96,8 +102,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     {
         ReturnAssembledPayload();
         _stackTop = 0;
-        _initialized = false;
-        _exhausted = false;
+        _state = 0;
         _currentLeafPage = 0;
         _cachedLeafPageNum = 0;
         _cachedLeafMemory = default;
@@ -110,14 +115,14 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         // Return any previously assembled overflow buffer
         ReturnAssembledPayload();
 
-        if (_exhausted)
+        if ((_state & StateExhausted) != 0)
             return false;
 
-        Debug.Assert(!_disposed, "MoveNext called on disposed cursor");
+        Debug.Assert((_state & StateDisposed) == 0, "MoveNext called on disposed cursor");
 
-        if (!_initialized)
+        if ((_state & StateInitialized) == 0)
         {
-            _initialized = true;
+            _state |= StateInitialized;
             if (_snapshotVersion == 0)
                 _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
@@ -129,11 +134,10 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     /// <inheritdoc />
     public bool MoveLast()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf((_state & StateDisposed) != 0, this);
         ReturnAssembledPayload();
         _stackTop = 0;
-        _exhausted = false;
-        _initialized = true;
+        _state = (byte)((_state & ~StateExhausted) | StateInitialized);
 
         uint pageNum = _rootPage;
         while (true)
@@ -145,20 +149,19 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
              if (header.IsLeaf)
              {
                  _currentLeafPage = pageNum;
-                 _currentHeaderOffset = headerOffset;
-                 _currentHeader = header;
-                 
+                 _leafCellCount = header.CellCount;
+
                  if (header.CellCount == 0)
                  {
-                     _exhausted = true;
+                     _state |= StateExhausted;
                      return false;
                  }
-                 
+
                  _currentCellIndex = header.CellCount - 1;
                  ParseCurrentLeafCell();
                  return true;
              }
-             
+
              // Interior page - follow right pointer
              pageNum = header.RightChildPage;
         }
@@ -167,16 +170,15 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     /// <inheritdoc />
     public bool Seek(long rowId)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf((_state & StateDisposed) != 0, this);
         ReturnAssembledPayload();
         _stackTop = 0;
-        _exhausted = false;
-        _initialized = true;
+        _state = (byte)((_state & ~StateExhausted) | StateInitialized);
         _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeaf(_rootPage, rowId);
 
-        if (_currentCellIndex < _currentHeader.CellCount)
+        if (_currentCellIndex < _leafCellCount)
         {
             ParseCurrentLeafCell();
             return exactMatch;
@@ -192,7 +194,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             }
             else
             {
-                _exhausted = true;
+                _state |= StateExhausted;
                 return false;
             }
         }
@@ -209,8 +211,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             if (header.IsLeaf)
             {
                 _currentLeafPage = pageNumber;
-                _currentHeaderOffset = headerOffset;
-                _currentHeader = header;
+                _leafCellCount = header.CellCount;
                 // Pre-cache the leaf so first ParseCurrentLeafCell gets a free cache hit
                 _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
                 _cachedLeafPageNum = pageNumber;
@@ -222,13 +223,13 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             if (header.CellCount == 0)
             {
                 // Interior page with no cells - go to right child
-                StackPush(new CursorStackFrame(pageNumber, 0, headerOffset, header));
+                StackPush(pageNumber, 0);
                 pageNumber = header.RightChildPage;
                 continue;
             }
 
             // Push this interior page (starting before first cell)
-            StackPush(new CursorStackFrame(pageNumber, 0, headerOffset, header));
+            StackPush(pageNumber, 0);
 
             // Descend to the left child of the first cell
             // Read the single cell pointer on-demand (no array allocation)
@@ -249,8 +250,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             if (header.IsLeaf)
             {
                 _currentLeafPage = pageNumber;
-                _currentHeaderOffset = headerOffset;
-                _currentHeader = header;
+                _leafCellCount = header.CellCount;
 
                 // Pre-cache the leaf so ParseCurrentLeafCell gets a free cache hit
                 _cachedLeafMemory = _pageSource.GetPageMemory(pageNumber);
@@ -306,7 +306,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
 
             if (idx != -1)
             {
-                StackPush(new CursorStackFrame(pageNumber, idx, headerOffset, header));
+                StackPush(pageNumber, idx);
                 int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
                 CellParser.ParseTableInteriorCell(page[cellOffset..], out uint leftChild, out _);
                 pageNumber = leftChild;
@@ -324,7 +324,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
 
         while (true)
         {
-            if (_currentCellIndex < _currentHeader.CellCount)
+            if (_currentCellIndex < _leafCellCount)
             {
                 // Parse the current leaf cell
                 ParseCurrentLeafCell();
@@ -334,7 +334,7 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             // Current leaf exhausted - try to move to next leaf via stack
             if (!MoveToNextLeaf())
             {
-                _exhausted = true;
+                _state |= StateExhausted;
                 return false;
             }
 
@@ -346,17 +346,22 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     {
         while (_stackTop > 0)
         {
-            var frame = StackPop();
-            int nextCellIndex = frame.CellIndex + 1;
+            ulong frame = StackPop();
+            uint pageId = CursorStack.PageId(frame);
+            int nextCellIndex = CursorStack.CellIndex(frame) + 1;
 
-            if (nextCellIndex < frame.Header.CellCount)
+            // Re-derive header from cached page (interior pages are in page source cache)
+            var interiorPage = _pageSource.GetPage(pageId);
+            int headerOffset = pageId == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+            var header = BTreePageHeader.Parse(interiorPage[headerOffset..]);
+
+            if (nextCellIndex < header.CellCount)
             {
                 // More cells in this interior page — push updated state and descend
-                StackPush(new CursorStackFrame(frame.PageId, nextCellIndex, frame.HeaderOffset, frame.Header));
+                StackPush(pageId, nextCellIndex);
 
                 // Read the single cell pointer on-demand (no array allocation)
-                var interiorPage = _pageSource.GetPage(frame.PageId);
-                ushort cellPtr = frame.Header.GetCellPointer(interiorPage[frame.HeaderOffset..], nextCellIndex);
+                ushort cellPtr = header.GetCellPointer(interiorPage[headerOffset..], nextCellIndex);
                 uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(interiorPage[cellPtr..]);
 
                 DescendToLeftmostLeaf(leftChild);
@@ -364,9 +369,9 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
             }
 
             // All cells exhausted - descend to right child
-            if (frame.Header.RightChildPage != 0)
+            if (header.RightChildPage != 0)
             {
-                DescendToLeftmostLeaf(frame.Header.RightChildPage);
+                DescendToLeftmostLeaf(header.RightChildPage);
                 return true;
             }
         }
@@ -377,8 +382,10 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
     private void ParseCurrentLeafCell()
     {
         var page = GetCachedLeafPage();
-        // Read cell pointer on-demand - zero allocation
-        int cellOffset = _currentHeader.GetCellPointer(page[_currentHeaderOffset..], _currentCellIndex);
+        // Inline cell pointer math — leaf HeaderSize is always 8
+        int ho = _currentLeafPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+        int cellOffset = BinaryPrimitives.ReadUInt16BigEndian(
+            page[(ho + SQLiteLayout.TableLeafHeaderSize + _currentCellIndex * 2)..]);
 
         int cellHeaderSize = CellParser.ParseTableLeafCell(
             page[cellOffset..], out _payloadSize, out _rowId);
@@ -458,21 +465,38 @@ internal sealed class BTreeCursor<TPageSource> : IBTreeCursor
         }
     }
 
-    private void StackPush(CursorStackFrame frame)
+    private void StackPush(uint pageId, int cellIndex)
     {
-        if (_stackTop == _stack.Length)
-            Array.Resize(ref _stack, _stack.Length * 2);
-        _stack[_stackTop++] = frame;
+        ulong packed = CursorStack.Pack(pageId, cellIndex);
+        if (_stackTop < StackCapacity)
+        {
+            _stack[_stackTop++] = packed;
+            return;
+        }
+        PushOverflow(packed);
     }
 
-    private CursorStackFrame StackPop() => _stack[--_stackTop];
+    private void PushOverflow(ulong packed)
+    {
+        _stackOverflow ??= new ulong[8];
+        int idx = _stackTop - StackCapacity;
+        if (idx == _stackOverflow.Length)
+            Array.Resize(ref _stackOverflow, _stackOverflow.Length * 2);
+        _stackOverflow[idx] = packed;
+        _stackTop++;
+    }
+
+    private ulong StackPop()
+    {
+        --_stackTop;
+        return _stackTop < StackCapacity ? _stack[_stackTop] : _stackOverflow![_stackTop - StackCapacity];
+    }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _exhausted = true; // Ensures MoveNext() returns false without branching on _disposed
+        if ((_state & StateDisposed) != 0) return;
+        _state |= StateDisposed | StateExhausted;
         ReturnAssembledPayload();
     }
 }

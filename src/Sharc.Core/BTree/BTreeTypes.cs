@@ -19,6 +19,7 @@ internal readonly record struct InsertPathEntry(uint PageNum, int CellIndex);
 
 /// <summary>
 /// Represents a single frame in the B-Tree cursor's traversal stack.
+/// Used by <see cref="IndexBTreeCursor{TPageSource}"/> and write engine.
 /// </summary>
 /// <param name="PageId">The page number of the node.</param>
 /// <param name="CellIndex">The current cell index being visited in this node.</param>
@@ -30,3 +31,48 @@ internal readonly record struct CursorStackFrame(
     int HeaderOffset,
     BTreePageHeader Header
 );
+
+/// <summary>
+/// Fixed-capacity inline stack for B-tree cursor traversal.
+/// Each slot is a packed <see cref="ulong"/>: PageId in bits 16..47, CellIndex in bits 0..15.
+/// Embedded directly in the cursor object — zero separate heap allocation.
+/// CellCount and RightChildPage are re-derived from the cached page on pop.
+/// </summary>
+internal struct CursorStack
+{
+    private ulong _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
+
+    internal ulong this[int index]
+    {
+        get => index switch
+        {
+            0 => _f0, 1 => _f1, 2 => _f2, 3 => _f3,
+            4 => _f4, 5 => _f5, 6 => _f6, 7 => _f7,
+            _ => 0
+        };
+        set
+        {
+            switch (index)
+            {
+                case 0: _f0 = value; break;
+                case 1: _f1 = value; break;
+                case 2: _f2 = value; break;
+                case 3: _f3 = value; break;
+                case 4: _f4 = value; break;
+                case 5: _f5 = value; break;
+                case 6: _f6 = value; break;
+                case 7: _f7 = value; break;
+            }
+        }
+    }
+
+    /// <summary>Packs a PageId and CellIndex into a single ulong.</summary>
+    internal static ulong Pack(uint pageId, int cellIndex)
+        => ((ulong)pageId << 16) | (uint)(ushort)cellIndex;
+
+    /// <summary>Extracts the PageId from a packed frame.</summary>
+    internal static uint PageId(ulong frame) => (uint)(frame >> 16);
+
+    /// <summary>Extracts the CellIndex from a packed frame.</summary>
+    internal static int CellIndex(ulong frame) => (int)(ushort)frame;
+}
