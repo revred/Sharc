@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Sharc.Core;
+using Sharc.Core.Schema;
 
 namespace Sharc;
 
@@ -11,48 +12,87 @@ namespace Sharc;
 /// <see cref="SharcDatabase.PrepareReader(string, string[])"/>.
 /// </summary>
 /// <remarks>
-/// <para>After the first <see cref="CreateReader"/> call, the cursor and reader are cached.
-/// Subsequent calls reset traversal state via <see cref="IBTreeCursor.Reset"/> and reuse
-/// the same buffers, eliminating per-call allocation and setup overhead.</para>
-/// <para>This type is <b>not thread-safe</b>. Each instance should be used from a single thread.</para>
+/// <para>Thread-safe: each thread gets its own cursor+reader via <see cref="ThreadLocal{T}"/>.
+/// A single <see cref="PreparedReader"/> instance can be shared across N threads.</para>
+/// <para>After the first <see cref="CreateReader"/> call on each thread, the cursor and reader
+/// are cached. Subsequent calls reset traversal state via <see cref="IBTreeCursor.Reset"/> and
+/// reuse the same buffers, eliminating per-call allocation and setup overhead.</para>
 /// </remarks>
-public sealed class PreparedReader : IDisposable
+public sealed class PreparedReader : IPreparedReader
 {
-    private IBTreeCursor? _cursor;
-    private SharcDataReader? _reader;
+    // Immutable template — resolved once at PrepareReader() time
+    private readonly SharcDatabase _db;
+    private readonly TableInfo _table;
+    private readonly SharcDataReader.CursorReaderConfig _config;
 
-    internal PreparedReader(IBTreeCursor cursor, SharcDataReader reader)
+    // Per-thread execution state
+    private readonly ThreadLocal<ReaderSlot> _slot;
+    private volatile bool _disposed;
+
+    private sealed class ReaderSlot : IDisposable
     {
-        _cursor = cursor;
-        _reader = reader;
-        reader.MarkReusable();
+        internal IBTreeCursor Cursor;
+        internal SharcDataReader Reader;
+
+        internal ReaderSlot(IBTreeCursor cursor, SharcDataReader reader)
+        {
+            Cursor = cursor;
+            Reader = reader;
+            reader.MarkReusable();
+        }
+
+        public void Dispose()
+        {
+            Reader.DisposeForReal();
+            Cursor.Dispose();
+        }
     }
 
+    internal PreparedReader(SharcDatabase db, TableInfo table, SharcDataReader.CursorReaderConfig config)
+    {
+        _db = db;
+        _table = table;
+        _config = config;
+        _slot = new ThreadLocal<ReaderSlot>(trackAllValues: true);
+    }
+
+    /// <inheritdoc/>
+    public SharcDataReader Execute() => CreateReader();
+
     /// <summary>
-    /// Returns the cached reader, reset for a new Seek/Read pass.
-    /// Zero allocation after the first call.
+    /// Returns the per-thread cached reader, reset for a new Seek/Read pass.
+    /// Zero allocation after the first call on each thread.
     /// </summary>
     /// <returns>The cached <see cref="SharcDataReader"/> ready for Seek or Read.</returns>
     /// <exception cref="ObjectDisposedException">The prepared reader has been disposed.</exception>
     public SharcDataReader CreateReader()
     {
-        ObjectDisposedException.ThrowIf(_reader is null, this);
-        _reader.ResetForReuse(null);
-        return _reader;
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var slot = _slot.Value;
+        if (slot != null)
+        {
+            slot.Reader.ResetForReuse(null);
+            return slot.Reader;
+        }
+
+        // First call on this thread: create cursor + reader
+        var cursor = _db.CreateTableCursorForPrepared(_table);
+        var reader = new SharcDataReader(cursor, _db.Decoder, _config);
+        _slot.Value = new ReaderSlot(cursor, reader);
+        return reader;
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (_reader != null)
-        {
-            _reader.DisposeForReal();
-            _reader = null;
-        }
-        if (_cursor != null)
-        {
-            _cursor.Dispose();
-            _cursor = null;
-        }
+        if (_disposed) return;
+        _disposed = true;
+
+        // Clean up all per-thread slots
+        foreach (var slot in _slot.Values)
+            slot.Dispose();
+
+        _slot.Dispose();
     }
 }

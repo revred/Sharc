@@ -263,20 +263,22 @@ public sealed partial class SharcDataReader : IDisposable
     /// <para>Bits 0–1: dispatch mode (0=Default, 1=TypedCached, 2=TypedMemory, 3=Disposed).</para>
     /// <para>Bit 2: Lazy (row header parsed, body decoded on demand via Get*).</para>
     /// <para>Bit 3: Reusable (owned by PreparedQuery, Dispose resets instead of releasing).</para>
+    /// <para>Bit 4: Pooled (eligible for ThreadStatic reader pool return on Dispose).</para>
     /// </remarks>
     [Flags]
     private enum ScanMode : byte
     {
-        Default     = 0, // Composite/dedup/concat/materialized/interface — existing cascade
-        TypedCached = 1, // BTreeCursor<CachedPageSource> — devirtualized via generic specialization
-        TypedMemory = 2, // BTreeCursor<MemoryPageSource> — devirtualized via generic specialization
-        Disposed    = 3, // Reader has been disposed — Read() throws without field check
-        Lazy        = 4, // bit 2: lazy decode active
-        Reusable    = 8, // bit 3: owned by PreparedQuery
+        Default     = 0,  // Composite/dedup/concat/materialized/interface — existing cascade
+        TypedCached = 1,  // BTreeCursor<CachedPageSource> — devirtualized via generic specialization
+        TypedMemory = 2,  // BTreeCursor<MemoryPageSource> — devirtualized via generic specialization
+        Disposed    = 3,  // Reader has been disposed — Read() throws without field check
+        Lazy        = 4,  // bit 2: lazy decode active
+        Reusable    = 8,  // bit 3: owned by PreparedQuery
+        Pooled      = 16, // bit 4: eligible for ThreadStatic pool return on Dispose
     }
 
     private const byte DispatchMask = 0x3;  // bits 0-1: dispatch mode
-    private const byte FlagsMask    = 0xF;  // bits 0-3: all 4 flag bits
+    private const byte FlagsMask    = 0x1F; // bits 0-4: all 5 flag bits
 
     /// <summary>Dispatch mode (bits 0-1): Default, TypedCached, TypedMemory, or Disposed.</summary>
     private ScanMode DispatchMode
@@ -308,6 +310,85 @@ public sealed partial class SharcDataReader : IDisposable
         get => (_scanMode & ScanMode.Reusable) != 0;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         set => _scanMode = value ? (_scanMode | ScanMode.Reusable) : (_scanMode & ~ScanMode.Reusable);
+    }
+
+    private bool IsPooled
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (_scanMode & ScanMode.Pooled) != 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => _scanMode = value ? (_scanMode | ScanMode.Pooled) : (_scanMode & ~ScanMode.Pooled);
+    }
+
+    // ── ThreadStatic Reader Pool ──────────────────────────────────────
+    //
+    // Two-slot ThreadStatic pool for cursor-mode readers (no projection,
+    // no filters). After warmup, CreateReader() returns a pooled reader
+    // via ResetForReuse — zero allocation. Matches the IndexSet pattern.
+
+    [ThreadStatic] private static SharcDataReader? s_pool1;
+    [ThreadStatic] private static SharcDataReader? s_pool2;
+
+    /// <summary>Root page of the table this reader was built for (pool key).</summary>
+    private uint _poolRootPage;
+
+    /// <summary>
+    /// Tries to rent a pooled reader matching the given root page and decoder (database identity).
+    /// Returns null if no match is available.
+    /// </summary>
+    internal static SharcDataReader? TryRentFromPool(uint rootPage, IRecordDecoder decoder)
+    {
+        var r = s_pool1;
+        if (r != null && r._poolRootPage == rootPage && ReferenceEquals(r._recordDecoder, decoder))
+        { s_pool1 = null; return r; }
+        r = s_pool2;
+        if (r != null && r._poolRootPage == rootPage && ReferenceEquals(r._recordDecoder, decoder))
+        { s_pool2 = null; return r; }
+        return null;
+    }
+
+    /// <summary>
+    /// Returns a pooled reader to the ThreadStatic pool.
+    /// If pool is full, performs full disposal.
+    /// </summary>
+    private void ReturnToPool()
+    {
+        // Mark as disposed-but-pooled: preserve cursor, buffers, and Pooled flag
+        _currentRow = null;
+        ScanFlags = ScanMode.Disposed | ScanMode.Pooled;
+
+        if (s_pool1 == null) { s_pool1 = this; return; }
+        if (s_pool2 == null) { s_pool2 = this; return; }
+
+        // Pool full — evict slot 2 (oldest), take its place
+        var evicted = s_pool2!;
+        s_pool2 = this;
+        evicted.IsPooled = false;
+        evicted.ScanFlags = ScanMode.Default;
+        evicted.Dispose();
+    }
+
+    /// <summary>
+    /// Marks this reader as eligible for ThreadStatic pool return on Dispose.
+    /// Sets the pool key (root page) for matching.
+    /// </summary>
+    internal void MarkPoolable(uint rootPage)
+    {
+        IsPooled = true;
+        _poolRootPage = rootPage;
+    }
+
+    /// <summary>
+    /// Reactivates a pooled reader for reuse. Calls <see cref="ResetForReuse"/>
+    /// and restores the dispatch mode.
+    /// </summary>
+    internal void ReactivateFromPool()
+    {
+        // Restore Reusable temporarily so ResetForReuse works
+        IsReusable = true;
+        ResetForReuse(null);
+        // Clear Reusable, keep Pooled
+        IsReusable = false;
     }
 
     /// <summary>
@@ -1172,8 +1253,8 @@ public sealed partial class SharcDataReader : IDisposable
         _decodedGeneration++;
         _cachedColumnNames = null;
 
-        // Recompute scan mode — preserve generation and Reusable flag, replace dispatch bits
-        ScanFlags = (ScanFlags & ScanMode.Reusable) | ResolveScanMode();
+        // Recompute scan mode — preserve lifecycle flags (Reusable, Pooled), replace dispatch bits
+        ScanFlags = (ScanFlags & (ScanMode.Reusable | ScanMode.Pooled)) | ResolveScanMode();
     }
 
     /// <summary>
@@ -1182,8 +1263,7 @@ public sealed partial class SharcDataReader : IDisposable
     /// </summary>
     internal void DisposeForReal()
     {
-        IsReusable = false;
-        ScanFlags = ScanMode.Default; // Clear all flags — allow Dispose() to run
+        ScanFlags = ScanMode.Default; // Clear all flags (Reusable, Pooled) — allow Dispose() to run
         Dispose();
     }
 
@@ -1197,6 +1277,13 @@ public sealed partial class SharcDataReader : IDisposable
         {
             ScanFlags = ScanMode.Disposed | ScanMode.Reusable;
             _currentRow = null;
+            return;
+        }
+
+        // Pooled readers: return to ThreadStatic pool instead of freeing
+        if (IsPooled)
+        {
+            ReturnToPool();
             return;
         }
 
