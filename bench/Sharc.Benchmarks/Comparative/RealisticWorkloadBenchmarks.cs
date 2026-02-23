@@ -55,6 +55,12 @@ public class RealisticWorkloadBenchmarks
         _selectAllTableNames.CommandText = "SELECT name FROM sqlite_master WHERE type='table'";
     }
 
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {

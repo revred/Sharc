@@ -86,6 +86,17 @@ public class CoreBenchmarks
             "SELECT id FROM users WHERE age > 30 AND score < 50");
     }
 
+    /// <summary>
+    /// Clears SQLite connection pool state between iterations to prevent
+    /// query plan cache and page cache warmth from leaking across measurements.
+    /// Sharc prepared handles are intentionally kept warm (that's the benchmark).
+    /// </summary>
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {
