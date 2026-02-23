@@ -177,11 +177,20 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         bodyOffset = (int)headerSize;
         int headerEnd = bodyOffset;
 
-        int colCount = 0;
+        int remaining = headerEnd - offset;
         int capacity = serialTypes.Length;
 
-        // Use ReadFromRef with ref to indexed element — avoids span slice construction per iteration.
-        // On WASM Mono, span construction has nontrivial overhead vs. a single ref + offset arithmetic.
+        // Fast path: all serial types fit in destination AND are single-byte varints.
+        // Covers ~95% of real-world rows — serial types 0-9 (integers), up to 127
+        // (text/blob ≤57 bytes) are all < 0x80 and encode as one byte each.
+        // Eliminates per-column ReadFromRef call, Unsafe.AsRef, and offset accumulation.
+        if (remaining <= capacity && TryReadSingleByteSerialTypes(payload, offset, remaining, serialTypes))
+            return remaining;
+
+        // General path: per-column varint decode with ReadFromRef.
+        // Handles multi-byte serial types (large text/blob ≥58 bytes) and
+        // rows with more columns than the destination array.
+        int colCount = 0;
         while (offset < headerEnd && colCount < capacity)
         {
             offset += VarintDecoder.ReadFromRef(
@@ -198,6 +207,24 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         }
 
         return colCount;
+    }
+
+    /// <summary>
+    /// Batch-reads serial types when all are single-byte varints (&lt; 0x80).
+    /// Returns false on the first multi-byte varint, falling back to the general path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadSingleByteSerialTypes(
+        ReadOnlySpan<byte> payload, int offset, int count, Span<long> serialTypes)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            byte b = payload[offset + i];
+            if (b >= 0x80)
+                return false;
+            serialTypes[i] = b;
+        }
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
