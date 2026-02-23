@@ -32,6 +32,7 @@ public sealed class ViewBuilder
     private string[]? _columns;
     private Func<IRowAccessor, bool>? _filter;
     private string _name;
+    private MaterializationStrategy _strategy;
 
     private ViewBuilder(string sourceTable)
     {
@@ -87,12 +88,22 @@ public sealed class ViewBuilder
         return this;
     }
 
+    /// <summary>
+    /// Sets the materialization strategy for the view.
+    /// Default is <see cref="MaterializationStrategy.Eager"/>.
+    /// </summary>
+    public ViewBuilder Materialize(MaterializationStrategy strategy)
+    {
+        _strategy = strategy;
+        return this;
+    }
+
     /// <summary>Build the immutable view definition.</summary>
     public SharcView Build()
     {
         if (_sourceView != null)
-            return new SharcView(_name, _sourceView, _columns, _filter);
+            return new SharcView(_name, _sourceView, _columns, _filter, _strategy);
 
-        return new SharcView(_name, _sourceTable!, _columns, _filter);
+        return new SharcView(_name, _sourceTable!, _columns, _filter, _strategy);
     }
 }

@@ -107,4 +107,38 @@ public sealed class ViewBuilderTests
     {
         Assert.ThrowsAny<ArgumentException>(() => ViewBuilder.From("users").Named(null!));
     }
+
+    // ─── ILayer + MaterializationStrategy ────────────────────────────
+
+    [Fact]
+    public void SharcView_ImplementsILayer()
+    {
+        var view = ViewBuilder.From("users").Build();
+        Assert.IsAssignableFrom<ILayer>(view);
+    }
+
+    [Fact]
+    public void Build_DefaultStrategy_IsEager()
+    {
+        var view = ViewBuilder.From("users").Build();
+        Assert.Equal(MaterializationStrategy.Eager, view.Strategy);
+    }
+
+    [Fact]
+    public void Build_StreamingStrategy_IsStreaming()
+    {
+        var view = ViewBuilder.From("users")
+            .Materialize(MaterializationStrategy.Streaming)
+            .Build();
+        Assert.Equal(MaterializationStrategy.Streaming, view.Strategy);
+    }
+
+    [Fact]
+    public void Build_Materialize_EagerExplicit_IsEager()
+    {
+        var view = ViewBuilder.From("users")
+            .Materialize(MaterializationStrategy.Eager)
+            .Build();
+        Assert.Equal(MaterializationStrategy.Eager, view.Strategy);
+    }
 }

@@ -57,6 +57,11 @@ internal enum SharqTokenKind : byte
     Exists,
     UnionAll,       // |a (shorthand for UNION ALL)
 
+    // Execution hints
+    Direct,         // DIRECT (explicit default tier)
+    Cached,         // CACHED (auto-Prepare tier)
+    Jit,            // JIT (auto-Jit tier)
+
     // DDL
     Create,
     View,

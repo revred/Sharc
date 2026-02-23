@@ -24,6 +24,9 @@ public sealed class QueryPlan
     /// <summary>True if the query has Cote definitions.</summary>
     public bool HasCotes => Cotes is { Count: > 0 };
 
+    /// <summary>Execution hint from the top-level statement. Default is Direct.</summary>
+    public ExecutionHint Hint { get; init; }
+
     /// <summary>
     /// Cached resolved intent for simple Cote queries (Cote → SELECT WHERE).
     /// Set on first execution so the same object reference is reused,

@@ -607,4 +607,42 @@ public class IntentCompilerTests
         Assert.NotNull(plan.Compound!.FinalOrderBy);
         Assert.Equal(5L, plan.Compound.FinalLimit);
     }
+
+    // ─── Execution Hint Propagation ──────────────────────────────────
+
+    [Fact]
+    public void Compile_NoHint_DefaultsDirect()
+    {
+        var intent = Compile("SELECT * FROM users");
+        Assert.Equal(ExecutionHint.Direct, intent.Hint);
+    }
+
+    [Fact]
+    public void Compile_CachedHint_PropagatedToIntent()
+    {
+        var intent = Compile("CACHED SELECT * FROM users WHERE age > 25");
+        Assert.Equal(ExecutionHint.Cached, intent.Hint);
+    }
+
+    [Fact]
+    public void Compile_JitHint_PropagatedToIntent()
+    {
+        var intent = Compile("JIT SELECT name FROM users");
+        Assert.Equal(ExecutionHint.Jit, intent.Hint);
+    }
+
+    [Fact]
+    public void CompilePlan_CachedHint_PropagatedToPlan()
+    {
+        var plan = CompilePlan("CACHED SELECT * FROM users");
+        Assert.Equal(ExecutionHint.Cached, plan.Hint);
+        Assert.Equal(ExecutionHint.Cached, plan.Simple!.Hint);
+    }
+
+    [Fact]
+    public void CompilePlan_JitHint_PropagatedToPlan()
+    {
+        var plan = CompilePlan("JIT SELECT * FROM users");
+        Assert.Equal(ExecutionHint.Jit, plan.Hint);
+    }
 }
