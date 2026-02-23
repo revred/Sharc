@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using System.Text;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
@@ -6,185 +5,276 @@ using Sharc.Core.Schema;
 namespace Sharc;
 
 /// <summary>
-/// Specialized builder for Predicate expressions in the FilterStar JIT.
-/// Adheres to SRP by focusing only on column-and-field-level logic.
+/// Builds closure-based BakedDelegate instances for individual predicates.
+/// Direct method calls — no expression trees, no reflection.
 /// </summary>
 internal static class JitPredicateBuilder
 {
-    public static Expression Build(PredicateExpression pred,
-                                 IReadOnlyList<ColumnInfo> columns,
-                                 int rowidAliasOrdinal,
-                                 ParameterExpression payload,
-                                 ParameterExpression serialTypes,
-                                 ParameterExpression offsets,
-                                 ParameterExpression rowId)
+    public static BakedDelegate Build(PredicateExpression pred,
+                                     IReadOnlyList<ColumnInfo> columns,
+                                     int rowidAliasOrdinal)
     {
         int ordinal = pred.ColumnOrdinal ?? columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase))?.Ordinal ?? -1;
 
         if (ordinal < 0 || ordinal >= columns.Count)
             throw new ArgumentOutOfRangeException(nameof(pred), $"Column '{pred.ColumnName}' (ordinal {ordinal}) not found.");
 
-        var ordinalExpr = Expression.Constant(ordinal);
-        var serialTypeExpr = Expression.Call(JitMethodRegistry.GetSerialType, serialTypes, ordinalExpr);
-
         // NULL handling (SQLite semantics: NULL is never equal, but matches IS NULL)
         if (pred.Operator == FilterOp.IsNull)
-            return Expression.AndAlso(Expression.Equal(serialTypeExpr, Expression.Constant(SerialTypeCodec.NullSerialType)), Expression.NotEqual(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
+            return (payload, serialTypes, offsets, rowId) =>
+                FilterStarCompiler.GetSerialType(serialTypes, ordinal) == SerialTypeCodec.NullSerialType && ordinal != rowidAliasOrdinal;
 
         if (pred.Operator == FilterOp.IsNotNull)
-            return Expression.OrElse(Expression.NotEqual(serialTypeExpr, Expression.Constant(SerialTypeCodec.NullSerialType)), Expression.Equal(ordinalExpr, Expression.Constant(rowidAliasOrdinal)));
+            return (payload, serialTypes, offsets, rowId) =>
+                FilterStarCompiler.GetSerialType(serialTypes, ordinal) != SerialTypeCodec.NullSerialType || ordinal == rowidAliasOrdinal;
 
         // RowID Alias
-        if (ordinal == rowidAliasOrdinal) return BuildRowIdPredicate(pred, rowId);
+        if (ordinal == rowidAliasOrdinal) return BuildRowIdPredicate(pred);
 
         // Column Data
-        var offsetExpr = Expression.Call(JitMethodRegistry.GetOffset, offsets, ordinalExpr);
-        var lengthExpr = Expression.Call(JitMethodRegistry.GetContentSize, serialTypeExpr);
-        var dataExpr = Expression.Call(JitMethodRegistry.GetSlice, payload, offsetExpr, lengthExpr);
-
         return pred.Operator switch
         {
-            FilterOp.Eq or FilterOp.Neq or FilterOp.Lt or FilterOp.Lte or FilterOp.Gt or FilterOp.Gte 
-                => BuildComparison(pred, serialTypeExpr, dataExpr),
+            FilterOp.Eq or FilterOp.Neq or FilterOp.Lt or FilterOp.Lte or FilterOp.Gt or FilterOp.Gte
+                => BuildComparison(pred, ordinal),
             FilterOp.StartsWith or FilterOp.EndsWith or FilterOp.Contains
-                => BuildStringOperation(pred, dataExpr),
-            FilterOp.Between 
-                => BuildBetween(pred, serialTypeExpr, dataExpr),
-            FilterOp.In or FilterOp.NotIn 
-                => BuildIn(pred, serialTypeExpr, dataExpr),
-            _ => Expression.Constant(false)
+                => BuildStringOperation(pred, ordinal),
+            FilterOp.Between
+                => BuildBetween(pred, ordinal),
+            FilterOp.In or FilterOp.NotIn
+                => BuildIn(pred, ordinal),
+            _ => static (_, _, _, _) => false
         };
     }
 
-    private static MethodCallExpression BuildStringOperation(PredicateExpression pred, Expression data)
+    private static BakedDelegate BuildStringOperation(PredicateExpression pred, int ordinal)
     {
-        var method = pred.Operator switch
+        // Cache the UTF-8 bytes as a single heap array — captured by closure.
+        byte[] utf8Bytes = pred.Value.AsUtf8().ToArray();
+
+        return pred.Operator switch
         {
-            FilterOp.StartsWith => JitMethodRegistry.Utf8StartsWith,
-            FilterOp.EndsWith => JitMethodRegistry.Utf8EndsWith,
-            FilterOp.Contains => JitMethodRegistry.Utf8Contains,
+            FilterOp.StartsWith => (payload, serialTypes, offsets, rowId) =>
+            {
+                long st = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, st);
+                return RawByteComparer.Utf8StartsWith(data, utf8Bytes);
+            },
+            FilterOp.EndsWith => (payload, serialTypes, offsets, rowId) =>
+            {
+                long st = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, st);
+                return RawByteComparer.Utf8EndsWith(data, utf8Bytes);
+            },
+            FilterOp.Contains => (payload, serialTypes, offsets, rowId) =>
+            {
+                long st = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, st);
+                return RawByteComparer.Utf8Contains(data, utf8Bytes);
+            },
             _ => throw new NotSupportedException($"Operator {pred.Operator} is not a string operator.")
         };
-
-        // Cache the UTF-8 bytes as a single heap array — avoids re-allocating from ReadOnlySpan on each build.
-        byte[] utf8Bytes = pred.Value.AsUtf8().ToArray();
-        return Expression.Call(method, data, Expression.Constant(utf8Bytes));
     }
 
-    private static ConditionalExpression BuildComparison(PredicateExpression pred, Expression serialType, Expression data)
+    private static BakedDelegate BuildComparison(PredicateExpression pred, int ordinal)
     {
-        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
-        Expression comparison = pred.Value.ValueTag switch
+        return pred.Value.ValueTag switch
         {
-            // Int64 filter: prefer IsIntegral (same-type), fall back to IsReal (cross-type)
-            TypedFilterValue.Tag.Int64 => Expression.Condition(
-                Expression.Call(JitMethodRegistry.IsIntegral, serialType),
-                BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareInt64, data, serialType, Expression.Constant(pred.Value.AsInt64()))),
-                Expression.Condition(
-                    Expression.Call(JitMethodRegistry.IsReal, serialType),
-                    BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareDouble, data, Expression.Constant((double)pred.Value.AsInt64()))),
-                    Expression.Constant(false))),
-
-            // Double filter: prefer IsReal (same-type), fall back to IsIntegral (cross-type)
-            TypedFilterValue.Tag.Double => Expression.Condition(
-                Expression.Call(JitMethodRegistry.IsReal, serialType),
-                BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareDouble, data, Expression.Constant(pred.Value.AsDouble()))),
-                Expression.Condition(
-                    Expression.Call(JitMethodRegistry.IsIntegral, serialType),
-                    BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.CompareIntAsDouble, data, serialType, Expression.Constant(pred.Value.AsDouble()))),
-                    Expression.Constant(false))),
-
-            TypedFilterValue.Tag.Utf8 => BuildUtf8Comparison(pred, serialType, data),
-            _ => Expression.Constant(false)
+            TypedFilterValue.Tag.Int64 => BuildInt64Comparison(ordinal, pred.Operator, pred.Value.AsInt64()),
+            TypedFilterValue.Tag.Double => BuildDoubleComparison(ordinal, pred.Operator, pred.Value.AsDouble()),
+            TypedFilterValue.Tag.Utf8 => BuildUtf8Comparison(ordinal, pred.Operator, pred.Value.AsUtf8().ToArray()),
+            _ => static (_, _, _, _) => false
         };
-
-        return Expression.Condition(isNull, Expression.Constant(false), comparison);
     }
 
-    private static ConditionalExpression BuildUtf8Comparison(PredicateExpression pred, Expression serialType, Expression data)
+    // Int64 filter: prefer IsIntegral (same-type), fall back to IsReal (cross-type)
+    private static BakedDelegate BuildInt64Comparison(int ordinal, FilterOp op, long filterValue)
     {
-        // Cache UTF-8 bytes once to avoid repeated Span→Array allocation.
-        byte[] utf8Bytes = pred.Value.AsUtf8().ToArray();
-        return Expression.Condition(
-            Expression.Call(JitMethodRegistry.IsText, serialType),
-            BuildOp(pred.Operator, Expression.Call(JitMethodRegistry.Utf8Compare, data, Expression.Constant(utf8Bytes))),
-            Expression.Constant(false));
-    }
-
-    private static ConditionalExpression BuildBetween(PredicateExpression pred, Expression serialType, Expression data)
-    {
-        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
-        Expression comparison = pred.Value.ValueTag switch
+        double doubleFilterValue = (double)filterValue;
+        return (payload, serialTypes, offsets, rowId) =>
         {
-            // Int64Range: prefer IsIntegral, cross-type fall back to IsReal
-            TypedFilterValue.Tag.Int64Range => Expression.Condition(
-                Expression.Call(JitMethodRegistry.IsIntegral, serialType),
-                BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType), pred.Value.AsInt64(), pred.Value.AsInt64High()),
-                Expression.Condition(
-                    Expression.Call(JitMethodRegistry.IsReal, serialType),
-                    BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeDouble, data), (double)pred.Value.AsInt64(), (double)pred.Value.AsInt64High()),
-                    Expression.Constant(false))),
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
 
-            // DoubleRange: prefer IsReal, cross-type fall back to IsIntegral
-            TypedFilterValue.Tag.DoubleRange => Expression.Condition(
-                Expression.Call(JitMethodRegistry.IsReal, serialType),
-                BuildRangeCmp(Expression.Call(JitMethodRegistry.DecodeDouble, data), pred.Value.AsDouble(), pred.Value.AsDoubleHigh()),
-                Expression.Condition(
-                    Expression.Call(JitMethodRegistry.IsIntegral, serialType),
-                    BuildRangeCmp(Expression.Convert(Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType), typeof(double)), pred.Value.AsDouble(), pred.Value.AsDoubleHigh()),
-                    Expression.Constant(false))),
-
-            _ => Expression.Constant(false)
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareInt64(data, serialType, filterValue));
+            }
+            if (SerialTypeCodec.IsReal(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareDouble(data, doubleFilterValue));
+            }
+            return false;
         };
-
-        return Expression.Condition(isNull, Expression.Constant(false), comparison);
     }
 
-    private static ConditionalExpression BuildIn(PredicateExpression pred, Expression serialType, Expression data)
+    // Double filter: prefer IsReal (same-type), fall back to IsIntegral (cross-type)
+    private static BakedDelegate BuildDoubleComparison(int ordinal, FilterOp op, double filterValue)
     {
-        var isNull = Expression.Equal(serialType, Expression.Constant(SerialTypeCodec.NullSerialType));
-        Expression comparison = pred.Value.ValueTag switch
+        return (payload, serialTypes, offsets, rowId) =>
         {
-            TypedFilterValue.Tag.Int64Set => Expression.Condition(Expression.Call(JitMethodRegistry.IsIntegral, serialType), Expression.Call(Expression.Constant(new HashSet<long>(pred.Value.AsInt64Set())), JitMethodRegistry.HashSetInt64Contains, Expression.Call(JitMethodRegistry.DecodeInt64, data, serialType)), Expression.Constant(false)),
-            TypedFilterValue.Tag.Utf8Set => Expression.Condition(Expression.Call(JitMethodRegistry.IsText, serialType), Expression.Call(JitMethodRegistry.Utf8SetContains, data, Expression.Constant(new HashSet<string>(pred.Value.AsUtf8Set().Select(m => Encoding.UTF8.GetString(m.Span))))), Expression.Constant(false)),
-            _ => Expression.Constant(false)
-        };
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
 
-        if (pred.Operator == FilterOp.NotIn) comparison = Expression.Not(comparison);
-        return Expression.Condition(isNull, Expression.Constant(false), comparison);
+            if (SerialTypeCodec.IsReal(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareDouble(data, filterValue));
+            }
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareIntAsDouble(data, serialType, filterValue));
+            }
+            return false;
+        };
     }
 
-    private static BinaryExpression BuildRangeCmp(Expression val, object low, object high) 
-        => Expression.AndAlso(Expression.GreaterThanOrEqual(val, Expression.Constant(low)), Expression.LessThanOrEqual(val, Expression.Constant(high)));
-
-    private static Expression BuildOp(FilterOp op, Expression cmpResult) => op switch
+    private static BakedDelegate BuildUtf8Comparison(int ordinal, FilterOp op, byte[] utf8Bytes)
     {
-        FilterOp.Eq => Expression.Equal(cmpResult, Expression.Constant(0)),
-        FilterOp.Neq => Expression.NotEqual(cmpResult, Expression.Constant(0)),
-        FilterOp.Lt => Expression.LessThan(cmpResult, Expression.Constant(0)),
-        FilterOp.Lte => Expression.LessThanOrEqual(cmpResult, Expression.Constant(0)),
-        FilterOp.Gt => Expression.GreaterThan(cmpResult, Expression.Constant(0)),
-        FilterOp.Gte => Expression.GreaterThanOrEqual(cmpResult, Expression.Constant(0)),
-        _ => Expression.Constant(false)
-    };
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
 
-    private static Expression BuildRowIdPredicate(PredicateExpression pred, Expression rowId)
+            if (SerialTypeCodec.IsText(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                return FilterStarCompiler.CompareOp(op, RawByteComparer.Utf8Compare(data, utf8Bytes));
+            }
+            return false;
+        };
+    }
+
+    private static BakedDelegate BuildBetween(PredicateExpression pred, int ordinal)
+    {
+        return pred.Value.ValueTag switch
+        {
+            TypedFilterValue.Tag.Int64Range => BuildInt64Between(ordinal, pred.Value.AsInt64(), pred.Value.AsInt64High()),
+            TypedFilterValue.Tag.DoubleRange => BuildDoubleBetween(ordinal, pred.Value.AsDouble(), pred.Value.AsDoubleHigh()),
+            _ => static (_, _, _, _) => false
+        };
+    }
+
+    // Int64Range: prefer IsIntegral, cross-type fall back to IsReal
+    private static BakedDelegate BuildInt64Between(int ordinal, long low, long high)
+    {
+        double doubleLow = (double)low;
+        double doubleHigh = (double)high;
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
+
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                long val = RawByteComparer.DecodeInt64(data, serialType);
+                return val >= low && val <= high;
+            }
+            if (SerialTypeCodec.IsReal(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                double val = RawByteComparer.DecodeDouble(data);
+                return val >= doubleLow && val <= doubleHigh;
+            }
+            return false;
+        };
+    }
+
+    // DoubleRange: prefer IsReal, cross-type fall back to IsIntegral
+    private static BakedDelegate BuildDoubleBetween(int ordinal, double low, double high)
+    {
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
+
+            if (SerialTypeCodec.IsReal(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                double val = RawByteComparer.DecodeDouble(data);
+                return val >= low && val <= high;
+            }
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                double val = (double)RawByteComparer.DecodeInt64(data, serialType);
+                return val >= low && val <= high;
+            }
+            return false;
+        };
+    }
+
+    private static BakedDelegate BuildIn(PredicateExpression pred, int ordinal)
+    {
+        bool isNotIn = pred.Operator == FilterOp.NotIn;
+
+        return pred.Value.ValueTag switch
+        {
+            TypedFilterValue.Tag.Int64Set => BuildInt64In(ordinal, new HashSet<long>(pred.Value.AsInt64Set()), isNotIn),
+            TypedFilterValue.Tag.Utf8Set => BuildUtf8In(ordinal, new HashSet<string>(pred.Value.AsUtf8Set().Select(m => Encoding.UTF8.GetString(m.Span))), isNotIn),
+            _ => static (_, _, _, _) => false
+        };
+    }
+
+    private static BakedDelegate BuildInt64In(int ordinal, HashSet<long> set, bool negate)
+    {
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
+
+            bool contains = false;
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                contains = set.Contains(RawByteComparer.DecodeInt64(data, serialType));
+            }
+            return negate ? !contains : contains;
+        };
+    }
+
+    private static BakedDelegate BuildUtf8In(int ordinal, HashSet<string> set, bool negate)
+    {
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
+
+            bool contains = false;
+            if (SerialTypeCodec.IsText(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                contains = FilterStarCompiler.Utf8SetContains(data, set);
+            }
+            return negate ? !contains : contains;
+        };
+    }
+
+    private static BakedDelegate BuildRowIdPredicate(PredicateExpression pred)
     {
         if (pred.Operator == FilterOp.Between && pred.Value.ValueTag == TypedFilterValue.Tag.Int64Range)
-            return BuildRangeCmp(rowId, pred.Value.AsInt64(), pred.Value.AsInt64High());
+        {
+            long low = pred.Value.AsInt64();
+            long high = pred.Value.AsInt64High();
+            return (payload, serialTypes, offsets, rowId) => rowId >= low && rowId <= high;
+        }
 
-        if (pred.Value.ValueTag != TypedFilterValue.Tag.Int64) return Expression.Constant(false);
-        var val = Expression.Constant(pred.Value.AsInt64());
-        
+        if (pred.Value.ValueTag != TypedFilterValue.Tag.Int64) return static (_, _, _, _) => false;
+
+        long val = pred.Value.AsInt64();
+
         return pred.Operator switch
         {
-            FilterOp.Eq => Expression.Equal(rowId, val),
-            FilterOp.Neq => Expression.NotEqual(rowId, val),
-            FilterOp.Lt => Expression.LessThan(rowId, val),
-            FilterOp.Lte => Expression.LessThanOrEqual(rowId, val),
-            FilterOp.Gt => Expression.GreaterThan(rowId, val),
-            FilterOp.Gte => Expression.GreaterThanOrEqual(rowId, val),
-            _ => Expression.Constant(false)
+            FilterOp.Eq => (payload, serialTypes, offsets, rowId) => rowId == val,
+            FilterOp.Neq => (payload, serialTypes, offsets, rowId) => rowId != val,
+            FilterOp.Lt => (payload, serialTypes, offsets, rowId) => rowId < val,
+            FilterOp.Lte => (payload, serialTypes, offsets, rowId) => rowId <= val,
+            FilterOp.Gt => (payload, serialTypes, offsets, rowId) => rowId > val,
+            FilterOp.Gte => (payload, serialTypes, offsets, rowId) => rowId >= val,
+            _ => static (_, _, _, _) => false
         };
     }
 }

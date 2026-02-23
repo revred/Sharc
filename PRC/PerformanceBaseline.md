@@ -19,7 +19,7 @@
 | Sharc_TypeDecode | 176 us | 688 B | 0 | Full scan, type decode only |
 | Sharc_GcPressure | 175 us | 688 B | 0 | Full scan, designed for zero GC |
 | Sharc_NullScan | 175 us | 688 B | 0 | Full scan with NULL handling |
-| Sharc_FilterStar | 304 us | 800 B | 0 | JIT-compiled predicate scan |
+| Sharc_FilterStar | 304 us | 800 B | 0 | Closure-composed predicate scan |
 | Sharc_WhereFilter | 298 us | 912 B | 0 | SQL WHERE filter |
 | DirectTable_SequentialScan | 220 us | 672 B | 0 | Raw CreateReader |
 | SELECT * (no filter) | 105 us | 672 B | 0 | Simplest SQL query |

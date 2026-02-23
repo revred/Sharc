@@ -331,6 +331,33 @@ using var db = await SharcDatabase.OpenFromBrowserAsync(JS, "myapp");
 
 ---
 
+## Phase 6: File-Backed IndexedDB Benchmarking
+
+**Goal**: Provide a best-practice pattern for using Sharc as a file-backed cache that streams data into and out of IndexedDB, enabling fairer Arena benchmarks.
+
+**Problem**: Today the Arena benchmarks IndexedDB by serializing entire datasets as JSON through `IJSRuntime` interop. This creates a size-dependent initialization bottleneck (capped at 10K rows) that conflates interop overhead with IndexedDB's actual read/write performance. IndexedDB was winning 5+ of 17 benchmark matchups before — the interop penalty shouldn't disqualify it.
+
+**Approach**: Use the `IndexedDbPageSource` (Phase 1) to stream SQLite pages into IndexedDB as binary blobs, bypassing the JSON serialization bottleneck entirely. The Arena can then benchmark IndexedDB at any scale (100K+ rows) since the data lives as compact binary pages, not inflated JSON objects.
+
+```text
+Current (JSON interop, capped at 10K):
+  byte[] → SQLite reader → Dictionary<string, object?>[] → JSON → IJSRuntime → IndexedDB
+
+Proposed (binary page streaming, unlimited):
+  byte[] → 4KB page chunks → Uint8Array → IndexedDB (page store)
+  IndexedDB → cursor over pages → Sharc reads natively
+```
+
+**Arena integration**:
+
+- Add a "Persistent Mode" toggle that uses `IndexedDbPageSource` for IndexedDB benchmarks
+- IndexedDB benchmarks in persistent mode measure actual IndexedDB read performance (not interop serialization)
+- Standard mode (JSON interop) remains available for comparing the browser-native key-value API
+
+This lets IndexedDB compete fairly at all density tiers, including Stress tests.
+
+---
+
 ## Open Questions
 
 1. **Should encrypted pages be stored encrypted in IndexedDB?** Recommendation: Yes — if the user opened with encryption options, store pages in their encrypted form. This provides defense-in-depth against browser extension attacks.

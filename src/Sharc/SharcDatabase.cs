@@ -67,8 +67,8 @@ public sealed class SharcDatabase : IDisposable
     private readonly Views.ViewResolver _viewResolver;
 
     // ─── Compiled-query cache ─────────────────────────────────────
-    // Eliminates per-invocation Expression.Lambda().Compile() overhead
-    // by caching the JIT-compiled filter delegate, projection array,
+    // Eliminates per-invocation delegate construction overhead
+    // by caching the closure-composed filter delegate, projection array,
     // and table metadata for each unique (intent, parameters) pair.
     private System.Collections.Concurrent.ConcurrentDictionary<
         Intent.QueryIntent, CachedReaderInfo>? _readerInfoCache;
@@ -749,7 +749,7 @@ public sealed class SharcDatabase : IDisposable
         if (plan.Index == null)
             return null;
 
-        // DECISION: Keep the JIT-compiled residual filter even for consumed index conditions.
+        // DECISION: Keep the compiled residual filter even for consumed index conditions.
         // The byte-level filter is near-zero cost and avoids predicate subtraction complexity.
         return new IndexSeekCursor(
             _bTreeReader, _recordDecoder,
