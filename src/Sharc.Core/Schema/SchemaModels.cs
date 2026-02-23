@@ -35,6 +35,20 @@ public sealed class SharcSchema
     }
 
     /// <summary>
+    /// Gets a table by name (case-insensitive), or null if not found.
+    /// </summary>
+    public TableInfo? TryGetTable(string name)
+    {
+        var count = Tables.Count;
+        for (int i = 0; i < count; i++)
+        {
+            if (Tables[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return Tables[i];
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Gets a view by name (case-insensitive).
     /// </summary>
     /// <returns>Null if not found.</returns>

@@ -62,6 +62,27 @@ internal sealed class ViewResolver
         return false;
     }
 
+    /// <summary>
+    /// Resolves a view by name without opening a cursor.
+    /// Checks registered views first, then falls back to auto-promotable SQLite schema views.
+    /// Returns null if the view doesn't exist or isn't promotable.
+    /// </summary>
+    internal SharcView? TryResolveView(string viewName)
+    {
+        if (_registeredViews != null &&
+            _registeredViews.TryGetValue(viewName, out var registeredView))
+        {
+            return registeredView;
+        }
+
+        var schema = _db.GetSchemaInternal();
+        var viewInfo = schema.GetView(viewName);
+        if (viewInfo != null)
+            return ViewPromoter.TryPromote(viewInfo, schema);
+
+        return null;
+    }
+
     internal IViewCursor OpenView(string viewName)
     {
         // Check registered programmatic views first

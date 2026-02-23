@@ -10,7 +10,7 @@ namespace Sharc;
 /// </summary>
 public interface IFilterStar { }
 
-// â”€â”€ Internal expression tree nodes (uncompiled form) â”€â”€
+// â”€â”€ Internal filter AST nodes (uncompiled form) â”€â”€
 
 internal sealed class AndExpression : IFilterStar
 {

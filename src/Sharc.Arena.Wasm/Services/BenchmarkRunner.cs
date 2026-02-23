@@ -143,12 +143,18 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
     /// Generates the canonical database byte[] ONCE and shares it across all engines.
     /// Eliminates 3x redundant DataGenerator runs (was: each engine generated its own copy).
     /// </summary>
+    // IndexedDB can handle 10K rows through JS interop without issues.
+    // Only skip at Stress-test scales (100K+) where serialization becomes impractical.
+    private const int MaxIndexedDbRows = 10_000;
+
     private async Task EnsureAllEnginesInitialized(int userCount, int nodeCount)
     {
-        if (userCount != _lastUserCount || nodeCount != _lastNodeCount)
+        bool scaleChanged = userCount != _lastUserCount || nodeCount != _lastNodeCount;
+
+        if (scaleChanged)
         {
             // Single generation - deterministic seed=42, identical for all engines
-            try 
+            try
             {
                 _dbBytes = _dataGenerator.GenerateDatabase(userCount, nodeCount);
             }
@@ -163,7 +169,6 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             {
                 _sharcEngine.Reset();
                 var (sharcMs, sharcAlloc) = _sharcEngine.EnsureInitialized(_dbBytes);
-                // Console.WriteLine($"[Runner] Sharc init: {sharcMs:F1}ms, {sharcAlloc / 1024}KB");
             }
             catch (Exception ex)
             {
@@ -175,12 +180,15 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
             {
                 _sqliteEngine.Reset();
                 var (sqliteMs, sqliteAlloc) = _sqliteEngine.EnsureInitialized(_dbBytes);
-                // Console.WriteLine($"[Runner] SQLite init: {sqliteMs:F1}ms, {sqliteAlloc / 1024}KB");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[Runner] SQLite init failed: {ex}");
             }
+
+            // Reset IndexedDB when scale changes to avoid stale data
+            try { await _indexedDbEngine.Reset(); }
+            catch (Exception ex) { Console.WriteLine($"[Runner] IndexedDB reset failed: {ex.Message}"); }
 
             _lastUserCount = userCount;
             _lastNodeCount = nodeCount;
@@ -188,15 +196,13 @@ public sealed class BenchmarkRunner : IBenchmarkEngine
 
         if (_dbBytes is null) return;
 
+        // Initialize IndexedDB for Quick and Standard tests (up to 10K rows).
+        // Only Stress tests (100K+) are excluded — JS interop serialization is impractical at that scale.
         try
         {
-            if (userCount <= 1000)
+            if (userCount <= MaxIndexedDbRows)
             {
                 await _indexedDbEngine.EnsureInitialized(_dbBytes, userCount, nodeCount);
-            }
-            else
-            {
-                // Console.WriteLine("[Runner] Skipping IDB init (too large for WASM interop)");
             }
         }
         catch (Exception ex)

@@ -82,7 +82,7 @@ if (reader.Seek(memoryId))
 ## 4. Zero-Allocation Filtered Scan
 
 ```csharp
-// Filter without SQL parsing -- direct B-tree scan with JIT-compiled predicate
+// Filter without SQL parsing -- direct B-tree scan with compiled predicate
 using var reader = db.CreateReader("events",
     new SharcFilter("severity", SharcOperator.GreaterOrEqual, 3L),
     "timestamp", "message");  // column projection

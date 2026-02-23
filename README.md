@@ -171,19 +171,19 @@ writer.Insert("entities",
 
 **Memory per query** (managed heap, † = managed-only; see note below):
 
-| Query Type | Sharc | SQLite | Notes |
+| Query Type | Sharc | SQLite † | Notes |
 | :--- | ---: | ---: | :--- |
-| `SELECT *` (2.5K rows) | **576 B** | 688 B † | Lazy decode: only accessed columns materialized |
+| `SELECT *` (2.5K rows) | **576 B** | 688 B | Lazy decode: only accessed columns materialized |
 | `WHERE` filter | 98 KB | 98 KB | Near parity — both allocate result strings |
-| `WHERE + ORDER BY + LIMIT` | 42 KB | 5.6 KB † | Streaming TopN heap avoids full materialization |
+| `WHERE + ORDER BY + LIMIT` | 42 KB | 5.6 KB | Streaming TopN heap avoids full materialization |
 | `UNION ALL` | 415 KB | 414 KB | Both sides materialized in managed arrays |
-| `UNION` / `INTERSECT` / `EXCEPT` | **1.4 KB** | 744 B † | ArrayPool-backed IndexSet — zero alloc after warmup |
-| `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3.1 KB † | Streaming concat → TopN, no full materialization |
-| `GROUP BY + COUNT + AVG` | **5.3 KB** | 920 B † | Streaming hash aggregator with fingerprint-based string pooling |
-| `Cote → SELECT WHERE` | **808 B** | 31 KB † | Cached intent resolution — inline filter, no materialization |
-| `Cote + UNION ALL` | **1.4 KB** | 816 B † | Resolved Cote inlined into compound pipeline |
+| `UNION` / `INTERSECT` / `EXCEPT` | **1.4 KB** | 744 B | ArrayPool-backed IndexSet — zero alloc after warmup |
+| `UNION ALL + ORDER BY + LIMIT` | 32 KB | 3.1 KB | Streaming concat → TopN, no full materialization |
+| `GROUP BY + COUNT + AVG` | **5.3 KB** | 920 B | Streaming hash aggregator with fingerprint-based string pooling |
+| `Cote → SELECT WHERE` | **808 B** | 31 KB | Cached intent resolution — inline filter, no materialization |
+| `Cote + UNION ALL` | **1.4 KB** | 816 B | Resolved Cote inlined into compound pipeline |
 
-> **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's † numbers reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
+> **† Measurement note:** BenchmarkDotNet's `MemoryDiagnoser` only tracks .NET managed heap allocations. Sharc's numbers are **total** allocation (all work happens in managed code). SQLite's numbers (marked †) reflect only the P/Invoke marshaling cost — the actual hash tables, sort buffers, B-tree traversal, and query plan memory are allocated in native C and are **invisible** to the profiler. The true gap is significantly smaller than these numbers suggest.
 >
 > **Takeaway**: Sharc's core engine (CreateReader) is 2-95x faster with zero-alloc reads. The SQL query pipeline (Query) **wins or ties every benchmark** — from 1.1x on sorted queries to 9.2x on full scans (lazy decode: **576 B** vs SQLite's 688 B). Cote queries use cached intent resolution with inlined filters (**808 B** for Cote → SELECT WHERE, 3.1x faster). Set operations (UNION/INTERSECT/EXCEPT) use a pooled open-addressing hash map with ArrayPool-backed storage, achieving **1.4 KB** managed allocation vs SQLite's native-invisible approach. Streaming optimizations (TopN heap with JIT-specialized struct comparer, streaming aggregator with string pooling, predicate pushdown, lazy column decode, query plan + intent caching) deliver consistent wins across all query types.
 

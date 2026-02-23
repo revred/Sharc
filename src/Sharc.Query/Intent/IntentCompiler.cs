@@ -40,12 +40,12 @@ public static class IntentCompiler
         if (statement.CompoundOp != null)
         {
             var compound = CompileCompound(statement);
-            return new QueryPlan { Compound = compound, Cotes = cotes };
+            return new QueryPlan { Compound = compound, Cotes = cotes, Hint = statement.Hint };
         }
 
         // Simple query (strip Cotes — they're already compiled above)
         var intent = CompileSimple(statement);
-        return new QueryPlan { Simple = intent, Cotes = cotes };
+        return new QueryPlan { Simple = intent, Cotes = cotes, Hint = statement.Hint };
     }
 
     /// <summary>
@@ -146,6 +146,7 @@ public static class IntentCompiler
             Aggregates = aggregates,
             GroupBy = groupBy,
             HavingFilter = havingFilter,
+            Hint = statement.Hint,
         };
     }
 
@@ -505,6 +506,7 @@ public static class IntentCompiler
             Aggregates = aggregates,
             GroupBy = groupBy,
             HavingFilter = havingFilter,
+            Hint = statement.Hint,
         };
     }
 

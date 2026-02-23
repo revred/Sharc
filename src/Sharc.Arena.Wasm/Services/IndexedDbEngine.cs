@@ -53,13 +53,13 @@ public sealed class IndexedDbEngine
 
     public async Task<EngineBaseResult> RunSlide(string slideId, double scale)
     {
-        // Fast-fail when IDB couldn't be initialized (dataset >1000 rows).
+        // Fast-fail when IDB couldn't be initialized (dataset exceeds JS interop threshold).
         // Returns clean NotSupported instead of JS interop errors on null _db.
         if (!_initialized)
             return new EngineBaseResult
             {
                 NotSupported = true,
-                Note = "IndexedDB skipped (dataset too large for browser storage)",
+                Note = "IndexedDB skipped (dataset exceeds 10K row JS interop limit)",
             };
 
         return slideId switch
