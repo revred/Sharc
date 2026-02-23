@@ -195,6 +195,13 @@ The `Prepare()` call front-loads all compilation. `Execute()` only creates a cur
 
 ---
 
+## Detailed Plans
+
+- **Core SQL**: See [PlanCoreStoredProcedures.md](PlanCoreStoredProcedures.md) for pipeline stage cost breakdown, `PreparedQuery` API design, and Phase 0 implementation details.
+- **Graph Traversal**: See [PlanGraphStoredProcedures.md](PlanGraphStoredProcedures.md) for `PreparedTraversal` API design, concurrency gains, and Phase 0 implementation details.
+
+---
+
 ## Implementation Phases
 
 ### Phase 1: `PreparedQuery` Type

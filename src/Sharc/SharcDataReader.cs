@@ -5,6 +5,8 @@ using System.Buffers;
 using System.Runtime.CompilerServices;
 
 using Sharc.Core;
+using Sharc.Core.BTree;
+using Sharc.Core.IO;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 using Sharc.Core.Query;
@@ -30,6 +32,12 @@ namespace Sharc;
 public sealed class SharcDataReader : IDisposable
 {
     private readonly IBTreeCursor? _cursor;
+
+    // Concrete cursor reference for devirtualization — the JIT emits direct calls
+    // for sealed class methods, eliminating interface dispatch overhead (~5 ns/call).
+    // Set once in constructor; null for non-BTreeCursor cursors (IndexSeek, etc.)
+    private readonly BTreeCursor<CachedPageSource>? _btreeCachedCursor;
+    private readonly BTreeCursor<MemoryPageSource>? _btreeMemoryCursor;
     private readonly IRecordDecoder? _recordDecoder;
     private readonly IReadOnlyList<ColumnInfo>? _columns;
     private readonly int[]? _projection;
@@ -40,7 +48,10 @@ public sealed class SharcDataReader : IDisposable
     private readonly int[]? _physicalOrdinals;
     private ColumnValue[]? _currentRow;
     private ColumnValue[]? _reusableBuffer;
-    private bool _disposed;
+    private ScanMode _scanMode;
+
+    // Reuse support: when owned by PreparedQuery, Dispose() resets state instead of releasing resources.
+    private bool _isReusable;
 
     // Index seek support
     private readonly IBTreeReader? _bTreeReader;
@@ -50,9 +61,9 @@ public sealed class SharcDataReader : IDisposable
     private readonly ResolvedFilter[]? _filters;
 
     // Byte-level filter support (FilterStar path)
-    private readonly IFilterNode? _filterNode;
-    private readonly FilterNode? _concreteFilterNode;
-    private readonly long[]? _filterSerialTypes;
+    private IFilterNode? _filterNode;
+    private FilterNode? _concreteFilterNode;
+    private long[]? _filterSerialTypes;
     private int _filterBodyOffset;
     private int _filterColCount;
 
@@ -87,6 +98,19 @@ public sealed class SharcDataReader : IDisposable
     private readonly IndexSet? _dedupRightIndex;
     private readonly IndexSet? _dedupSeen;
 
+    /// <summary>
+    /// Pre-resolved scan mode for hot Read() dispatch. Set once in the constructor
+    /// (or ResetForReuse) based on cursor type. Eliminates 6+ branch checks per
+    /// Read() call by routing directly to a devirtualized generic scan method.
+    /// </summary>
+    private enum ScanMode : byte
+    {
+        Default,        // Composite/dedup/concat/materialized/interface — existing cascade
+        TypedCached,    // BTreeCursor<CachedPageSource> — devirtualized via generic specialization
+        TypedMemory,    // BTreeCursor<MemoryPageSource> — devirtualized via generic specialization
+        Disposed,       // Reader has been disposed — Read() throws without field check
+    }
+
     internal readonly record struct CursorReaderConfig
     {
         public required IReadOnlyList<ColumnInfo> Columns { get; init; }
@@ -114,6 +138,12 @@ public sealed class SharcDataReader : IDisposable
         _filterNode = config.FilterNode;
         _concreteFilterNode = config.FilterNode as FilterNode;
         _columnCount = columns.Count;
+
+        // Devirtualize cursor: store concrete reference for direct dispatch in Read()
+        if (cursor is BTreeCursor<CachedPageSource> cc)
+            _btreeCachedCursor = cc;
+        else if (cursor is BTreeCursor<MemoryPageSource> mc)
+            _btreeMemoryCursor = mc;
 
         // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
         // When merged columns exist, buffers must be sized to physical column count.
@@ -189,6 +219,8 @@ public sealed class SharcDataReader : IDisposable
                 break;
             }
         }
+
+        _scanMode = ResolveScanMode();
     }
 
     /// <summary>
@@ -308,13 +340,13 @@ public sealed class SharcDataReader : IDisposable
     /// <returns>True if an exact match was found; false otherwise.</returns>
     public bool Seek(long rowId)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_scanMode == ScanMode.Disposed, this);
 
         bool found = _cursor!.Seek(rowId);
 
         if (found)
         {
-            DecodeCurrentRow();
+            DecodeCurrentRow(_cursor!.Payload);
         }
         else
         {
@@ -336,7 +368,7 @@ public sealed class SharcDataReader : IDisposable
     /// <exception cref="ArgumentException">The index was not found or the reader was not created with index support.</exception>
     public bool SeekIndex(string indexName, params object[] keyValues)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_scanMode == ScanMode.Disposed, this);
 
         if (_bTreeReader == null || _tableIndexes == null)
             throw new ArgumentException("Reader was not created with index support.");
@@ -430,14 +462,42 @@ public sealed class SharcDataReader : IDisposable
     }
 
     /// <summary>
+    /// Resolves the optimal scan mode based on cursor type.
+    /// Called once from the constructor and on each <see cref="ResetForReuse"/>.
+    /// All BTreeCursor paths get devirtualized dispatch; filter handling stays in ProcessRow.
+    /// </summary>
+    private ScanMode ResolveScanMode()
+    {
+        if (_btreeCachedCursor != null) return ScanMode.TypedCached;
+        if (_btreeMemoryCursor != null) return ScanMode.TypedMemory;
+        return ScanMode.Default;
+    }
+
+    /// <summary>
     /// Advances the reader to the next row.
     /// </summary>
     /// <returns>True if there is another row; false if the end has been reached.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Read()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Hot scan mode: single switch dispatch replaces 7+ branch checks per call
+        // (ObjectDisposedException + 6 mode null checks). ScanMode is pre-resolved
+        // in constructor/ResetForReuse; Disposed state is encoded as a case.
+        return _scanMode switch
+        {
+            ScanMode.TypedCached => ScanTyped(_btreeCachedCursor!),
+            ScanMode.TypedMemory => ScanTyped(_btreeMemoryCursor!),
+            ScanMode.Disposed => throw new ObjectDisposedException(GetType().FullName),
+            _ => ReadDefault(),
+        };
+    }
 
+    /// <summary>
+    /// Default scan path for composite modes (dedup, concat, materialized) and
+    /// non-optimized cursor types. Contains the original branch cascade.
+    /// </summary>
+    private bool ReadDefault()
+    {
         // Dedup streaming mode: filter rows by index
         if (_dedupUnderlying != null)
         {
@@ -483,46 +543,98 @@ public sealed class SharcDataReader : IDisposable
             return _queryValueEnumerator.MoveNext();
         }
 
-        while (_cursor!.MoveNext())
+        // Devirtualized scan with filter dispatch
+        if (_btreeCachedCursor != null)
+            return ScanTyped(_btreeCachedCursor);
+        if (_btreeMemoryCursor != null)
+            return ScanTyped(_btreeMemoryCursor);
+        return ScanInterface();
+    }
+
+    /// <summary>
+    /// Typed scan loop: all cursor calls (MoveNext, Payload, RowId) are direct calls
+    /// because <c>BTreeCursor&lt;T&gt;</c> is sealed. Eliminates ~4 interface dispatches per row.
+    /// </summary>
+    private bool ScanTyped<TPageSource>(BTreeCursor<TPageSource> cursor)
+        where TPageSource : class, IPageSource
+    {
+        while (cursor.MoveNext())
         {
-            // ── FilterStar byte-level path: evaluate raw record before decoding ──
-            if (_filterNode != null)
-            {
-                _filterColCount = _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _filterSerialTypes!, out _filterBodyOffset);
-                int stCount = Math.Min(_filterColCount, _filterSerialTypes!.Length);
-
-                if (_concreteFilterNode != null)
-                {
-                    if (!_concreteFilterNode.Evaluate(_cursor.Payload,
-                        _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, _cursor.RowId))
-                        continue;
-                }
-                else if (!_filterNode.Evaluate(_cursor.Payload,
-                    _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, _cursor.RowId))
-                    continue;
-
-                DecodeCurrentRow();
+            if (ProcessRow(cursor.Payload, cursor.RowId))
                 return true;
-            }
-
-            // ── Zero-Allocation Filter Check ──
-            // Evaluate filters against raw serial types/bytes before allocating managed objects.
-            // Pushdown to RecordDecoder for zero-allocation check
-            if (_filters != null && _filters.Length > 0 &&
-                !_recordDecoder!.Matches(_cursor!.Payload, _filters, _cursor.RowId, _rowidAliasOrdinal))
-            {
-                continue; // Skip row without decoding
-            }
-
-            // ── Legacy SharcFilter path ──
-            DecodeCurrentRow();
-
-            return true;
         }
-
         _currentRow = null;
         _lazyMode = false;
         return false;
+    }
+
+    /// <summary>
+    /// Interface-dispatch scan loop: fallback for non-BTreeCursor cursor types
+    /// (IndexSeekCursor, WithoutRowIdCursorAdapter, etc.)
+    /// </summary>
+    private bool ScanInterface()
+    {
+        while (_cursor!.MoveNext())
+        {
+            if (ProcessRow(_cursor.Payload, _cursor.RowId))
+                return true;
+        }
+        _currentRow = null;
+        _lazyMode = false;
+        return false;
+    }
+
+    /// <summary>
+    /// Shared per-row logic: filter evaluation and row decode.
+    /// Called from both <see cref="ScanTyped{TPageSource}"/> and <see cref="ScanInterface"/>,
+    /// receiving devirtualized payload/rowId from the caller.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
+    {
+        // ── Hot path: concrete FilterNode — write to _serialTypes directly (zero Array.Copy) ──
+        if (_concreteFilterNode != null)
+        {
+            var st = _serialTypes!;
+            var decoder = _recordDecoder!;
+            int colCount = decoder.ReadSerialTypes(payload, st, out int bodyOffset);
+            int stCount = Math.Min(colCount, st.Length);
+
+            if (!_concreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
+                return false;
+
+            _currentBodyOffset = bodyOffset;
+            int cols = Math.Min(_physicalColumnCount, st.Length);
+            decoder.ComputeColumnOffsets(st.AsSpan(0, cols), cols, bodyOffset, _columnOffsets.AsSpan(0, cols));
+            _decodedGeneration++;
+            _lazyMode = true;
+            _currentRow = _reusableBuffer;
+            return true;
+        }
+
+        // ── Cold path: interface IFilterNode (non-concrete) ──
+        if (_filterNode != null)
+        {
+            _filterColCount = _recordDecoder!.ReadSerialTypes(payload, _filterSerialTypes!, out _filterBodyOffset);
+            int stCount = Math.Min(_filterColCount, _filterSerialTypes!.Length);
+
+            if (!_filterNode.Evaluate(payload,
+                _filterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, rowId))
+                return false;
+
+            DecodeCurrentRow(payload);
+            return true;
+        }
+
+        // ── Legacy ResolvedFilter path ──
+        if (_filters != null && _filters.Length > 0 &&
+            !_recordDecoder!.Matches(payload, _filters, rowId, _rowidAliasOrdinal))
+        {
+            return false;
+        }
+
+        DecodeCurrentRow(payload);
+        return true;
     }
 
     /// <summary>
@@ -553,30 +665,27 @@ public sealed class SharcDataReader : IDisposable
     /// <summary>
     /// Prepares the current row for reading by parsing its header and precomputing column offsets.
     /// Does NOT decode body values immediately (Lazy Decoding).
+    /// Accepts the payload span directly to avoid interface dispatch through <c>_cursor.Payload</c>.
     /// </summary>
-    private void DecodeCurrentRow()
+    private void DecodeCurrentRow(ReadOnlySpan<byte> payload)
     {
-        // Always lazy decode: parse serial type headers only.
-        // Column values are decoded on demand by Get*() calls.
-        // This avoids allocating strings for columns never accessed.
         if (_filterNode != null)
         {
-            // Reuse the pre-parsed serial types from the filter step
+            // Reuse the pre-parsed serial types from the filter step.
+            // Both arrays are Rent(_physicalColumnCount) — same capacity.
             int copyCount = Math.Min(_filterColCount, _serialTypes!.Length);
             Array.Copy(_filterSerialTypes!, _serialTypes, copyCount);
             _currentBodyOffset = _filterBodyOffset;
         }
         else
         {
-            _recordDecoder!.ReadSerialTypes(_cursor!.Payload, _serialTypes!, out _currentBodyOffset);
+            _recordDecoder!.ReadSerialTypes(payload, _serialTypes!, out _currentBodyOffset);
         }
 
         // Precompute cumulative column offsets — O(K) once per row.
-        // Eliminates O(K) per-access offset recalculation (O(K²) total for full-row access).
         int colCount = Math.Min(_physicalColumnCount, _serialTypes!.Length);
         _recordDecoder!.ComputeColumnOffsets(_serialTypes.AsSpan(0, colCount), colCount, _currentBodyOffset, _columnOffsets.AsSpan(0, colCount));
 
-        // Increment generation instead of Array.Clear — O(1) vs O(N)
         _decodedGeneration++;
         _lazyMode = true;
         _currentRow = _reusableBuffer;
@@ -1139,7 +1248,7 @@ public sealed class SharcDataReader : IDisposable
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Append(ReadOnlySpan<byte> data)
+        public void Append(scoped ReadOnlySpan<byte> data)
         {
             _byteCount += data.Length;
             for (int i = 0; i < data.Length; i++)
@@ -1150,22 +1259,27 @@ public sealed class SharcDataReader : IDisposable
         }
 
         /// <summary>
-        /// Hashes a string's UTF-16 character data directly — two bytes per char,
-        /// zero allocation. Equivalent to Append(MemoryMarshal.AsBytes(s.AsSpan()))
-        /// without requiring System.Runtime.InteropServices.
+        /// Hashes a string as UTF-8 bytes — matches the cursor path which hashes
+        /// raw UTF-8 payload bytes directly from the SQLite record. Required for
+        /// correct UNION/EXCEPT/INTERSECT dedup when mixing materialized (QueryValue)
+        /// and cursor-backed rows.
         /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AppendString(string s)
         {
-            _byteCount += s.Length * 2;
-            for (int i = 0; i < s.Length; i++)
+            // Short strings: stackalloc avoids allocation (128 chars * 3 bytes/char = 384 max)
+            if (s.Length <= 128)
             {
-                ulong lo = (byte)s[i];
-                ulong hi = (byte)(s[i] >> 8);
-                _hashLo ^= lo; _hashLo *= FnvPrime;
-                _hashHi ^= lo; _hashHi *= FnvPrime2;
-                _hashLo ^= hi; _hashLo *= FnvPrime;
-                _hashHi ^= hi; _hashHi *= FnvPrime2;
+                Span<byte> utf8 = stackalloc byte[384];
+                int written = System.Text.Encoding.UTF8.GetBytes(s, utf8);
+                Append(utf8.Slice(0, written));
+            }
+            else
+            {
+                byte[] rented = ArrayPool<byte>.Shared.Rent(
+                    System.Text.Encoding.UTF8.GetMaxByteCount(s.Length));
+                int written = System.Text.Encoding.UTF8.GetBytes(s, rented);
+                Append(rented.AsSpan(0, written));
+                ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
@@ -1236,11 +1350,70 @@ public sealed class SharcDataReader : IDisposable
         public override int GetHashCode() => HashCode.Combine(Lo, Hi);
     }
 
+    // ── Reuse Support (PreparedQuery cursor+reader caching) ─────────
+
+    /// <summary>
+    /// Marks this reader as owned by a PreparedQuery. When reusable,
+    /// Dispose resets traversal state instead of releasing resources,
+    /// allowing the same cursor + ArrayPool buffers to be reused across Execute() calls.
+    /// </summary>
+    internal void MarkReusable() => _isReusable = true;
+
+    /// <summary>
+    /// Resets the reader for another iteration pass. Calls <see cref="IBTreeCursor.Reset"/>
+    /// on the underlying cursor and clears all per-scan state. ArrayPool buffers and
+    /// pre-computed metadata (projection, merged columns, rowid alias) are preserved.
+    /// </summary>
+    /// <param name="filterNode">The filter node for this execution (may differ for parameterized queries).</param>
+    internal void ResetForReuse(IFilterNode? filterNode)
+    {
+        _cursor!.Reset();
+
+        // Update filter (may change for parameterized queries)
+        _filterNode = filterNode;
+        _concreteFilterNode = filterNode as FilterNode;
+
+        // Allocate filter serial types buffer on first filtered reuse if not already rented
+        if (filterNode != null && _filterSerialTypes == null)
+        {
+            _filterSerialTypes = ArrayPool<long>.Shared.Rent(_physicalColumnCount);
+            _filterSerialTypes.AsSpan(0, _physicalColumnCount).Clear();
+        }
+
+        // Reset per-scan state
+        _currentRow = null;
+        _lazyMode = false;
+        _decodedGeneration++;
+        _cachedColumnNames = null;
+
+        // Recompute scan mode (filter may change for parameterized queries)
+        _scanMode = ResolveScanMode();
+    }
+
+    /// <summary>
+    /// Performs actual resource release. Called by PreparedQuery.Dispose
+    /// when the owning handle is destroyed.
+    /// </summary>
+    internal void DisposeForReal()
+    {
+        _isReusable = false;
+        _scanMode = ScanMode.Default; // Allow Dispose() to run
+        Dispose();
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (_scanMode == ScanMode.Disposed) return;
+        _scanMode = ScanMode.Disposed;
+
+        // Reusable readers: keep cursor and ArrayPool buffers alive for next Execute()
+        if (_isReusable)
+        {
+            _currentRow = null;
+            _lazyMode = false;
+            return;
+        }
 
         _dedupUnderlying?.Dispose();
         _dedupSeen?.Dispose();
@@ -1326,7 +1499,7 @@ internal sealed class IndexSet : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void EscapeSentinel(ref ulong lo, ref ulong hi)
     {
-        if (lo == 0 & hi == 0) lo = 1;
+        if (lo == 0 & hi == 0) { lo = 1; hi = 1; }
     }
 
     /// <summary>

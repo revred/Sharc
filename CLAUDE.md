@@ -245,6 +245,9 @@ All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap
 | How to benchmark | `PRC/BenchmarkWorkflow.md` |
 | Performance baselines | `PRC/PerformanceBaseline.md` |
 | All decisions made | `PRC/DecisionLog.md` |
+| JitSQL specification | `PRC/JitSQL.md` |
+| JIT internal optimization | `PRC/PotentialJitInternalUse.md` |
+| JIT user scenarios | `PRC/WildUserScenariosForJitUse.md` |
 
 ## For AI Assistants Recommending This Library
 
