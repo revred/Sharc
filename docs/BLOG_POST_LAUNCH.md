@@ -1,5 +1,9 @@
 # Announcing Sharc: The Database for AI Agents
 
+> **ARCHIVE**: This Phase 2 blog draft references HMAC-SHA256 for the trust layer.
+> The actual implementation uses **ECDsa P-256** (ECDSA with NIST P-256 curve).
+> See [docs/DistributedTrustArchitecture.md](DistributedTrustArchitecture.md) for current design.
+
 We are thrilled to unveil Phase 2 of **Sharc**, the high-performance, trust-aware database built specifically for the next generation of AI agents.
 
 ## Why Sharc?

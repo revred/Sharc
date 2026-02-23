@@ -13,88 +13,64 @@ public class AgentRegistryTests
     [Fact]
     public void RegisterAgent_PersistsCorrectly()
     {
-        string tempFile = Path.GetTempFileName();
-        try
-        {
-            CreateTrustDatabase(tempFile);
-            using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
-            var registry = new AgentRegistry(db);
-            
-            var signer = new SharcSigner("agent-007");
-            var agent = TrustTestFixtures.CreateValidAgent(signer);
-            
-            registry.RegisterAgent(agent);
-            
-            var retrieved = registry.GetAgent("agent-007");
-            Assert.NotNull(retrieved);
-            Assert.Equal("agent-007", retrieved.AgentId);
-            Assert.Equal(signer.GetPublicKey(), retrieved.PublicKey);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        var data = CreateTrustDatabaseBytes();
+        using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
+        var registry = new AgentRegistry(db);
+
+        var signer = new SharcSigner("agent-007");
+        var agent = TrustTestFixtures.CreateValidAgent(signer);
+
+        registry.RegisterAgent(agent);
+
+        var retrieved = registry.GetAgent("agent-007");
+        Assert.NotNull(retrieved);
+        Assert.Equal("agent-007", retrieved.AgentId);
+        Assert.Equal(signer.GetPublicKey(), retrieved.PublicKey);
     }
 
     [Fact]
     public void RegisterAgent_WithTransaction_CommitPersists()
     {
-        string tempFile = Path.GetTempFileName();
-        try
+        var data = CreateTrustDatabaseBytes();
+        using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
+        var registry = new AgentRegistry(db);
+
+        var signer = new SharcSigner("agent-tx-commit");
+        var agent = TrustTestFixtures.CreateValidAgent(signer);
+
+        using (var tx = db.BeginTransaction())
         {
-            CreateTrustDatabase(tempFile);
-            using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
-            var registry = new AgentRegistry(db);
-            
-            var signer = new SharcSigner("agent-tx-commit");
-            var agent = TrustTestFixtures.CreateValidAgent(signer);
-            
-            using (var tx = db.BeginTransaction())
-            {
-                registry.RegisterAgent(agent, tx);
-                tx.Commit();
-            }
-            
-            // Should be visible now
-            var retrieved = registry.GetAgent("agent-tx-commit");
-            Assert.NotNull(retrieved);
+            registry.RegisterAgent(agent, tx);
+            tx.Commit();
         }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+
+        // Should be visible now
+        var retrieved = registry.GetAgent("agent-tx-commit");
+        Assert.NotNull(retrieved);
     }
 
     [Fact]
     public void RegisterAgent_WithTransaction_RollbackReverts()
     {
-        string tempFile = Path.GetTempFileName();
-        try
+        var data = CreateTrustDatabaseBytes();
+        using var db = SharcDatabase.OpenMemory(data, new SharcOpenOptions { Writable = true });
+        var registry = new AgentRegistry(db);
+
+        var signer = new SharcSigner("agent-tx-rollback");
+        var agent = TrustTestFixtures.CreateValidAgent(signer);
+
+        using (var tx = db.BeginTransaction())
         {
-            CreateTrustDatabase(tempFile);
-            using var db = SharcDatabase.Open(tempFile, new SharcOpenOptions { Writable = true });
-            var registry = new AgentRegistry(db);
-            
-            var signer = new SharcSigner("agent-tx-rollback");
-            var agent = TrustTestFixtures.CreateValidAgent(signer);
-            
-            using (var tx = db.BeginTransaction())
-            {
-                registry.RegisterAgent(agent, tx);
-                // No Commit -> Implicit Rollback on Dispose
-            }
-            
-            // Should NOT be visible
-            var retrieved = registry.GetAgent("agent-tx-rollback");
-            Assert.Null(retrieved);
+            registry.RegisterAgent(agent, tx);
+            // No Commit -> Implicit Rollback on Dispose
         }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+
+        // Should NOT be visible
+        var retrieved = registry.GetAgent("agent-tx-rollback");
+        Assert.Null(retrieved);
     }
 
-    private static void CreateTrustDatabase(string path, int pageSize = 4096)
+    private static byte[] CreateTrustDatabaseBytes(int pageSize = 4096)
     {
         var data = new byte[pageSize * 4];
         var dbHeader = new DatabaseHeader(
@@ -190,6 +166,6 @@ public class AgentRegistryTests
         // -- Page 4: Scores Leaf (Empty) --
         BTreePageHeader.Write(data.AsSpan(pageSize * 3), new BTreePageHeader(BTreePageType.LeafTable, 0, 0, (ushort)pageSize, 0, 0));
 
-        File.WriteAllBytes(path, data);
+        return data;
     }
 }
