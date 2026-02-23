@@ -56,7 +56,67 @@ The infrastructure is 80% built. The stored procedure layer is the **missing 20%
 
 ---
 
-## Design: Core Stored Procedures
+## Phase 0: PreparedQuery Foundation (Implementing Now)
+
+The full stored procedure system (Phases 1-5 below) requires a compilation foundation. `PreparedQuery` is that foundation — it wraps the existing `CachedReaderInfo` pattern as a public API.
+
+### Pipeline Stage Cost Elimination
+
+| Stage | Method | Est. Cost | PreparedQuery | Eliminated? |
+| :--- | :--- | :--- | :--- | :--- |
+| Schema check | `EnsureSchemaUpToDate()` | ~1-3 us | `SchemaCookie` uint compare | Partial (~0.5 us) |
+| Plan cache | `QueryPlanCache.GetOrCompilePlan()` | ~0.5-1 us | Skipped | Yes |
+| View resolve | `ViewResolver.ResolveViews()` | ~0.5-2 us | Resolved at prepare | Yes |
+| Reader cache | `_readerInfoCache` lookup | ~0.3-0.5 us | Captured in PreparedQuery | Yes |
+| Param cache | `_paramFilterCache` hash | ~0.3-1 us | Inline `Dictionary` | Partial |
+| Index select | `PredicateAnalyzer` + `IndexSelector` | ~1-3 us | Pre-computed `IndexSeekPlan` | Yes |
+| Cursor create | `CreateTableCursor()` | ~0.2-0.5 us | Same (unavoidable) | No |
+
+**Total per-call savings: 3-8 us.**
+
+### PreparedQuery Type
+
+```csharp
+public sealed class PreparedQuery : IDisposable
+{
+    internal readonly TableInfo Table;
+    internal readonly int[]? Projection;
+    internal readonly int RowidAliasOrdinal;
+    internal readonly IndexSeekPlan? PrecomputedIndexPlan;
+    internal readonly IFilterNode? StaticFilter;
+    internal readonly QueryIntent Intent;
+    internal readonly uint SchemaCookieAtPrepare;
+    internal readonly bool NeedsPostProcessing;
+    private Dictionary<long, IFilterNode>? _paramCache;
+
+    public SharcDataReader Execute(IReadOnlyDictionary<string, object>? parameters = null);
+    public void Dispose();
+}
+```
+
+**Location**: `src/Sharc/PreparedQuery.cs`
+**Factory**: `SharcDatabase.Prepare(string sharqQuery)`
+
+### Performance Targets
+
+| Operation | Current | Target | Delta |
+| :--- | :--- | :--- | :--- |
+| SELECT * (5K, 3 cols) | 105 us / 672 B | 100 us / 640 B | -5 us / -32 B |
+| WHERE filter (5K) | 298 us / 912 B | 290 us / 720 B | -8 us / -192 B |
+| Point lookup | 272 ns / 664 B | 255 ns / 640 B | -17 ns / -24 B |
+| Index seek (int, 3 rows) | 1.25 us / 1,456 B | 1.10 us / 1,400 B | -150 ns |
+
+### Scope
+
+- Simple SELECT/WHERE queries (non-compound, non-join)
+- Static and parameterized filters
+- Pre-computed index selection
+- Staleness detection via `SchemaCookie`
+- `NotSupportedException` for compound/Cote/JOIN (future phases)
+
+---
+
+## Design: Core Stored Procedures (Long-Term Vision)
 
 ### Core Concept
 

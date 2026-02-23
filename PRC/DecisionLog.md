@@ -4,6 +4,37 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-020: JitQuery View Support + JitSQL Design
+
+**Date**: 2026-02-22
+**Status**: Accepted — View support complete (28 tests), JitSQL specification drafted
+
+**Context**: JitQuery (ADR-018 era) was table-only. Users needed views as first-class citizens for composable analytics, tenant isolation, and layered filtering. Additionally, the growing query API surface (Query, Prepare, Jit, CreateReader) needed a coherence review to ensure each tier has a distinct purpose.
+
+**Decision**: Two-part work:
+
+1. **JitQuery View Support** (implemented):
+   - `db.Jit(view)` creates view-backed JitQuery (read-only)
+   - `db.Jit("viewName")` resolves registered views and auto-promotable SQLite views (tables take precedence)
+   - `jit.AsView("name", columns)` exports accumulated state as transient SharcView
+   - View-backed mutations throw `NotSupportedException`
+   - `ViewFilterBridge` uses resolver delegate pattern for both `IReadOnlyList<ColumnInfo>` and `string[]` overloads
+   - `SharcSchema.TryGetTable()` added for null-returning lookups
+   - `ViewResolver.TryResolveView()` resolves views without opening cursors
+
+2. **JitSQL Design** (specification):
+   - Three-tier query model: Tier 1 (SQL), Tier 2 (Prepared), Tier 3 (JitSQL)
+   - Each tier has a distinct purpose — no overlap
+   - `JIT SELECT ...` keyword planned as a bridge for SQL-native users wanting JIT speed
+   - Internal JIT opportunities identified: CoteExecutor row filtering (P0), CompoundQuery filter reuse (P1)
+   - Python binding specification drafted
+
+**Files created/modified**: `JitQuery.cs` (view-backed mode), `SharcDatabase.cs` (Jit overloads), `ViewFilterBridge.cs` (string[] overload), `ViewResolver.cs` (TryResolveView), `SchemaModels.cs` (TryGetTable), `JitViewTests.cs` (12 tests), `PRC/JitSQL.md`, `PRC/PotentialJitInternalUse.md`, `PRC/WildUserScenariosForJitUse.md`
+
+**Public API impact**: `SharcDatabase.Jit(SharcView)` overload added. `JitQuery.AsView()` method added. No existing API changed.
+
+---
+
 ## ADR-019: Generic Page Source Specialization — Eliminate Interface Dispatch
 
 **Date**: 2026-02-22
