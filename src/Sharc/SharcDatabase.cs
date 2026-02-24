@@ -291,6 +291,13 @@ public sealed class SharcDatabase : IDisposable
     public static SharcDatabase Create(string path) => SharcDatabaseFactory.Create(path);
 
     /// <summary>
+    /// Creates a new, empty Sharc database entirely in memory (no filesystem access).
+    /// Suitable for Blazor WASM and other environments without file I/O.
+    /// </summary>
+    /// <returns>An open database instance with Write mode enabled.</returns>
+    public static SharcDatabase CreateInMemory() => SharcDatabaseFactory.CreateInMemory();
+
+    /// <summary>
     /// Opens a SQLite database from a file path.
     /// </summary>
     /// <param name="path">Path to the SQLite database file.</param>

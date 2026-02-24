@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Security.Cryptography;
+using Sharc.Core.Trust;
 using Sharc.Crypto;
 
 namespace Sharc.Trust;
@@ -28,6 +29,9 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
 
     /// <inheritdoc />
     public string AgentId { get; }
+
+    /// <inheritdoc />
+    public SignatureAlgorithm Algorithm => SignatureAlgorithm.HmacSha256;
 
     /// <inheritdoc />
     public byte[] Sign(ReadOnlySpan<byte> data)
@@ -75,5 +79,22 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     public void Dispose()
     {
         _hmac.Dispose();
+    }
+    /// <inheritdoc />
+    public Task<byte[]> SignAsync(byte[] data)
+    {
+        return Task.FromResult(Sign(data));
+    }
+
+    /// <inheritdoc />
+    public Task<bool> VerifyAsync(byte[] data, byte[] signature)
+    {
+        return Task.FromResult(Verify(data, signature));
+    }
+
+    /// <inheritdoc />
+    public Task<byte[]> GetPublicKeyAsync()
+    {
+        return Task.FromResult(GetPublicKey());
     }
 }

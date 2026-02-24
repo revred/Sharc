@@ -1,0 +1,1489 @@
+@page "/simulator"
+@using System.Text.Json
+@using Sharc.Arena.Wasm.Models
+@using Sharc.Arena.Wasm.Services
+@inject IJSRuntime JS
+
+<PageTitle>Flight Simulator Trust Layer - Sharc</PageTitle>
+
+<div class="simulator-container">
+    <!-- Header -->
+    <header class="sim-header">
+        <div class="brand">
+            <span class="logo">SHARC</span>
+            <span class="system">TRUST LAYER AVIONICS</span>
+        </div>
+        <div class="status-panel">
+            <div class="status-indicator @(_isRunning ? "active" : "")"></div>
+            <span>@(_isRunning ? "SIMULATION RUNNING" : "STANDBY")</span>
+            <div class="scenario-badge">SCENARIO: @CurrentScenarioId / @TotalScenarios</div>
+            <div class="mode-indicator @(CurrentMode == AutoPilotMode.AutoPilot ? "mode-auto" : "mode-suggest")">
+                @(CurrentMode == AutoPilotMode.AutoPilot ? "A/P" : "SUG")
+            </div>
+            @if (_isInitialized && _arcManager != null)
+            {
+                var stats = _arcManager.GetStats();
+                <div class="arc-status">
+                    <span class="arc-badge arc-volatile" title="Telemetry (volatile)">TEL: @stats.TelemetryEntries</span>
+                    <span class="arc-badge arc-durable" title="Critical Events (OPFS)">CRT: @stats.CriticalEntries</span>
+                    <span class="arc-badge arc-durable" title="Agent Identity (OPFS)">AGT: @stats.AgentEntries</span>
+                    @if (_arcManager.AgentsRestoredFromOpfs || _arcManager.CriticalRestoredFromOpfs)
+                    {
+                        <span class="arc-badge arc-restored" title="Restored from prior OPFS session">RESUMED</span>
+                    }
+                </div>
+            }
+        </div>
+        <div class="controls">
+            @if (_isRunning)
+            {
+                <button class="btn-mode" @onclick="ToggleMode">
+                    @(CurrentMode == AutoPilotMode.Suggestive ? "ENGAGE A/P" : "DISENGAGE A/P")
+                </button>
+            }
+            @if (!_isRunning)
+            {
+                <button class="btn-start" @onclick="StartSimulation">ENGAGE AUTO-PILOT</button>
+                <button class="btn-clear" @onclick="ClearFlightData">CLEAR FLIGHT DATA</button>
+            }
+            else
+            {
+                <button class="btn-stop" @onclick="StopSimulation">MANUAL OVERRIDE</button>
+            }
+        </div>
+    </header>
+
+    <!-- Scenario Timeline -->
+    @if (_isRunning)
+    {
+        <div class="scenario-timeline">
+            @for (int i = 1; i <= TotalScenarios; i++)
+            {
+                var idx = i;
+                <div class="tl-dot @(idx < CurrentScenarioId ? "tl-done" : idx == CurrentScenarioId ? "tl-active" : "")">@idx</div>
+            }
+        </div>
+    }
+
+    <!-- Main Cockpit View / Panoramic Toggle -->
+    @if (!_showPanoramicView)
+    {
+    <main class="cockpit">
+
+        <!-- Left Display: Primary Flight Display (PFD) -->
+        <section class="display pfd glass-panel">
+            <h2 class="display-title">PRIMARY FLIGHT DISPLAY</h2>
+
+            <div class="pfd-body">
+                <div class="tape airspeed-tape">
+                    <div class="tape-label">SPD (KTS)</div>
+                    <div class="tape-value">@(CurrentSpeed.ToString("F0"))</div>
+                    <div class="tape-track"></div>
+                </div>
+
+                <div class="pfd-center">
+                    <div class="attitude-indicator">
+                        <!-- SVG Artificial Horizon -->
+                        <svg viewBox="0 0 200 200" class="horizon">
+                            <defs>
+                                <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#0284c7;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#7dd3fc;stop-opacity:1" />
+                                </linearGradient>
+                                <linearGradient id="gndGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#a16207;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#451a03;stop-opacity:1" />
+                                </linearGradient>
+                            </defs>
+                            <clipPath id="circle-clip">
+                                <circle cx="100" cy="100" r="95" />
+                            </clipPath>
+                            <g clip-path="url(#circle-clip)">
+                                <rect x="0" y="0" width="200" height="200" fill="url(#skyGrad)" />
+                                <g transform="translate(0, @(_pitchOffset)) rotate(@CurrentRoll, 100, 100)">
+                                    <rect x="-100" y="100" width="400" height="200" fill="url(#gndGrad)" />
+                                    <line x1="-100" y1="100" x2="300" y2="100" stroke="white" stroke-width="2" />
+                                    @for(int i = -4; i <= 4; i++) {
+                                        if(i != 0) {
+                                            <line x1="80" y1="@(100 - i*20)" x2="120" y2="@(100 - i*20)" stroke="rgba(255,255,255,0.8)" stroke-width="1.5" />
+                                            <text><tspan x="62" y="@(104 - i*20)" fill="white" font-size="10" font-weight="bold" text-anchor="end">@(Math.Abs(i * 10))</tspan></text>
+                                            <text><tspan x="138" y="@(104 - i*20)" fill="white" font-size="10" font-weight="bold" text-anchor="start">@(Math.Abs(i * 10))</tspan></text>
+                                        }
+                                    }
+                                </g>
+                            </g>
+                            <!-- Inner shadow bezel -->
+                            <circle cx="100" cy="100" r="95" fill="none" stroke="#0f172a" stroke-width="5" opacity="0.8" />
+                            <circle cx="100" cy="100" r="95" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <path d="M 75,100 L 95,100 L 100,105 L 105,100 L 125,100" stroke="#facc15" stroke-width="4" fill="none" filter="drop-shadow(0 2px 2px rgba(0,0,0,0.8))" />
+                            <circle cx="100" cy="100" r="2" fill="#facc15" />
+                        </svg>
+                    </div>
+
+                    <!-- Heading Compass -->
+                    <div class="heading-indicator">
+                        <svg viewBox="0 0 120 120" class="compass-svg">
+                            <circle cx="60" cy="60" r="55" fill="none" stroke="#334155" stroke-width="2" />
+                            <g transform="rotate(@(-CurrentHeading), 60, 60)">
+                                <text x="60" y="18" text-anchor="middle" fill="#ef4444" font-size="12" font-weight="bold">N</text>
+                                <text x="105" y="64" text-anchor="middle" fill="white" font-size="10">E</text>
+                                <text x="60" y="110" text-anchor="middle" fill="white" font-size="10">S</text>
+                                <text x="15" y="64" text-anchor="middle" fill="white" font-size="10">W</text>
+                                @for (int d = 0; d < 360; d += 30)
+                                {
+                                    var deg = d;
+                                    <line x1="60" y1="8" x2="60" y2="@(deg % 90 == 0 ? 14 : 11)"
+                                          stroke="white" stroke-width="1"
+                                          transform="rotate(@deg, 60, 60)" />
+                                }
+                            </g>
+                            <!-- Lubber line (fixed) -->
+                            <polygon points="60,6 56,0 64,0" fill="#F1C40F" />
+                        </svg>
+                        <div class="hdg-readout">HDG @(CurrentHeading.ToString("F0"))°</div>
+                    </div>
+                </div>
+
+                <div class="tape-right">
+                    <div class="tape altimeter-tape">
+                        <div class="tape-label">ALT (FT)</div>
+                        <div class="tape-value">@(CurrentAltitude.ToString("F0"))</div>
+                        <div class="tape-track"></div>
+                    </div>
+                    <div class="vsi-gauge">
+                        <div class="tape-label">VSI (FPM)</div>
+                        <div class="vsi-value @(Math.Abs(CurrentVerticalSpeed) > 2000 ? "warn-text" : "")">
+                            @(CurrentVerticalSpeed >= 0 ? "+" : "")@(CurrentVerticalSpeed.ToString("F0"))
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Center Display: Engine / Warning (EICAS) -->
+        <section class="display eicas glass-panel">
+            <h2 class="display-title">EICAS & SENSORS</h2>
+
+            <div class="engine-gauges">
+                <div class="engine">
+                    <div>L-ENG TEMP</div>
+                    <div class="gauge-value @(LeftEngineTemp > 900 ? "warn-text" : "")">@(LeftEngineTemp.ToString("F0")) °C</div>
+                </div>
+                <div class="engine">
+                    <div>R-ENG TEMP</div>
+                    <div class="gauge-value @(RightEngineTemp > 900 ? "warn-text" : "")">@(RightEngineTemp.ToString("F0")) °C</div>
+                </div>
+            </div>
+
+            <!-- Throttle & Flap Controls -->
+            <div class="engine-controls">
+                <div class="control-row">
+                    <span class="ctrl-label">THR</span>
+                    <div class="ctrl-bar">
+                        <div class="ctrl-fill thr-fill" style="width: @((CurrentThrottle * 100).ToString("F0"))%"></div>
+                    </div>
+                    <span class="ctrl-val">@((CurrentThrottle * 100).ToString("F0"))%</span>
+                </div>
+                <div class="control-row">
+                    <span class="ctrl-label">FLAP</span>
+                    <div class="ctrl-bar">
+                        <div class="ctrl-fill flap-fill" style="width: @(Math.Min(CurrentFlapPosition / 40.0 * 100, 100).ToString("F0"))%"></div>
+                    </div>
+                    <span class="ctrl-val">@(CurrentFlapPosition == 0 ? "UP" : CurrentFlapPosition.ToString("F0") + "°")</span>
+                </div>
+            </div>
+
+            <div class="warnings-box">
+                @if (ActiveWarnings.Any())
+                {
+                    <ul class="warning-list">
+                    @foreach (var w in ActiveWarnings)
+                    {
+                        <li class="warn-item blink">⚠ @w</li>
+                    }
+                    </ul>
+                }
+                else
+                {
+                    <div class="outside-view-wrapper" @onclick="TogglePanoramic" style="cursor: pointer;" title="Expand to Panoramic View">
+                        <!-- Simulated 3D Environment -->
+                        <div class="outside-camera" style="transform: rotateZ(@((-CurrentRoll).ToString("F1"))deg) rotateX(@(CurrentPitch.ToString("F1"))deg);">
+                            <div class="scene-sky"></div>
+                            <div class="scene-ground">
+                                <div class="scene-grid"></div>
+                            </div>
+                        </div>
+                        <div class="ok-text overlay-ok">SYSTEMS NORMAL<br/><small style="font-size:0.6rem;color:#94a3b8;">CLICK FOR PANORAMIC / SENSOR BLOBS</small></div>
+                    </div>
+                }
+            </div>
+
+            <div class="scenario-details">
+                <div class="scenario-name">@ScenarioName</div>
+                <div class="scenario-desc">@ScenarioDescription</div>
+            </div>
+        </section>
+
+        <!-- Right Display: Trust Ledger Console -->
+        <section class="display ledger glass-panel">
+            <h2 class="display-title">SHARC TRUST LEDGER</h2>
+
+            <!-- Agent Reputation Cards -->
+            <div class="agent-cards">
+                @foreach (var w in _workers)
+                {
+                    var rep = _autoPilot?.GetReputation(w.AgentId) ?? w.ReputationScore;
+                    var repClass = rep >= 60 ? "rep-good" : rep >= 30 ? "rep-warn" : "rep-bad";
+                    <div class="agent-card @repClass">
+                        <div class="agent-card-id">@w.AgentId.Replace("SENSOR-", "")</div>
+                        <div class="rep-bar-container">
+                            <div class="rep-bar-fill" style="width: @rep%"></div>
+                        </div>
+                        <div class="agent-card-score">@rep</div>
+                    </div>
+                }
+            </div>
+
+            <div class="agent-stats">
+                <div class="stat">TPS: <strong>@Tps</strong></div>
+            </div>
+
+            <div class="ledger-console">
+                @foreach(var entry in LedgerEntries)
+                {
+                    <div class="ledger-row @GetLedgerClass(entry.Status)">
+                        <span class="time">[@entry.Timestamp]</span>
+                        <span class="agent">@entry.AgentId.Replace("SENSOR-", "") (R:@entry.Reputation)</span>
+                        <span class="action">@entry.Action</span>
+                        @if(entry.Status != TrustStatus.Valid) {
+                            <span class="status-msg">→ @entry.StatusMessage</span>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+    </main>
+    }
+    else
+    {
+        <main class="panoramic-view">
+            <div class="outside-view-wrapper pano-wrapper">
+                <div class="outside-camera" style="transform: rotateZ(@((-CurrentRoll).ToString("F1"))deg) rotateX(@(CurrentPitch.ToString("F1"))deg);">
+                    <div class="scene-sky"></div>
+                    <div class="scene-ground">
+                        <div class="scene-grid"></div>
+                    </div>
+                </div>
+
+                <div class="pano-overlay">
+                    <!-- Top bar: title + return button -->
+                    <div class="pano-header">
+                        <h2>PANORAMIC SENSOR VIEW // DISTRIBUTED ARC TELEMETRY</h2>
+                        <button class="btn-stop" @onclick="TogglePanoramic">RETURN TO COCKPIT</button>
+                    </div>
+
+                    <!-- Flight telemetry HUD (top-right) -->
+                    <div class="pano-telemetry">
+                        <div>SPD: @(CurrentSpeed.ToString("F0")) KTS</div>
+                        <div>ALT: @(CurrentAltitude.ToString("F0")) FT</div>
+                        <div>HDG: @(CurrentHeading.ToString("F0"))&deg;</div>
+                        <div>VS: @(CurrentVerticalSpeed >= 0 ? "+" : "")@(CurrentVerticalSpeed.ToString("F0")) FPM</div>
+                        <div>PITCH: @(CurrentPitch.ToString("F1"))&deg;</div>
+                        <div>ROLL: @(CurrentRoll.ToString("F1"))&deg;</div>
+                        <div class="pano-divider"></div>
+                        <div>L-ENG: <span class="@(LeftEngineTemp > 900 ? "warn-text" : "")">@(LeftEngineTemp.ToString("F0"))&deg;C</span></div>
+                        <div>R-ENG: <span class="@(RightEngineTemp > 900 ? "warn-text" : "")">@(RightEngineTemp.ToString("F0"))&deg;C</span></div>
+                        <div>THR: @((CurrentThrottle * 100).ToString("F0"))%</div>
+                        <div>FLAP: @(CurrentFlapPosition == 0 ? "UP" : CurrentFlapPosition.ToString("F0") + "&deg;")</div>
+                    </div>
+
+                    <!-- Bottom: sensor agent feeds + arc status -->
+                    <div class="pano-bottom">
+                        <!-- Per-agent sensor feeds -->
+                        <div class="sensor-blobs">
+                            @foreach (var w in _workers)
+                            {
+                                var rep = _autoPilot?.GetReputation(w.AgentId) ?? w.ReputationScore;
+                                var repClass = rep >= 60 ? "blob-good" : rep >= 30 ? "blob-warn" : "blob-bad";
+                                <div class="blob-feed @repClass">
+                                    <div class="blob-title">@w.AgentId</div>
+                                    <div class="blob-rep">
+                                        <span class="blob-rep-label">TRUST</span>
+                                        <div class="blob-rep-bar"><div class="blob-rep-fill" style="width: @rep%"></div></div>
+                                        <span class="blob-rep-val">@rep</span>
+                                    </div>
+                                    <div class="blob-data">
+                                        @if (w.IsReliable)
+                                        {
+                                            <span>NOMINAL</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="warn-text">UNRELIABLE</span>
+                                        }
+                                        <span class="blob-auth">AUTH: @w.AuthorityCeiling</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Arc distributed ledger status -->
+                        @if (_isInitialized && _arcManager != null)
+                        {
+                            var stats = _arcManager.GetStats();
+                            <div class="pano-arc-status">
+                                <div class="pano-arc-title">DISTRIBUTED ARC LEDGER</div>
+                                <div class="pano-arc-grid">
+                                    <div class="pano-arc-card arc-volatile">
+                                        <div class="pano-arc-name">telemetry.arc</div>
+                                        <div class="pano-arc-type">VOLATILE</div>
+                                        <div class="pano-arc-count">@stats.TelemetryEntries</div>
+                                        <div class="pano-arc-label">entries</div>
+                                    </div>
+                                    <div class="pano-arc-card arc-durable">
+                                        <div class="pano-arc-name">critical_events.arc</div>
+                                        <div class="pano-arc-type">OPFS-DURABLE</div>
+                                        <div class="pano-arc-count">@stats.CriticalEntries</div>
+                                        <div class="pano-arc-label">entries</div>
+                                    </div>
+                                    <div class="pano-arc-card arc-durable">
+                                        <div class="pano-arc-name">agents.arc</div>
+                                        <div class="pano-arc-type">OPFS-DURABLE</div>
+                                        <div class="pano-arc-count">@stats.AgentEntries</div>
+                                        <div class="pano-arc-label">entries</div>
+                                    </div>
+                                </div>
+                                <div class="pano-arc-footer">
+                                    @if (_arcManager.AgentsRestoredFromOpfs || _arcManager.CriticalRestoredFromOpfs)
+                                    {
+                                        <span class="arc-badge arc-restored">RESUMED FROM PRIOR SESSION</span>
+                                    }
+                                    <span class="pano-arc-opfs">OPFS: @(_arcManager.OpfsAvailable ? "AVAILABLE" : "UNAVAILABLE")</span>
+                                    <span class="pano-arc-integrity">CHAIN: @(_arcManager.TelemetryArc.VerifyIntegrity() && _arcManager.CriticalArc.VerifyIntegrity() ? "VERIFIED" : "DEGRADED")</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </main>
+    }
+</div>
+
+<style>
+/* 
+================================================================================
+HYPER-REALISTIC AVIONICS GLASS COCKPIT THEME
+================================================================================
+*/
+@@import url('https://fonts.googleapis.com/css2?family=Jura:wght@400;600;700&family=Share+Tech+Mono&display=swap');
+
+:root {
+    --bg-dark: #020617; /* Deepest slate */
+    --panel-bg: rgba(15, 23, 42, 0.4);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --border-glow: rgba(56, 189, 248, 0.2);
+    
+    --text-primary: #f8fafc;
+    --text-muted: #64748b;
+    
+    /* Avionics Phosphor Accents */
+    --accent-blue: #0ea5e9;
+    --accent-blue-glow: rgba(14, 165, 233, 0.6);
+    --accent-red: #ef4444;
+    --accent-red-glow: rgba(239, 68, 68, 0.6);
+    --accent-green: #10b981;
+    --accent-green-glow: rgba(16, 185, 129, 0.6);
+    --accent-amber: #f59e0b;
+    --accent-amber-glow: rgba(245, 158, 11, 0.6);
+}
+
+body {
+    background-color: #000;
+    background-image: 
+        radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.8) 0%, #000 100%),
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 100% 100%, 30px 30px, 30px 30px;
+}
+
+.simulator-container {
+    color: var(--text-primary);
+    min-height: 100vh;
+    font-family: 'Jura', sans-serif;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    box-shadow: 
+        0 8px 32px 0 rgba(0, 0, 0, 0.8),
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.sim-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2.5rem;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 0.8) 100%);
+    border-bottom: 1px solid var(--border-glow);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    z-index: 10;
+}
+
+.brand .logo {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-shadow: 0 0 12px var(--accent-blue-glow);
+    margin-right: 15px;
+    letter-spacing: 2px;
+}
+.brand .system {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    letter-spacing: 4px;
+}
+
+.status-panel {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 8px 24px;
+    background: rgba(0,0,0,0.4);
+    border-radius: 30px;
+    border: 1px solid rgba(255,255,255,0.05);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.status-indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--text-muted);
+    transition: all 0.3s ease;
+}
+.status-indicator.active {
+    background-color: var(--accent-green);
+    box-shadow: 0 0 12px var(--accent-green-glow);
+}
+
+.scenario-badge {
+    color: var(--accent-blue);
+    text-shadow: 0 0 8px var(--accent-blue-glow);
+}
+
+.mode-indicator {
+    padding: 4px 16px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-shadow: 0 0 8px currentColor;
+    border: 1px solid currentColor;
+}
+.mode-suggest {
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.1);
+    box-shadow: inset 0 0 8px rgba(16, 185, 129, 0.2);
+}
+.mode-auto {
+    color: var(--accent-blue);
+    background: rgba(14, 165, 233, 0.1);
+    box-shadow: inset 0 0 8px rgba(14, 165, 233, 0.2);
+    animation: pulse-mode 2s ease-in-out infinite;
+}
+
+@@keyframes pulse-mode {
+    0%, 100% { box-shadow: 0 0 8px var(--accent-blue-glow), inset 0 0 8px rgba(14, 165, 233, 0.2); }
+    50% { box-shadow: 0 0 24px var(--accent-blue-glow), inset 0 0 16px rgba(14, 165, 233, 0.4); }
+}
+
+.controls button {
+    font-family: 'Jura', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.controls button:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.2);
+}
+.controls button:active {
+    transform: translateY(1px);
+}
+
+.btn-start { background-color: var(--accent-green); color: #000; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; text-shadow: none; box-shadow: 0 0 12px var(--accent-green-glow); }
+.btn-stop { background-color: var(--accent-red); color: #fff; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 0 12px var(--accent-red-glow); }
+.btn-mode { background-color: var(--accent-blue); color: #000; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; margin-right: 12px; box-shadow: 0 0 12px var(--accent-blue-glow); }
+.btn-clear { background-color: #475569; color: #e2e8f0; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; margin-left: 12px; box-shadow: 0 0 8px rgba(71, 85, 105, 0.4); }
+.btn-clear:hover { background-color: #64748b; }
+
+/* Arc Status Badges */
+.arc-status {
+    display: flex;
+    gap: 8px;
+    margin-left: 12px;
+    align-items: center;
+}
+.arc-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 12px;
+    letter-spacing: 1px;
+}
+.arc-volatile {
+    color: var(--accent-blue);
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+    text-shadow: 0 0 6px var(--accent-blue-glow);
+}
+.arc-durable {
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    text-shadow: 0 0 6px var(--accent-green-glow);
+}
+.arc-restored {
+    color: var(--accent-amber);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    text-shadow: 0 0 6px var(--accent-amber-glow);
+    animation: pulse-restored 2s ease-in-out infinite;
+}
+@@keyframes pulse-restored {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Scenario Timeline */
+.scenario-timeline {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: linear-gradient(90deg, transparent, rgba(15, 23, 42, 0.8), transparent);
+}
+.tl-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: 'Share Tech Mono', monospace;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-muted);
+    transition: all 0.4s ease;
+}
+.tl-done {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    text-shadow: 0 0 8px var(--accent-green-glow);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+}
+.tl-active {
+    background: rgba(14, 165, 233, 0.2);
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+    text-shadow: 0 0 8px var(--accent-blue-glow);
+    box-shadow: 0 0 16px var(--accent-blue-glow);
+    transform: scale(1.1);
+}
+
+.cockpit {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1.5fr;
+    gap: 24px;
+    padding: 24px;
+    flex-grow: 1;
+}
+
+.display {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.display-title {
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    border-bottom: 2px solid rgba(255,255,255,0.1);
+    padding-bottom: 10px;
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+    letter-spacing: 4px;
+    text-shadow: 0 0 8px rgba(255,255,255,0.4);
+}
+
+/* PFD Layout */
+.pfd-body {
+    display: grid;
+    grid-template-columns: 80px 1fr 90px;
+    grid-template-rows: 1fr;
+    align-items: center;
+    flex-grow: 1;
+    gap: 15px;
+}
+
+.pfd-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+
+.attitude-indicator {
+    background: #000;
+    border-radius: 50%;
+    padding: 4px;
+    border: 2px solid #334155;
+    box-shadow: 
+        0 0 20px rgba(0,0,0,0.8),
+        inset 0 0 12px rgba(255,255,255,0.1);
+}
+.horizon { width: 100%; max-width: 250px; border-radius: 50%; }
+
+.tape, .vsi-gauge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: linear-gradient(90deg, #020617, #0f172a, #020617);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
+}
+.tape { height: 200px; padding: 10px 0; }
+.vsi-gauge { margin-top: 15px; padding: 10px; }
+
+.tape-right {
+    display: flex;
+    flex-direction: column;
+}
+
+.tape-label {
+    font-size: 0.8rem;
+    color: var(--accent-blue);
+    text-shadow: 0 0 4px var(--accent-blue-glow);
+    padding: 5px 0;
+    letter-spacing: 1px;
+}
+.tape-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.6rem;
+    color: var(--text-primary);
+    background: #000;
+    padding: 8px 12px;
+    border: 1px solid var(--accent-green);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.3), inset 0 0 8px rgba(16, 185, 129, 0.2);
+    margin: 10px 0;
+    border-radius: 4px;
+    text-shadow: 0 0 8px rgba(255,255,255,0.8);
+}
+.vsi-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.2rem;
+    color: var(--text-primary);
+    text-shadow: 0 0 8px rgba(255,255,255,0.5);
+    margin-top: 5px;
+}
+
+/* Heading Indicator */
+.heading-indicator {
+    background: #000;
+    border-radius: 50%;
+    padding: 4px;
+    border: 1px solid #334155;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+}
+.compass-svg { width: 130px; height: 130px; }
+.hdg-readout {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    color: var(--accent-amber);
+    text-shadow: 0 0 8px var(--accent-amber-glow);
+    margin-top: 8px;
+    text-align: center;
+}
+
+/* EICAS */
+.engine-gauges {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 25px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.engine { text-align: center; }
+.engine div:first-child {
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    font-size: 0.9rem;
+}
+.gauge-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 2rem;
+    color: var(--text-primary);
+    text-shadow: 0 0 12px rgba(255,255,255,0.5);
+    margin-top: 8px;
+}
+
+/* Engine Controls */
+.engine-controls {
+    margin-bottom: 25px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.ctrl-label {
+    width: 50px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-align: right;
+    letter-spacing: 1px;
+}
+.ctrl-bar {
+    flex-grow: 1;
+    height: 18px;
+    background: #000;
+    border: 1px solid #334155;
+    border-radius: 3px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+}
+.ctrl-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease-out;
+    box-shadow: inset 0 0 8px rgba(255,255,255,0.4);
+}
+.thr-fill { background: linear-gradient(90deg, #059669, #10b981); }
+.flap-fill { background: linear-gradient(90deg, #d97706, #f59e0b); }
+.ctrl-val {
+    width: 50px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.warnings-box {
+    flex-grow: 1;
+    border: 1px solid var(--accent-red);
+    background: rgba(239, 68, 68, 0.05);
+    box-shadow: inset 0 0 20px rgba(239, 68, 68, 0.1);
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    min-height: 80px;
+}
+.ok-text {
+    color: var(--accent-green);
+    text-shadow: 0 0 12px var(--accent-green-glow);
+    text-align: center;
+    font-size: 1.2rem;
+    letter-spacing: 4px;
+    margin-top: 20px;
+}
+.warn-list { list-style-type: none; padding: 0; margin: 0; }
+.warn-item { 
+    color: #fff;
+    background: var(--accent-red);
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 1.1rem;
+    letter-spacing: 1px;
+    margin-bottom: 8px; 
+    text-align: center;
+    box-shadow: 0 0 16px var(--accent-red-glow);
+}
+.warn-text { color: var(--accent-red) !important; text-shadow: 0 0 12px var(--accent-red-glow) !important; }
+
+@@keyframes blink-anim { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.blink { animation: blink-anim 0.8s ease-in-out infinite; }
+
+.scenario-details {
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.1), transparent);
+    padding: 15px;
+    border-left: 4px solid var(--accent-amber);
+    border-radius: 0 8px 8px 0;
+}
+.scenario-name { font-size: 1.1rem; color: var(--accent-amber); text-shadow: 0 0 8px var(--accent-amber-glow); margin-bottom: 8px; letter-spacing: 1px; }
+.scenario-desc { line-height: 1.5; color: #cbd5e1; }
+
+/* Agent Reputation Cards */
+.agent-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 15px;
+}
+.agent-card {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+}
+.agent-card.rep-good { border-top: 3px solid var(--accent-green); }
+.agent-card.rep-warn { border-top: 3px solid var(--accent-amber); }
+.agent-card.rep-bad { border-top: 3px solid var(--accent-red); }
+.agent-card-id {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+.rep-bar-container {
+    height: 8px;
+    background: #000;
+    border-radius: 4px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.rep-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.rep-good .rep-bar-fill { background: linear-gradient(90deg, #059669, #10b981); box-shadow: 0 0 8px var(--accent-green-glow); }
+.rep-warn .rep-bar-fill { background: linear-gradient(90deg, #d97706, #f59e0b); box-shadow: 0 0 8px var(--accent-amber-glow); }
+.rep-bad .rep-bar-fill { background: linear-gradient(90deg, #dc2626, #ef4444); box-shadow: 0 0 8px var(--accent-red-glow); }
+.agent-card-score {
+    text-align: right;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text-muted);
+}
+
+/* Ledger Console */
+.agent-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 0 4px;
+}
+.agent-stats .stat {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    color: var(--accent-blue);
+    text-shadow: 0 0 8px var(--accent-blue-glow);
+}
+
+.ledger-console {
+    flex-grow: 1;
+    background: #000;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    overflow-y: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem;
+    max-height: 380px;
+    box-shadow: inset 0 4px 12px rgba(0,0,0,0.6);
+}
+
+/* Custom Scrollbar for realism */
+.ledger-console::-webkit-scrollbar { width: 8px; }
+.ledger-console::-webkit-scrollbar-track { background: #0f172a; border-radius: 4px; }
+.ledger-console::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+.ledger-row { 
+    margin-bottom: 6px; 
+    padding: 6px;
+    background: rgba(15, 23, 42, 0.4);
+    border-radius: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+}
+.time { color: var(--text-muted); margin-right: 10px; }
+.agent { color: var(--accent-blue); margin-right: 10px; }
+.action { color: var(--text-primary); }
+.status-msg { margin-left: 10px; font-style: italic; }
+
+.row-valid { border-left: 3px solid var(--accent-green); background: linear-gradient(90deg, rgba(16, 185, 129, 0.05), transparent); }
+.row-invalid-sig { border-left: 3px solid var(--accent-red); background: linear-gradient(90deg, rgba(239, 68, 68, 0.05), transparent); color: #fca5a5; }
+.row-rejected-rep { border-left: 3px solid var(--accent-amber); background: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent); color: #fcd34d; }
+.row-consensus { border-left: 3px solid var(--accent-blue); background: linear-gradient(90deg, rgba(14, 165, 233, 0.1), transparent); }
+
+
+/* 3D Outside View */
+.warnings-box {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.outside-view-wrapper {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    overflow: hidden;
+    z-index: 0;
+    perspective: 600px;
+    background: #020617;
+}
+.outside-camera {
+    position: absolute;
+    top: -50%; left: -50%; width: 200%; height: 200%;
+    transform-style: preserve-3d;
+    transition: transform 0.1s linear;
+}
+.scene-sky {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 50%;
+    background: linear-gradient(0deg, #0ea5e9 0%, #020617 100%);
+    opacity: 0.6;
+}
+.scene-ground {
+    position: absolute;
+    top: 50%; left: 0; width: 100%; height: 50%;
+    background: #064e3b;
+    border-top: 2px solid #10b981;
+    overflow: hidden;
+    transform: rotateX(80deg);
+    transform-origin: top center;
+}
+.scene-grid {
+    width: 100%; height: 200%;
+    background-image: 
+        linear-gradient(rgba(16, 185, 129, 0.4) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 185, 129, 0.4) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: grid-move 2s linear infinite;
+}
+@@keyframes grid-move {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(40px); }
+}
+.overlay-ok {
+    position: relative;
+    z-index: 10;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-green);
+    box-shadow: 0 0 12px var(--accent-green-glow);
+    margin-top: 0;
+    pointer-events: none;
+}
+
+/* Panoramic View Styles */
+.panoramic-view {
+    position: relative;
+    flex-grow: 1;
+    overflow: hidden;
+    margin: 24px;
+    border-radius: 12px;
+    border: 1px solid var(--border-glow);
+    box-shadow: 0 0 32px rgba(14, 165, 233, 0.2);
+}
+.pano-wrapper {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+}
+.pano-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 20;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+    background: radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.8) 100%);
+}
+.pano-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: auto;
+}
+.pano-header h2 {
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    margin: 0;
+    text-shadow: 0 0 12px rgba(255,255,255,0.8);
+    background: rgba(0,0,0,0.5);
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.pano-telemetry {
+    position: absolute;
+    right: 30px; top: 100px;
+    background: rgba(0,0,0,0.6);
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--accent-blue);
+    box-shadow: 0 0 16px var(--accent-blue-glow);
+    color: var(--accent-blue);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.2rem;
+    line-height: 1.8;
+    text-shadow: 0 0 8px var(--accent-blue-glow);
+}
+.pano-bottom {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    pointer-events: auto;
+}
+.sensor-blobs {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.blob-feed {
+    background: rgba(15, 23, 42, 0.85);
+    padding: 12px 16px;
+    border-radius: 8px;
+    min-width: 160px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.blob-feed.blob-good { border-color: var(--accent-green); box-shadow: 0 0 10px var(--accent-green-glow); }
+.blob-feed.blob-warn { border-color: var(--accent-amber); box-shadow: 0 0 10px var(--accent-amber-glow); }
+.blob-feed.blob-bad { border-color: var(--accent-red); box-shadow: 0 0 10px var(--accent-red-glow); }
+.blob-title {
+    color: var(--accent-blue);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    text-shadow: 0 0 6px var(--accent-blue-glow);
+}
+.blob-rep {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.blob-rep-label {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+}
+.blob-rep-bar {
+    flex-grow: 1;
+    height: 4px;
+    background: #000;
+    border-radius: 2px;
+    overflow: hidden;
+}
+.blob-rep-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+.blob-good .blob-rep-fill { background: var(--accent-green); }
+.blob-warn .blob-rep-fill { background: var(--accent-amber); }
+.blob-bad .blob-rep-fill { background: var(--accent-red); }
+.blob-rep-val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 20px;
+    text-align: right;
+}
+.blob-data {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent-green);
+    text-shadow: 0 0 6px var(--accent-green-glow);
+}
+.blob-auth {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+}
+.pano-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.1);
+    margin: 4px 0;
+}
+
+/* Arc Status in Panoramic View */
+.pano-arc-status {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid var(--border-glow);
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 240px;
+    box-shadow: 0 0 16px rgba(14, 165, 233, 0.15);
+}
+.pano-arc-title {
+    color: var(--accent-blue);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+    text-shadow: 0 0 6px var(--accent-blue-glow);
+}
+.pano-arc-grid {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.pano-arc-card {
+    flex: 1;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.pano-arc-card.arc-volatile { border-top: 2px solid var(--accent-blue); }
+.pano-arc-card.arc-durable { border-top: 2px solid var(--accent-green); }
+.pano-arc-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+.pano-arc-type {
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    opacity: 0.6;
+    margin-bottom: 4px;
+}
+.pano-arc-count {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.pano-arc-card.arc-volatile .pano-arc-count { color: var(--accent-blue); text-shadow: 0 0 8px var(--accent-blue-glow); }
+.pano-arc-card.arc-durable .pano-arc-count { color: var(--accent-green); text-shadow: 0 0 8px var(--accent-green-glow); }
+.pano-arc-label {
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+}
+.pano-arc-footer {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.pano-arc-opfs, .pano-arc-integrity {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent-green);
+    text-shadow: 0 0 4px var(--accent-green-glow);
+}
+</style>
+
+@using Sharc.Core
+@using Sharc.Core.Trust
+@using Sharc.Trust
+
+@code {
+    private bool _isRunning = false;
+    private bool _isInitialized = false;
+    private bool _showPanoramicView = false;
+    private System.Threading.Timer? _simTimer;
+    private int _totalTicks = 0;
+
+    // Arc File Manager — distributed ledger across multiple arc files
+    private ArcFileManager? _arcManager;
+
+    // Agents
+    private AutoPilotAgent? _autoPilot;
+    private List<WorkerAgent> _workers = new();
+    private SimulationEngine? _simEngine;
+
+    // Flight State
+    public double CurrentSpeed => _autoPilot?.Speed ?? 250.0;
+    public double CurrentAltitude => _autoPilot?.Altitude ?? 35000.0;
+    public double CurrentPitch => _autoPilot?.Pitch ?? 0.0;
+    public double CurrentRoll => _autoPilot?.Roll ?? 0.0;
+    public double LeftEngineTemp => _autoPilot?.EngineLeft ?? 650.0;
+    public double RightEngineTemp => _autoPilot?.EngineRight ?? 648.0;
+    public double CurrentHeading => _autoPilot?.Heading ?? 270.0;
+    public double CurrentVerticalSpeed => _autoPilot?.VerticalSpeed ?? 0.0;
+    public double CurrentThrottle => _autoPilot?.Throttle ?? 0.72;
+    public double CurrentFlapPosition => _autoPilot?.FlapPosition ?? 0.0;
+    public AutoPilotMode CurrentMode => _autoPilot?.Mode ?? AutoPilotMode.Suggestive;
+    public IReadOnlyList<string> ActiveWarnings => _autoPilot?.ActiveWarnings ?? (IReadOnlyList<string>)Array.Empty<string>();
+
+    // Scenario State
+    public int CurrentScenarioId => _simEngine?.GetCurrentScenario()?.Id ?? 0;
+    public string ScenarioName => _simEngine?.GetCurrentScenario()?.Name ?? "SYSTEM IDLE";
+    public string ScenarioDescription => _simEngine?.GetCurrentScenario()?.Description ?? "Waiting for simulation to engage.";
+    public int TotalScenarios => _simEngine?.ScenarioCount ?? 15;
+
+    // Trust Ledger State
+    public int Tps { get; set; } = 0;
+
+    public enum TrustStatus { Valid, InvalidSignature, ReputationTooLow, ConsensusOverride }
+
+    public class LedgerEntryModel
+    {
+        public string Timestamp { get; set; } = "";
+        public string AgentId { get; set; } = "";
+        public int Reputation { get; set; }
+        public string Action { get; set; } = "";
+        public TrustStatus Status { get; set; } = TrustStatus.Valid;
+        public string StatusMessage { get; set; } = "";
+    }
+
+    public List<LedgerEntryModel> LedgerEntries { get; set; } = new();
+
+    private double _pitchOffset => CurrentPitch * 2;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 1. Initialize Arc File Manager — 3 distributed arc files per TheArcFormat.md
+        _arcManager = new ArcFileManager(JS);
+        await _arcManager.InitializeAsync();
+
+        // 2. Subscribe to SecurityAudit on all 3 arc ledgers
+        _arcManager.TelemetryArc.Ledger.SecurityAudit += OnLedgerAudit;
+        _arcManager.CriticalArc.Ledger.SecurityAudit += OnLedgerAudit;
+        _arcManager.AgentsArc.Ledger.SecurityAudit += OnLedgerAudit;
+
+        // 3. Register Agents across all arcs
+        await SetupAgentsAsync();
+
+        // 4. Create Engine — AutoPilot uses TelemetryArc for consensus validation
+        _autoPilot = new AutoPilotAgent(_arcManager.TelemetryArc.Ledger, _arcManager.TelemetryArc.Registry);
+        _autoPilot.InitializeSensors(_workers);
+        _autoPilot.OnReputationChanged = (agentId, newScore) =>
+        {
+            var w = _workers.FirstOrDefault(x => x.AgentId == agentId);
+            if (w != null) w.ReputationScore = newScore;
+        };
+        _simEngine = new SimulationEngine(_autoPilot, _workers, OnAgentPushToLedger);
+
+        _isInitialized = true;
+    }
+
+    private async Task SetupAgentsAsync()
+    {
+        if (_arcManager == null) return;
+
+        // Create 3 Reliable Sensors — registered in ALL arcs
+        for (int i = 1; i <= 3; i++)
+        {
+            var signer = new SharcSigner($"SENSOR-REL-{i}");
+            var info = new AgentInfo(signer.AgentId, AgentClass.User, await signer.GetPublicKeyAsync(), 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());
+
+            var buffer = AgentRegistry.GetVerificationBuffer(info);
+            info = info with { Signature = await signer.SignAsync(buffer) };
+
+            _arcManager.RegisterAgentInAllArcs(info);
+            _workers.Add(new WorkerAgent(signer.AgentId, signer, isReliable: true, reputation: 90, authority: 100));
+
+            // Log registration event to AgentsArc for identity continuity
+            var regPayload = new TrustPayload(PayloadType.System, $"AGENT_REGISTRATION:{signer.AgentId}", EconomicValue: 1);
+            await _arcManager.AgentsArc.AppendAsync(regPayload, signer);
+        }
+
+        // Create 1 Bad Actor
+        var badSigner = new SharcSigner($"SENSOR-UNREL-1");
+        var badInfo = new AgentInfo(badSigner.AgentId, AgentClass.User, await badSigner.GetPublicKeyAsync(), 10, "*", "*", 0, 0, "", false, Array.Empty<byte>());
+
+        var badBuffer = AgentRegistry.GetVerificationBuffer(badInfo);
+        badInfo = badInfo with { Signature = await badSigner.SignAsync(badBuffer) };
+
+        _arcManager.RegisterAgentInAllArcs(badInfo);
+        _workers.Add(new WorkerAgent(badSigner.AgentId, badSigner, isReliable: false, reputation: 15, authority: 10));
+
+        // Log bad actor registration too — all agents get recorded
+        var badRegPayload = new TrustPayload(PayloadType.System, $"AGENT_REGISTRATION:{badSigner.AgentId}", EconomicValue: 1);
+        await _arcManager.AgentsArc.AppendAsync(badRegPayload, badSigner);
+    }
+
+    private void OnLedgerAudit(object? sender, SecurityEventArgs e)
+    {
+        if (e.EventType == SecurityEventType.IntegrityViolation)
+        {
+            InvokeAsync(() => AddLedgerEntry(e.AgentId, "ATTEMPTED OVERWRITE", TrustStatus.InvalidSignature, e.Details));
+        }
+    }
+
+    private async Task OnAgentPushToLedger(TrustPayload payload, string signerId)
+    {
+        if (_arcManager == null || _autoPilot == null) return;
+        var agent = _workers.FirstOrDefault(a => a.AgentId == signerId);
+        if (agent == null) return;
+
+        try
+        {
+            // 1. Route payload to the appropriate arc file
+            var targetArc = _arcManager.RoutePayload(payload);
+            await targetArc.AppendAsync(payload, agent.Signer);
+
+            // 2. Evaluate Consensus (AutoPilot)
+            var (accepted, reason) = _autoPilot.ProcessReading(payload, signerId);
+
+            var arcTag = targetArc == _arcManager.CriticalArc ? "[CRT]" : "[TEL]";
+            if (accepted)
+                await InvokeAsync(() => AddLedgerEntry(signerId, $"{arcTag} APPENDED {payload.EconomicValue} L-VAL | {reason}", TrustStatus.Valid, ""));
+            else
+                await InvokeAsync(() => AddLedgerEntry(signerId, $"{arcTag} REJECTED READING", TrustStatus.ConsensusOverride, reason));
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() => AddLedgerEntry(signerId, "REJECTED BY LEDGER", TrustStatus.InvalidSignature, ex.Message));
+        }
+
+        Tps++;
+    }
+
+    private void AddLedgerEntry(string agentId, string action, TrustStatus status, string msg)
+    {
+        int rep = _autoPilot?.GetReputation(agentId) ?? 0;
+
+        LedgerEntries.Insert(0, new LedgerEntryModel {
+            Timestamp = DateTime.Now.ToString("HH:mm:ss.fff"),
+            AgentId = agentId,
+            Reputation = rep,
+            Action = action,
+            Status = status,
+            StatusMessage = msg
+        });
+
+        if (LedgerEntries.Count > 100) LedgerEntries.RemoveAt(LedgerEntries.Count - 1);
+        StateHasChanged();
+    }
+
+    private void StartSimulation()
+    {
+        if (!_isInitialized) return;
+
+        _isRunning = true;
+        _totalTicks = 0;
+        _autoPilot?.ClearWarnings();
+
+        // Run scenario loop 4 times a second
+        _simTimer = new System.Threading.Timer((_) =>
+        {
+            InvokeAsync(async () =>
+            {
+                Tps = 0;
+                if (_simEngine != null) await _simEngine.TickAsync();
+
+                _totalTicks++;
+                // Move to next scenario every 4 seconds (16 ticks at 250ms)
+                if (_totalTicks % 16 == 0)
+                {
+                    _autoPilot?.ClearWarnings();
+                    _simEngine?.MoveNextScenario();
+                    // Reset mode to Suggestive at start of each scenario
+                    if (_autoPilot != null) _autoPilot.Mode = AutoPilotMode.Suggestive;
+
+                    // Flush durable arcs to OPFS at scenario boundaries
+                    if (_arcManager != null) await _arcManager.FlushDurableArcsAsync();
+                }
+
+                StateHasChanged();
+            });
+        }, null, 0, 250);
+    }
+
+    private async Task StopSimulation()
+    {
+        _isRunning = false;
+        _simTimer?.Dispose();
+
+        // Flush durable arcs to OPFS on stop
+        if (_arcManager != null) await _arcManager.FlushDurableArcsAsync();
+
+        StateHasChanged();
+    }
+
+    private async Task ClearFlightData()
+    {
+        if (_arcManager == null) return;
+
+        // Wipe OPFS data
+        await _arcManager.ClearAllOpfsDataAsync();
+
+        // Dispose and re-create the manager
+        await _arcManager.DisposeAsync();
+        _arcManager = new ArcFileManager(JS);
+        await _arcManager.InitializeAsync();
+
+        // Subscribe audit events on new arcs
+        _arcManager.TelemetryArc.Ledger.SecurityAudit += OnLedgerAudit;
+        _arcManager.CriticalArc.Ledger.SecurityAudit += OnLedgerAudit;
+        _arcManager.AgentsArc.Ledger.SecurityAudit += OnLedgerAudit;
+
+        // Re-register agents
+        _workers.Clear();
+        await SetupAgentsAsync();
+
+        // Re-create engine with new arcs
+        _autoPilot = new AutoPilotAgent(_arcManager.TelemetryArc.Ledger, _arcManager.TelemetryArc.Registry);
+        _autoPilot.InitializeSensors(_workers);
+        _autoPilot.OnReputationChanged = (agentId, newScore) =>
+        {
+            var w = _workers.FirstOrDefault(x => x.AgentId == agentId);
+            if (w != null) w.ReputationScore = newScore;
+        };
+        _simEngine = new SimulationEngine(_autoPilot, _workers, OnAgentPushToLedger);
+
+        LedgerEntries.Clear();
+        StateHasChanged();
+    }
+
+    private void ToggleMode()
+    {
+        if (_autoPilot == null) return;
+        _autoPilot.Mode = _autoPilot.Mode == AutoPilotMode.Suggestive
+            ? AutoPilotMode.AutoPilot
+            : AutoPilotMode.Suggestive;
+        StateHasChanged();
+    }
+
+    private void TogglePanoramic()
+    {
+        _showPanoramicView = !_showPanoramicView;
+        StateHasChanged();
+    }
+
+    private string GetLedgerClass(TrustStatus status)
+    {
+        return status switch
+        {
+            TrustStatus.Valid => "row-valid",
+            TrustStatus.InvalidSignature => "row-invalid-sig",
+            TrustStatus.ReputationTooLow => "row-rejected-rep",
+            TrustStatus.ConsensusOverride => "row-consensus",
+            _ => "row-valid"
+        };
+    }
+}
+
+
+
