@@ -26,5 +26,6 @@ internal enum JoinKind : byte
     Inner,
     Left,
     Right,
-    Cross
+    Cross,
+    Full
 }
