@@ -17,6 +17,7 @@ internal sealed class ViewResolver
 {
     private readonly SharcDatabase _db;
     private Dictionary<string, SharcView>? _registeredViews;
+    private Dictionary<string, ILayer>? _registeredLayers;
     private int _registeredViewGeneration;
 
     internal ViewResolver(SharcDatabase db)
@@ -24,8 +25,8 @@ internal sealed class ViewResolver
         _db = db;
     }
 
-    /// <summary>Whether any views are currently registered.</summary>
-    internal bool HasRegisteredViews => _registeredViews is { Count: > 0 };
+    /// <summary>Whether any views or layers are currently registered.</summary>
+    internal bool HasRegisteredViews => _registeredViews is { Count: > 0 } || _registeredLayers is { Count: > 0 };
 
     /// <summary>
     /// The current generation counter. Returns -1 when no views are registered,
@@ -55,6 +56,30 @@ internal sealed class ViewResolver
     internal bool UnregisterView(string viewName)
     {
         if (_registeredViews != null && _registeredViews.Remove(viewName))
+        {
+            _registeredViewGeneration++;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Registers a graph traversal layer (or any <see cref="ILayer"/>) as a queryable source.
+    /// Layers are always pre-materialized when referenced in SQL queries.
+    /// </summary>
+    internal void RegisterLayer(ILayer layer)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+        if (string.IsNullOrWhiteSpace(layer.Name))
+            throw new ArgumentException("Layer name must not be empty or whitespace.", nameof(layer));
+        _registeredLayers ??= new Dictionary<string, ILayer>(StringComparer.OrdinalIgnoreCase);
+        _registeredLayers[layer.Name] = layer;
+        _registeredViewGeneration++;
+    }
+
+    internal bool UnregisterLayer(string layerName)
+    {
+        if (_registeredLayers != null && _registeredLayers.Remove(layerName))
         {
             _registeredViewGeneration++;
             return true;
@@ -136,7 +161,20 @@ internal sealed class ViewResolver
             {
                 if (resolvedViews.ContainsKey(table)) continue;
 
-                // Check registered programmatic views first
+                // Check registered layers first (graph traversals, etc.)
+                if (_registeredLayers != null &&
+                    _registeredLayers.ContainsKey(table))
+                {
+                    // Layers are pre-materialized — use a placeholder Cote that
+                    // references the layer name as a table. The CoteExecutor will
+                    // find the pre-materialized result in the CoteMap.
+                    var layerPlan = IntentCompiler.CompilePlan($"SELECT * FROM [{table}]");
+                    resolvedViews[table] = layerPlan;
+                    changed = true;
+                    continue;
+                }
+
+                // Check registered programmatic views
                 if (_registeredViews != null &&
                     _registeredViews.TryGetValue(table, out var regView))
                 {
@@ -217,7 +255,9 @@ internal sealed class ViewResolver
     /// </summary>
     internal CoteMap? PreMaterializeFilteredViews(QueryPlan plan)
     {
-        if (_registeredViews == null || _registeredViews.Count == 0)
+        bool hasViews = _registeredViews is { Count: > 0 };
+        bool hasLayers = _registeredLayers is { Count: > 0 };
+        if (!hasViews && !hasLayers)
             return null;
 
         var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -230,17 +270,44 @@ internal sealed class ViewResolver
 
         CoteMap? result = null;
 
-        foreach (var tableName in references)
+        // Materialize layers — always pre-materialized (non-SQL data)
+        if (hasLayers)
         {
-            if (!_registeredViews.TryGetValue(tableName, out var regView))
-                continue;
+            foreach (var tableName in references)
+            {
+                if (!_registeredLayers!.TryGetValue(tableName, out var layer))
+                    continue;
 
-            if (!ViewChainHasFilter(regView))
-                continue;
+                result = MaterializeCursor(layer.Open(_db), tableName, result);
+            }
+        }
 
-            // Materialize the view cursor. The using declaration ensures disposal
-            // even if an exception occurs during row materialization.
-            using var cursor = regView.Open(_db);
+        // Materialize filtered views
+        if (hasViews)
+        {
+            foreach (var tableName in references)
+            {
+                if (!_registeredViews!.TryGetValue(tableName, out var regView))
+                    continue;
+
+                if (!ViewChainHasFilter(regView))
+                    continue;
+
+                result = MaterializeCursor(regView.Open(_db), tableName, result);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Materializes an <see cref="IViewCursor"/> into a <see cref="MaterializedResultSet"/>
+    /// and adds it to the <see cref="CoteMap"/>.
+    /// </summary>
+    private static CoteMap MaterializeCursor(IViewCursor cursor, string name, CoteMap? existing)
+    {
+        using (cursor)
+        {
             int fieldCount = cursor.FieldCount;
             var columnNames = new string[fieldCount];
             for (int i = 0; i < fieldCount; i++)
@@ -269,11 +336,10 @@ internal sealed class ViewResolver
                 rows.Add(row);
             }
 
-            result ??= new CoteMap(StringComparer.OrdinalIgnoreCase);
-            result[tableName] = new MaterializedResultSet(rows, columnNames);
+            existing ??= new CoteMap(StringComparer.OrdinalIgnoreCase);
+            existing[name] = new MaterializedResultSet(rows, columnNames);
+            return existing;
         }
-
-        return result;
     }
 
     // ─── Static helpers ─────────────────────────────────────────────

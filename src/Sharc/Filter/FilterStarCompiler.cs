@@ -22,7 +22,6 @@ internal static class FilterStarCompiler
     {
         return BuildDelegate(expression, columns, rowidAliasOrdinal);
     }
-
     private static BakedDelegate BuildDelegate(IFilterStar expr, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
     {
         return expr switch
@@ -30,9 +29,29 @@ internal static class FilterStarCompiler
             AndExpression and => BuildAnd(and, columns, rowidAliasOrdinal),
             OrExpression or => BuildOr(or, columns, rowidAliasOrdinal),
             NotExpression not => BuildNot(not, columns, rowidAliasOrdinal),
-            PredicateExpression pred => JitPredicateBuilder.Build(pred, columns, rowidAliasOrdinal),
+            PredicateExpression pred => BuildPredicate(pred, columns, rowidAliasOrdinal),
             _ => throw new NotSupportedException($"Unsupported expression type: {expr.GetType().Name}")
         };
+    }
+
+    private static BakedDelegate BuildPredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
+    {
+        ColumnInfo? col = pred.ColumnOrdinal.HasValue
+            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
+            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (col == null)
+            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found.");
+
+        // GUID expansion for merged columns
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
+        {
+            var hiOrdinal = col.MergedPhysicalOrdinals[0];
+            var loOrdinal = col.MergedPhysicalOrdinals[1];
+            return JitPredicateBuilder.BuildGuidComparison(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
+        }
+
+        return JitPredicateBuilder.Build(pred, columns, rowidAliasOrdinal);
     }
 
     private static BakedDelegate BuildAnd(AndExpression and, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)

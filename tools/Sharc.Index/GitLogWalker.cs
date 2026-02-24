@@ -25,6 +25,66 @@ public sealed record FileChangeRecord(
     int LinesDeleted);
 
 /// <summary>
+/// A unique author (name + email pair) with commit statistics.
+/// </summary>
+public sealed record AuthorRecord(
+    string Name,
+    string Email,
+    string FirstCommitSha,
+    long CommitCount);
+
+/// <summary>
+/// A parent-child relationship between commits (supports merge commits with ordinal).
+/// </summary>
+public sealed record CommitParentRecord(
+    string CommitSha,
+    string ParentSha,
+    int Ordinal);
+
+/// <summary>
+/// A git branch reference pointing to a commit.
+/// </summary>
+public sealed record BranchRecord(
+    string Name,
+    string HeadSha,
+    int IsRemote,
+    long UpdatedAt);
+
+/// <summary>
+/// A git tag (annotated or lightweight).
+/// </summary>
+public sealed record TagRecord(
+    string Name,
+    string TargetSha,
+    string? TaggerName,
+    string? TaggerEmail,
+    string? Message,
+    long CreatedAt);
+
+/// <summary>
+/// A single diff hunk from a commit.
+/// </summary>
+public sealed record DiffHunkRecord(
+    string CommitSha,
+    string Path,
+    int OldStart,
+    int OldLines,
+    int NewStart,
+    int NewLines,
+    string Content);
+
+/// <summary>
+/// A blame annotation for a single line in a file.
+/// </summary>
+public sealed record BlameLineRecord(
+    string Path,
+    int LineNumber,
+    string CommitSha,
+    string AuthorName,
+    string AuthorEmail,
+    string LineContent);
+
+/// <summary>
 /// Walks git log and diff output, parsing into structured records.
 /// </summary>
 public sealed class GitLogWalker

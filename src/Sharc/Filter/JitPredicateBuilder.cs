@@ -17,10 +17,14 @@ internal static class JitPredicateBuilder
                                      IReadOnlyList<ColumnInfo> columns,
                                      int rowidAliasOrdinal)
     {
-        int ordinal = pred.ColumnOrdinal ?? columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase))?.Ordinal ?? -1;
+        ColumnInfo? col = pred.ColumnOrdinal.HasValue 
+            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
+            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
 
-        if (ordinal < 0 || ordinal >= columns.Count)
-            throw new ArgumentOutOfRangeException(nameof(pred), $"Column '{pred.ColumnName}' (ordinal {ordinal}) not found.");
+        if (col == null)
+            throw new ArgumentOutOfRangeException(nameof(pred), $"Column '{pred.ColumnName}' (ordinal {pred.ColumnOrdinal}) not found.");
+
+        int ordinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal;
 
         // NULL handling (SQLite semantics: NULL is never equal, but matches IS NULL)
         if (pred.Operator == FilterOp.IsNull)
@@ -282,6 +286,43 @@ internal static class JitPredicateBuilder
             FilterOp.Gt => (payload, serialTypes, offsets, rowId) => rowId > val,
             FilterOp.Gte => (payload, serialTypes, offsets, rowId) => rowId >= val,
             _ => static (_, _, _, _) => false
+        };
+    }
+
+    public static BakedDelegate BuildGuidComparison(int hiOrdinal, int loOrdinal, FilterOp op, TypedFilterValue value)
+    {
+        long hiValue = value.AsInt64();
+        long loValue = value.AsInt64High();
+
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            if (hiOrdinal >= serialTypes.Length || loOrdinal >= serialTypes.Length)
+                return false;
+
+            long hiSerialType = FilterStarCompiler.GetSerialType(serialTypes, hiOrdinal);
+            long loSerialType = FilterStarCompiler.GetSerialType(serialTypes, loOrdinal);
+
+            if (hiSerialType == SerialTypeCodec.NullSerialType || loSerialType == SerialTypeCodec.NullSerialType)
+                return false;
+
+            var hiData = FilterStarCompiler.GetColumnData(payload, offsets, hiOrdinal, hiSerialType);
+            long hiColVal = RawByteComparer.DecodeInt64(hiData, hiSerialType);
+
+            if (op == FilterOp.Eq)
+            {
+                if (hiColVal != hiValue) return false;
+                var loData = FilterStarCompiler.GetColumnData(payload, offsets, loOrdinal, loSerialType);
+                return RawByteComparer.DecodeInt64(loData, loSerialType) == loValue;
+            }
+
+            if (op == FilterOp.Neq)
+            {
+                if (hiColVal != hiValue) return true;
+                var loData = FilterStarCompiler.GetColumnData(payload, offsets, loOrdinal, loSerialType);
+                return RawByteComparer.DecodeInt64(loData, loSerialType) != loValue;
+            }
+
+            return false;
         };
     }
 }
