@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-3%2C356_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-3%2C467_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -153,6 +153,57 @@ var handle = resolver.Resolve("arc://dropbox/factory-floor/sensors");
 ```
 
 **Why this matters:** A Kerala health worker's tablet and a West Midlands factory terminal can each hold a `.arc` fragment. When connectivity returns, `FragmentSyncProtocol` merges deltas and the ledger proves nothing was tampered with. No central server required.
+
+### Row-Level Entitlements
+
+Agent-scoped access control enforced at the query layer — zero cost when not opted in:
+
+```csharp
+// Create an agent with restricted read scope
+var agent = new AgentInfo("analyst", AgentClass.User, publicKey, authorityCeiling: 0,
+    writeScope: "reports.*",
+    readScope: "users.name,users.email",  // column-level restriction
+    validityStart: 0, validityEnd: 0, parentAgent: "", coSignRequired: false, signature, algorithm);
+
+// Entitled query succeeds
+using var reader = db.Query("SELECT name, email FROM users", agent);
+
+// Denied query throws UnauthorizedAccessException
+db.Query("SELECT * FROM users", agent);  // SELECT * denied — scope restricts to specific columns
+db.Query("SELECT salary FROM users", agent);  // salary not in scope
+```
+
+Entitlements cover table-level, column-level, wildcard (`SELECT *`), JOIN cross-table, WHERE/ORDER BY column references, CACHED/JIT hint paths, and view-based escalation. All enforcement is pre-query — no data leaks through side channels.
+
+### Multi-Arc Fusion (Sharc.Arc)
+
+Query across multiple `.arc` fragments with source provenance:
+
+```csharp
+var fused = new FusedArcContext();
+fused.Mount(ArcHandle.OpenLocal("conversations.arc"), "conversations");
+fused.Mount(ArcHandle.OpenLocal("codebase.arc"), "codebase");
+
+// Every result carries its source arc
+var rows = fused.Query("commits");
+foreach (var row in rows)
+    Console.WriteLine($"Row {row.RowId} from {row.SourceArc}");
+
+// Discover what tables exist across all fragments
+var tables = fused.DiscoverTables();
+```
+
+### Data Ingestion — CSV to Arc
+
+```csharp
+// Import CSV data into a portable .arc file
+var handle = CsvArcImporter.Import(csvText, new CsvImportOptions
+{
+    TableName = "patients",
+    HasHeader = true,
+    ArcName = "health-data.arc"
+});
+```
 
 ### Change Event Bus
 
@@ -333,7 +384,7 @@ src/
   Sharc.Vector/             SIMD-accelerated vector similarity search
   Sharc.Arc/                Cross-arc: ArcUri, ArcResolver, ArcDiffer, fragment sync
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
-tests/                      3,356 tests across 11 projects
+tests/                      3,467 tests across 11 projects
   Sharc.Tests/              Core unit tests
   Sharc.IntegrationTests/   End-to-end tests
   Sharc.Query.Tests/        Query pipeline tests
