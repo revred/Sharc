@@ -69,7 +69,7 @@ internal static class SharcDatabaseFactory
             ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_scores")),
             ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_scores")),
             ColumnValue.FromInt64(3, 4), // RootPage = 4
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores(AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, LastRatingCount INTEGER)"))
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_scores(AgentId TEXT PRIMARY KEY, Score REAL, Confidence REAL, LastUpdated INTEGER, RatingCount INTEGER, Alpha REAL, Beta REAL)"))
         };
 
         var auditCols = new[] {

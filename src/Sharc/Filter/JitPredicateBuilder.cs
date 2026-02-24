@@ -239,23 +239,6 @@ internal static class JitPredicateBuilder
         };
     }
 
-    private static BakedDelegate BuildUtf8In(int ordinal, HashSet<string> set, bool negate)
-    {
-        return (payload, serialTypes, offsets, rowId) =>
-        {
-            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
-            if (serialType == SerialTypeCodec.NullSerialType) return false;
-
-            bool contains = false;
-            if (SerialTypeCodec.IsText(serialType))
-            {
-                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
-                contains = FilterStarCompiler.Utf8SetContains(data, set);
-            }
-            return negate ? !contains : contains;
-        };
-    }
-
     /// <summary>
     /// Zero-allocation UTF-8 IN predicate. Compares raw byte spans against
     /// pre-encoded UTF-8 keys — no per-row string materialization.

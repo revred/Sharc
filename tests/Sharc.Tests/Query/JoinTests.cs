@@ -194,6 +194,81 @@ public class JoinTests : IDisposable
         Assert.Equal(4, count); // 3 matched + 1 orphan
     }
 
+    // --- FULL OUTER JOIN tests ---
+
+    [Fact]
+    public void FullJoin_AllMatched_EqualsInner()
+    {
+        // All orders have matching users (Charlie has no orders but is a left orphan)
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u FULL JOIN orders o ON u.id = o.user_id ORDER BY u.id, o.id");
+
+        // Alice -> Order 10
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(100.5, reader.GetDouble(1));
+
+        // Alice -> Order 11
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(200.0, reader.GetDouble(1));
+
+        // Bob -> Order 12
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader.GetString(0));
+        Assert.Equal(300.0, reader.GetDouble(1));
+
+        // Charlie -> NULL (left orphan, no orders)
+        Assert.True(reader.Read());
+        Assert.Equal("Charlie", reader.GetString(0));
+        Assert.True(reader.IsNull(1));
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void FullJoin_OrphansBothSides_EmitsAll()
+    {
+        // Charlie has no orders (left orphan), orphan order has no user (right orphan)
+        AddOrphanOrder();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u FULL OUTER JOIN orders o ON u.id = o.user_id");
+
+        int count = 0;
+        bool foundLeftOrphan = false;
+        bool foundRightOrphan = false;
+        while (reader.Read())
+        {
+            count++;
+            if (!reader.IsNull(0) && reader.GetString(0) == "Charlie" && reader.IsNull(1))
+                foundLeftOrphan = true;
+            if (reader.IsNull(0) && !reader.IsNull(1) && reader.GetDouble(1) == 999.99)
+                foundRightOrphan = true;
+        }
+        Assert.True(foundLeftOrphan, "Expected Charlie as left orphan with null amount");
+        Assert.True(foundRightOrphan, "Expected orphan order with null name");
+        Assert.Equal(5, count); // 3 matched + 1 left orphan + 1 right orphan
+    }
+
+    [Fact]
+    public void FullJoin_EmptyRightTable_ReturnsAllLeftWithNulls()
+    {
+        AddEmptyTable();
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, e.user_id FROM users u FULL JOIN empty_table e ON u.id = e.user_id ORDER BY u.id");
+
+        int count = 0;
+        while (reader.Read())
+        {
+            Assert.True(reader.IsNull(1));
+            count++;
+        }
+        Assert.Equal(3, count);
+    }
+
     // --- Expanded coverage ---
 
     [Fact]

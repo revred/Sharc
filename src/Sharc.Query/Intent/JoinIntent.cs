@@ -36,5 +36,7 @@ public enum JoinType : byte
     /// <summary>Right Outer Join.</summary>
     Right,
     /// <summary>Cross Join.</summary>
-    Cross
+    Cross,
+    /// <summary>Full Outer Join.</summary>
+    Full
 }
