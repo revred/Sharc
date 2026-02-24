@@ -50,6 +50,22 @@ public enum ConceptKind
     /// <summary>A constraint.</summary>
     Constraint = 32,
     
+    // --- Git ---
+    /// <summary>A git commit.</summary>
+    GitCommit = 40,
+    /// <summary>A git author.</summary>
+    GitAuthor = 41,
+    /// <summary>A git branch.</summary>
+    GitBranch = 42,
+    /// <summary>A git tag.</summary>
+    GitTag = 43,
+
+    // --- Annotations ---
+    /// <summary>A review annotation.</summary>
+    Annotation = 50,
+    /// <summary>A decision record.</summary>
+    Decision = 51,
+
     // --- General ---
     /// <summary>A prompt or instruction.</summary>
     Prompt = 100,
