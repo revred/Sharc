@@ -4,17 +4,17 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-2%2C669_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-3%2C356_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
-| **Speed** | **Size** | **Trust** |
-| :--- | :--- | :--- |
-| **450x faster** indexed WHERE | **~52 KB** engine footprint | **ECDSA** agent attestation |
-| **109x faster** B-tree seeks | **Zero** native dependencies | **AES-256-GCM** encryption |
-| **31x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger |
-| **~0 B** per-row read allocation | SQL query pipeline built-in | JOIN / UNION / INTERSECT / EXCEPT / Cote |
+| **Speed** | **Size** | **Trust** | **Graph & AI** |
+| :--- | :--- | :--- | :--- |
+| **450x faster** indexed WHERE | **~52 KB** engine footprint | **ECDSA** agent attestation | **Cypher** query language |
+| **109x faster** B-tree seeks | **Zero** native dependencies | **AES-256-GCM** encryption | **PageRank** / centrality / topo-sort |
+| **31x faster** graph traversal | WASM / Mobile / IoT ready | **Tamper-evident** audit ledger | **Cross-arc** distributed sync |
+| **~0 B** per-row read allocation | SQL query pipeline built-in | JOIN / UNION / INTERSECT / EXCEPT / Cote | **GraphWriter** — full read/write graph |
 
 ---
 
@@ -39,8 +39,9 @@
 ```bash
 dotnet add package Sharc            # Core read/write engine
 dotnet add package Sharc.Crypto     # AES-256-GCM encryption (optional)
-dotnet add package Sharc.Graph      # Graph traversal + trust layer (optional)
+dotnet add package Sharc.Graph      # Graph + Cypher + algorithms (optional)
 dotnet add package Sharc.Vector     # Vector similarity search (optional)
+dotnet add package Sharc.Arc        # Cross-arc diff, sync, distributed fragments (optional)
 ```
 
 ## Quick Start
@@ -80,6 +81,95 @@ using var cte = db.Query(
 ```
 
 [**Full Getting Started Guide**](docs/GETTING_STARTED.md)
+
+---
+
+## What's New — Capabilities Added Since v1.1
+
+These features are production-ready and fully tested:
+
+### Cypher Query Language
+
+Full tokenizer → parser → compiler → executor pipeline for graph queries:
+
+```csharp
+using var cypher = graph.PrepareCypher(
+    "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE a.name = 'Alice' RETURN b.name");
+using var results = cypher.Execute();
+while (results.Read())
+    Console.WriteLine(results.GetString(0));
+```
+
+### Graph Algorithms
+
+| Algorithm | Class | Use Case |
+| :--- | :--- | :--- |
+| **PageRank** | `PageRankComputer` | Identify influential nodes |
+| **Degree Centrality** | `DegreeCentralityComputer` | Find most connected nodes |
+| **Topological Sort** | `TopologicalSortComputer` | Dependency ordering |
+| **Shortest Path** | `ShortestPathComputer` | Bidirectional BFS with depth/weight/kind |
+
+```csharp
+var ranks = PageRankComputer.Compute(graph, iterations: 20, dampingFactor: 0.85);
+foreach (var (nodeId, rank) in ranks.OrderByDescending(r => r.Value).Take(10))
+    Console.WriteLine($"Node {nodeId}: rank {rank:F4}");
+```
+
+### GraphWriter — Full Read/Write Graph
+
+| Method | Description |
+| :--- | :--- |
+| `Intern()` | Create or find a node by kind + name |
+| `Link()` | Create a typed, weighted, directional edge |
+| `Remove()` | Delete a node and its edges |
+| `Unlink()` | Delete a specific edge |
+
+```csharp
+using var writer = new GraphWriter(db);
+long alice = writer.Intern(ConceptKind.Person, "Alice");
+long bob   = writer.Intern(ConceptKind.Person, "Bob");
+writer.Link(alice, bob, RelationKind.Knows, weight: 1.0);
+```
+
+### Cross-Arc Distributed Sync (Sharc.Arc)
+
+`.arc` files are portable, self-contained database fragments that work anywhere — **local disk, Dropbox, Google Drive, shared URLs, or any cloud storage**. Share a `.arc` file like you share a document; the hash-chain ledger ensures integrity no matter how it travels.
+
+| Component | Purpose |
+| :--- | :--- |
+| `ArcUri` | Address any node across fragments (`arc://authority/path/table/row`) |
+| `IArcLocator` | Pluggable backend — `local`, `https`, `dropbox`, `gdrive`, custom |
+| `ArcResolver` | Resolve cross-fragment references across any backend |
+| `ArcDiffer` | Compute schema + row-level diffs between any two `.arc` files |
+| `FragmentSyncProtocol` | Delta export/import with hash-chain verification |
+
+```csharp
+// Resolve a fragment from any source — local, cloud, or URL
+var resolver = new ArcResolver();
+resolver.Register(new LocalArcLocator("/data/arcs"));
+resolver.Register(new HttpArcLocator());  // shared links, CDN, S3
+
+var handle = resolver.Resolve("arc://dropbox/factory-floor/sensors");
+```
+
+**Why this matters:** A Kerala health worker's tablet and a West Midlands factory terminal can each hold a `.arc` fragment. When connectivity returns, `FragmentSyncProtocol` merges deltas and the ledger proves nothing was tampered with. No central server required.
+
+### Change Event Bus
+
+```csharp
+var bus = new ChangeEventBus();
+bus.Subscribe(ConceptKind.Person, change =>
+    Console.WriteLine($"{change.Kind}: {change.Name}"));
+```
+
+### Tools
+
+| Tool | Description |
+| :--- | :--- |
+| `Sharc.Archive` | Conversation archiver — schema, reader, writer, CLI, sync protocol |
+| `Sharc.Repo` | AI agent repository — annotations, decisions, MCP tools |
+| `Sharc.Context` | MCP Context Server for AI agent memory |
+| `Sharc.Index` | Git history → SQLite indexer |
 
 ---
 
@@ -237,18 +327,24 @@ src/
   Sharc/                    Public API + Write Engine + Trust Layer
   Sharc.Core/               B-Tree, Records, Page I/O, Primitives
   Sharc.Query/              SQL pipeline: parser, compiler, executor
-  Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF
-  Sharc.Graph/              Graph storage (ConceptStore, RelationStore)
+  Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF, HKDF-SHA256
+  Sharc.Graph/              Graph engine: Cypher, PageRank, GraphWriter, algorithms
   Sharc.Graph.Surface/      Graph interfaces and models
   Sharc.Vector/             SIMD-accelerated vector similarity search
+  Sharc.Arc/                Cross-arc: ArcUri, ArcResolver, ArcDiffer, fragment sync
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
-tests/
-  Sharc.Tests/              1,477 unit tests
-  Sharc.IntegrationTests/   627 end-to-end tests
-  Sharc.Query.Tests/        462 query pipeline tests
-  Sharc.Graph.Tests.Unit/   67 graph tests
-  Sharc.Index.Tests/        22 index CLI tests
-  Sharc.Context.Tests/      14 MCP context tests
+tests/                      3,356 tests across 11 projects
+  Sharc.Tests/              Core unit tests
+  Sharc.IntegrationTests/   End-to-end tests
+  Sharc.Query.Tests/        Query pipeline tests
+  Sharc.Graph.Tests.Unit/   Graph + Cypher + algorithm tests
+  Sharc.Graph.Tests.Perf/   Graph performance benchmarks
+  Sharc.Arc.Tests/          Cross-arc diff + sync tests
+  Sharc.Archive.Tests/      Archive tool tests
+  Sharc.Vector.Tests/       Vector similarity tests
+  Sharc.Repo.Tests/         Repository + MCP tool tests
+  Sharc.Index.Tests/        Index CLI tests
+  Sharc.Context.Tests/      MCP context tests
 bench/
   Sharc.Benchmarks/         BenchmarkDotNet suite (Sharc vs SQLite)
   Sharc.Comparisons/        Graph + query benchmarks
@@ -262,8 +358,11 @@ samples/
   ContextGraph/             Graph traversal example
   TrustComplex/             Agent trust layer demo
 tools/
+  Sharc.Archive/            Conversation archiver (schema + sync protocol)
+  Sharc.Repo/               AI agent repository (annotations + decisions + MCP)
   Sharc.Context/            MCP Context Server
   Sharc.Index/              Git history → SQLite CLI
+  Sharc.Debug/              Debug utilities
 docs/                       Architecture, benchmarks, cookbook, FAQ, migration guides
 PRC/                        Architecture decisions, specs, execution plans
 ```
