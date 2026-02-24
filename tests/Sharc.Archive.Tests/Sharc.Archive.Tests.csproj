@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\Sharc.Archive\Sharc.Archive.csproj" />
+    <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Arc\Sharc.Arc.csproj" />
+  </ItemGroup>
+</Project>

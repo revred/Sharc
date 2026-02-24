@@ -46,5 +46,21 @@ public enum RelationKind
     /// <summary>Refers to an artifact.</summary>
     RefersTo = 30, // User request -> File
     /// <summary>Follows another step.</summary>
-    Follows = 31   // Step -> Step
+    Follows = 31,  // Step -> Step
+
+    // --- Git ---
+    /// <summary>Authored a commit.</summary>
+    Authored = 40,
+    /// <summary>Modified a file.</summary>
+    Modified = 41,
+    /// <summary>Parent commit relationship.</summary>
+    ParentOf = 42,
+    /// <summary>Branch points to a commit.</summary>
+    PointsTo = 43,
+
+    // --- Annotations ---
+    /// <summary>Annotated a file or concept.</summary>
+    Annotated = 50,
+    /// <summary>Decided on a concept or approach.</summary>
+    Decided = 51
 }
