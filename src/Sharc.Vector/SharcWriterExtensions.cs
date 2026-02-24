@@ -47,47 +47,30 @@ public static class SharcWriterExtensions
 
         var columns = table.Columns;
 
-        // Build ColumnValue[] in declaration order, skipping INTEGER PRIMARY KEY (rowid alias)
-        // The first column (typically "id") may be the rowid alias — if so, don't include it
-        // in the values array since SharcWriter auto-assigns rowid.
-        int startCol = 0;
-        long? explicitRowId = null;
+        // Build ColumnValue[] in declaration order for ALL columns.
+        // INTEGER PRIMARY KEY (rowid alias) columns are stored as NULL in the record —
+        // the actual rowid is the B-tree key, auto-assigned by SharcWriter.
+        var values = new ColumnValue[columns.Count];
 
-        // Check if first column is INTEGER PRIMARY KEY (rowid alias)
-        if (columns.Count > 0 && columns[0].DeclaredType.Contains("INTEGER", StringComparison.OrdinalIgnoreCase)
-            && columns[0].IsPrimaryKey)
-        {
-            // Check if caller provided explicit id
-            for (int m = 0; m < metadata.Length; m++)
-            {
-                if (metadata[m].ColumnName.Equals(columns[0].Name, StringComparison.OrdinalIgnoreCase)
-                    && metadata[m].Value != null)
-                {
-                    explicitRowId = Convert.ToInt64(metadata[m].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    break;
-                }
-            }
-            startCol = 1; // Skip rowid column in ColumnValue array
-        }
-
-        int valueCount = columns.Count - startCol;
-        var values = new ColumnValue[valueCount];
-
-        // Initialize all to NULL
-        for (int i = 0; i < valueCount; i++)
+        // Initialize all to NULL (correct default for rowid alias and unset columns)
+        for (int i = 0; i < values.Length; i++)
             values[i] = ColumnValue.Null();
 
         // Map metadata and vector into correct ordinals
-        for (int c = startCol; c < columns.Count; c++)
+        for (int c = 0; c < columns.Count; c++)
         {
-            int vi = c - startCol;
             string colName = columns[c].Name;
+
+            // Skip INTEGER PRIMARY KEY — leave as NULL (rowid alias)
+            if (columns[c].IsPrimaryKey
+                && columns[c].DeclaredType.Contains("INTEGER", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             if (colName.Equals(vectorColumn, StringComparison.OrdinalIgnoreCase))
             {
                 byte[] encoded = BlobVectorCodec.Encode(vector);
                 int serialType = 12 + encoded.Length * 2; // SQLite BLOB serial type
-                values[vi] = ColumnValue.Blob(serialType, encoded);
+                values[c] = ColumnValue.Blob(serialType, encoded);
                 continue;
             }
 
@@ -96,7 +79,7 @@ public static class SharcWriterExtensions
             {
                 if (metadata[m].ColumnName.Equals(colName, StringComparison.OrdinalIgnoreCase))
                 {
-                    values[vi] = ToColumnValue(metadata[m].Value);
+                    values[c] = ToColumnValue(metadata[m].Value);
                     break;
                 }
             }

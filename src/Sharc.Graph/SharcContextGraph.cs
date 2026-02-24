@@ -321,6 +321,221 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Produces a prompt-ready <see cref="ContextSummary"/> by traversing outgoing edges
+    /// from the given root key. Includes all reachable nodes up to <paramref name="maxDepth"/>
+    /// hops, optionally capped at <paramref name="maxTokens"/> estimated tokens.
+    /// </summary>
+    /// <param name="root">The starting node key.</param>
+    /// <param name="maxDepth">Maximum traversal depth (default 2).</param>
+    /// <param name="maxTokens">Optional token budget. When set, records are included in BFS order
+    /// until the cumulative token count would exceed this limit.</param>
+    /// <returns>A <see cref="ContextSummary"/> with the included records and generated text.</returns>
+    public ContextSummary GetContext(NodeKey root, int maxDepth = 2, int? maxTokens = null)
+    {
+        var policy = new TraversalPolicy
+        {
+            Direction = TraversalDirection.Outgoing,
+            MaxDepth = maxDepth,
+            IncludeData = true
+        };
+
+        var result = Traverse(root, policy);
+
+        if (result.Nodes.Count == 0)
+            return new ContextSummary(Guid.Empty, string.Empty, 0, Array.Empty<GraphRecord>());
+
+        var included = new List<GraphRecord>();
+        int totalTokens = 0;
+
+        foreach (var node in result.Nodes)
+        {
+            int nodeTokens = node.Record.Tokens > 0
+                ? node.Record.Tokens
+                : EstimateTokens(node.Record.JsonData);
+
+            if (maxTokens.HasValue && totalTokens + nodeTokens > maxTokens.Value && included.Count > 0)
+                break;
+
+            included.Add(node.Record);
+            totalTokens += nodeTokens;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var record in included)
+        {
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(record.JsonData);
+        }
+
+        var rootRecord = included[0];
+        Guid rootGuid = Guid.TryParse(rootRecord.Id.Id, out var parsed) ? parsed : Guid.Empty;
+
+        return new ContextSummary(rootGuid, sb.ToString(), totalTokens, included);
+    }
+
+    /// <summary>
+    /// Rough token estimate: ~4 characters per token for JSON payloads.
+    /// </summary>
+    private static int EstimateTokens(string text)
+        => string.IsNullOrEmpty(text) ? 0 : Math.Max(1, text.Length / 4);
+
+    /// <summary>
+    /// Finds the shortest path between two nodes using bidirectional BFS.
+    /// Returns the sequence of <see cref="NodeKey"/> values from <paramref name="from"/> to <paramref name="to"/>,
+    /// or <c>null</c> if no path exists within the policy constraints.
+    /// </summary>
+    /// <param name="from">The starting node key.</param>
+    /// <param name="to">The destination node key.</param>
+    /// <param name="policy">Optional traversal policy. Supports <see cref="TraversalPolicy.MaxDepth"/>,
+    /// <see cref="TraversalPolicy.Kind"/>, <see cref="TraversalPolicy.MinWeight"/>, and
+    /// <see cref="TraversalPolicy.Timeout"/>.</param>
+    /// <returns>An ordered list of node keys representing the shortest path, or <c>null</c> if unreachable.</returns>
+    public IReadOnlyList<NodeKey>? ShortestPath(NodeKey from, NodeKey to, TraversalPolicy policy = default)
+    {
+        // Same node — trivial path
+        if (from == to)
+            return [from];
+
+        RelationKind? filterKind = policy.Kind;
+        int? kindInt = filterKind.HasValue ? (int)filterKind.Value : null;
+
+        // Forward frontier: expands outgoing from 'from'
+        var forwardVisited = new Dictionary<NodeKey, NodeKey?>(64); // node → parent
+        var forwardQueue = new Queue<(NodeKey Key, int Depth)>();
+        forwardVisited[from] = null;
+        forwardQueue.Enqueue((from, 0));
+
+        // Backward frontier: expands incoming from 'to'
+        var backwardVisited = new Dictionary<NodeKey, NodeKey?>(64); // node → parent (toward 'to')
+        var backwardQueue = new Queue<(NodeKey Key, int Depth)>();
+        backwardVisited[to] = null;
+        backwardQueue.Enqueue((to, 0));
+
+        // Cursors: forward uses outgoing, backward uses incoming
+        using var forwardCursor = _relations.CreateEdgeCursor(from, filterKind);
+        using var backwardCursor = _relations.CreateIncomingEdgeCursor(to, filterKind);
+
+        // Timeout
+        long? deadlineTicks = policy.Timeout.HasValue
+            ? Stopwatch.GetTimestamp() + (long)(policy.Timeout.Value.TotalSeconds * Stopwatch.Frequency)
+            : null;
+        int iterCount = 0;
+
+        // MaxDepth applies to total path length, so each side can expand up to maxDepth
+        int maxForwardDepth = policy.MaxDepth ?? int.MaxValue;
+        int maxBackwardDepth = policy.MaxDepth ?? int.MaxValue;
+
+        NodeKey? meetingNode = null;
+
+        while (forwardQueue.Count > 0 || backwardQueue.Count > 0)
+        {
+            // Check timeout every 64 iterations
+            if (deadlineTicks.HasValue && (++iterCount & 63) == 0
+                && Stopwatch.GetTimestamp() >= deadlineTicks.Value)
+                break;
+
+            // Expand forward frontier (one level)
+            if (forwardQueue.Count > 0)
+            {
+                var (fKey, fDepth) = forwardQueue.Dequeue();
+                if (fDepth < maxForwardDepth)
+                {
+                    forwardCursor.Reset(fKey.Value, kindInt);
+                    while (forwardCursor.MoveNext())
+                    {
+                        if (policy.MinWeight.HasValue && forwardCursor.Weight < policy.MinWeight.Value)
+                            continue;
+
+                        var nextKey = new NodeKey(forwardCursor.TargetKey);
+                        if (!forwardVisited.ContainsKey(nextKey))
+                        {
+                            forwardVisited[nextKey] = fKey;
+                            forwardQueue.Enqueue((nextKey, fDepth + 1));
+
+                            // Check if backward frontier already visited this node
+                            if (backwardVisited.ContainsKey(nextKey))
+                            {
+                                meetingNode = nextKey;
+                                goto PathFound;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Expand backward frontier (one level)
+            if (backwardQueue.Count > 0)
+            {
+                var (bKey, bDepth) = backwardQueue.Dequeue();
+                if (bDepth < maxBackwardDepth)
+                {
+                    backwardCursor.Reset(bKey.Value, kindInt);
+                    while (backwardCursor.MoveNext())
+                    {
+                        if (policy.MinWeight.HasValue && backwardCursor.Weight < policy.MinWeight.Value)
+                            continue;
+
+                        // Incoming cursor: OriginKey is the neighbor (the node pointing toward bKey)
+                        var nextKey = new NodeKey(backwardCursor.OriginKey);
+                        if (!backwardVisited.ContainsKey(nextKey))
+                        {
+                            backwardVisited[nextKey] = bKey;
+                            backwardQueue.Enqueue((nextKey, bDepth + 1));
+
+                            // Check if forward frontier already visited this node
+                            if (forwardVisited.ContainsKey(nextKey))
+                            {
+                                meetingNode = nextKey;
+                                goto PathFound;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return null; // No path found
+
+    PathFound:
+        var shortPath = ReconstructBidirectionalPath(forwardVisited, backwardVisited, meetingNode!.Value);
+
+        // Validate total path length against MaxDepth (edges = nodes - 1)
+        if (policy.MaxDepth.HasValue && shortPath.Count - 1 > policy.MaxDepth.Value)
+            return null;
+
+        return shortPath;
+    }
+
+    /// <summary>
+    /// Reconstructs the full path from bidirectional BFS parent maps and the meeting node.
+    /// </summary>
+    private static List<NodeKey> ReconstructBidirectionalPath(
+        Dictionary<NodeKey, NodeKey?> forwardVisited,
+        Dictionary<NodeKey, NodeKey?> backwardVisited,
+        NodeKey meeting)
+    {
+        // Build forward half: from → ... → meeting
+        var forwardHalf = new List<NodeKey>();
+        NodeKey? current = meeting;
+        while (current.HasValue)
+        {
+            forwardHalf.Add(current.Value);
+            current = forwardVisited[current.Value];
+        }
+        forwardHalf.Reverse(); // Now: from → ... → meeting
+
+        // Build backward half: meeting → ... → to
+        current = backwardVisited[meeting];
+        while (current.HasValue)
+        {
+            forwardHalf.Add(current.Value);
+            current = backwardVisited[current.Value];
+        }
+
+        return forwardHalf;
+    }
+
     // ── Obsolete support code: only used by deprecated GetEdges/GetIncomingEdges ──
 
     [Obsolete("Only used by deprecated GetEdges/GetIncomingEdges.")]
