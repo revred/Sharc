@@ -246,6 +246,9 @@ public sealed partial class SharcDataReader : IDisposable
     // Per-row generation counter for lazy decode (full 32-bit, ~4.3B row cycle)
     private int _decodedGeneration;
 
+    // F-7: Cursor-based pagination — skip rows with RowId <= this value (0 = disabled)
+    private long _afterRowId;
+
     // Scan mode flags — byte enum with 4 flag bits
     private ScanMode _scanMode;
 
@@ -585,6 +588,19 @@ public sealed partial class SharcDataReader : IDisposable
     public long RowId => _composite?.DedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
 
     /// <summary>
+    /// Configures cursor-based pagination: only rows with RowId greater than
+    /// <paramref name="lastRowId"/> will be returned by subsequent <see cref="Read"/> calls.
+    /// Returns this reader for fluent chaining.
+    /// </summary>
+    /// <param name="lastRowId">The last-seen rowid. Rows with RowId &lt;= this value are skipped.</param>
+    /// <returns>This reader instance.</returns>
+    public SharcDataReader AfterRowId(long lastRowId)
+    {
+        _afterRowId = lastRowId;
+        return this;
+    }
+
+    /// <summary>
     /// Returns true if the underlying page source has been mutated since this reader
     /// was created or last refreshed. Useful for multi-agent scenarios where one agent
     /// may have committed changes that invalidate this reader's cached state.
@@ -838,6 +854,10 @@ public sealed partial class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
     {
+        // F-7: Cursor-based pagination — skip rows at or before the cursor position
+        if (_afterRowId > 0 && rowId <= _afterRowId)
+            return false;
+
         // ── Hot path: concrete FilterNode — write to _serialTypes directly (zero Array.Copy) ──
         if (_filter?.ConcreteFilterNode != null)
         {
