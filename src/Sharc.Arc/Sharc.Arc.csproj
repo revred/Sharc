@@ -17,4 +17,8 @@
     <InternalsVisibleTo Include="Sharc.Archive.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
 </Project>
