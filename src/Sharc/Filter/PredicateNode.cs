@@ -8,7 +8,7 @@ using Sharc.Core.Primitives;
 namespace Sharc;
 
 /// <summary>
-/// Leaf filter node â€” evaluates a single column predicate against raw record bytes.
+/// Leaf filter node — evaluates a single column predicate against raw record bytes.
 /// Zero allocation on the evaluation path.
 /// </summary>
 internal sealed class PredicateNode : IFilterNode
@@ -34,7 +34,7 @@ internal sealed class PredicateNode : IFilterNode
 
         long serialType = serialTypes[_columnOrdinal];
 
-        // â”€â”€ Phase 1: Serial-type-only predicates (zero body access) â”€â”€
+        // —— Phase 1: Serial-type-only predicates (zero body access) ——
         if (_operator == FilterOp.IsNull)
             return serialType == 0 && _columnOrdinal != _integerPrimaryKeyOrdinal;
 
@@ -50,7 +50,7 @@ internal sealed class PredicateNode : IFilterNode
             return false;
         }
 
-        // â”€â”€ Phase 2: Byte-level predicates â”€â”€
+        // —— Phase 2: Byte-level predicates ——
         var (offset, length) = GetColumnBodyPosition(serialTypes, bodyOffset, _columnOrdinal);
         var columnData = payload.Slice(offset, length);
 
@@ -273,5 +273,69 @@ internal sealed class PredicateNode : IFilterNode
         }
         int length = SerialTypeCodec.GetContentSize(serialTypes[columnIndex]);
         return (offset, length);
+    }
+}
+
+/// <summary>
+/// Optimized filter node for 128-bit GUID comparisons.
+/// Handles both physical hi/lo columns in a single step to avoid AndNode/OrNode overhead.
+/// </summary>
+internal sealed class GuidPredicateNode : IFilterNode
+{
+    private readonly int _hiOrdinal;
+    private readonly int _loOrdinal;
+    private readonly FilterOp _operator;
+    private readonly long _hiValue;
+    private readonly long _loValue;
+
+    internal GuidPredicateNode(int hiOrdinal, int loOrdinal, FilterOp op, TypedFilterValue value)
+    {
+        _hiOrdinal = hiOrdinal;
+        _loOrdinal = loOrdinal;
+        _operator = op;
+        _hiValue = value.AsInt64();
+        _loValue = value.AsInt64High();
+    }
+
+    public bool Evaluate(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes,
+                         int bodyOffset, long rowId)
+    {
+        if (_hiOrdinal >= serialTypes.Length || _loOrdinal >= serialTypes.Length)
+            return false;
+
+        long hiSerialType = serialTypes[_hiOrdinal];
+        long loSerialType = serialTypes[_loOrdinal];
+
+        // GUID physical parts must be present
+        if (hiSerialType == 0 || loSerialType == 0) return false;
+
+        // Performance: HI part check first (most likely to fail early)
+        var (hiOffset, hiLength) = PredicateNode.GetColumnBodyPosition(serialTypes, bodyOffset, _hiOrdinal);
+        var hiData = payload.Slice(hiOffset, hiLength);
+        long hiColVal = RawByteComparer.DecodeInt64(hiData, hiSerialType);
+
+        if (_operator == FilterOp.Eq)
+        {
+            if (hiColVal != _hiValue) return false;
+
+            var (loOffset, loLength) = PredicateNode.GetColumnBodyPosition(serialTypes, bodyOffset, _loOrdinal);
+            var loData = payload.Slice(loOffset, loLength);
+            long loColVal = RawByteComparer.DecodeInt64(loData, loSerialType);
+
+            return loColVal == _loValue;
+        }
+
+        if (_operator == FilterOp.Neq)
+        {
+            if (hiColVal != _hiValue) return true;
+
+            var (loOffset, loLength) = PredicateNode.GetColumnBodyPosition(serialTypes, bodyOffset, _loOrdinal);
+            var loData = payload.Slice(loOffset, loLength);
+            long loColVal = RawByteComparer.DecodeInt64(loData, loSerialType);
+
+            return loColVal != _loValue;
+        }
+
+        return false;
     }
 }

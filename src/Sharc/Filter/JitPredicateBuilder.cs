@@ -288,4 +288,41 @@ internal static class JitPredicateBuilder
             _ => static (_, _, _, _) => false
         };
     }
+
+    public static BakedDelegate BuildGuidComparison(int hiOrdinal, int loOrdinal, FilterOp op, TypedFilterValue value)
+    {
+        long hiValue = value.AsInt64();
+        long loValue = value.AsInt64High();
+
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            if (hiOrdinal >= serialTypes.Length || loOrdinal >= serialTypes.Length)
+                return false;
+
+            long hiSerialType = FilterStarCompiler.GetSerialType(serialTypes, hiOrdinal);
+            long loSerialType = FilterStarCompiler.GetSerialType(serialTypes, loOrdinal);
+
+            if (hiSerialType == SerialTypeCodec.NullSerialType || loSerialType == SerialTypeCodec.NullSerialType)
+                return false;
+
+            var hiData = FilterStarCompiler.GetColumnData(payload, offsets, hiOrdinal, hiSerialType);
+            long hiColVal = RawByteComparer.DecodeInt64(hiData, hiSerialType);
+
+            if (op == FilterOp.Eq)
+            {
+                if (hiColVal != hiValue) return false;
+                var loData = FilterStarCompiler.GetColumnData(payload, offsets, loOrdinal, loSerialType);
+                return RawByteComparer.DecodeInt64(loData, loSerialType) == loValue;
+            }
+
+            if (op == FilterOp.Neq)
+            {
+                if (hiColVal != hiValue) return true;
+                var loData = FilterStarCompiler.GetColumnData(payload, offsets, loOrdinal, loSerialType);
+                return RawByteComparer.DecodeInt64(loData, loSerialType) != loValue;
+            }
+
+            return false;
+        };
+    }
 }

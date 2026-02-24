@@ -48,27 +48,7 @@ internal static class FilterStarCompiler
         {
             var hiOrdinal = col.MergedPhysicalOrdinals[0];
             var loOrdinal = col.MergedPhysicalOrdinals[1];
-            var hiValue = TypedFilterValue.FromInt64(pred.Value.AsInt64());
-            var loValue = TypedFilterValue.FromInt64(pred.Value.AsInt64High());
-
-            // Use logical ordinal 0 in a single-column list to bypass mapping in JitPredicateBuilder
-            var hiCol = new[] { new ColumnInfo { Ordinal = hiOrdinal, Name = "", DeclaredType = "", IsPrimaryKey = false, IsNotNull = false } };
-            var loCol = new[] { new ColumnInfo { Ordinal = loOrdinal, Name = "", DeclaredType = "", IsPrimaryKey = false, IsNotNull = false } };
-
-            if (pred.Operator == FilterOp.Eq)
-            {
-                var hiDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Eq, hiValue), hiCol, rowidAliasOrdinal);
-                var loDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Eq, loValue), loCol, rowidAliasOrdinal);
-                return (payload, serialTypes, offsets, rowId) =>
-                    hiDel(payload, serialTypes, offsets, rowId) && loDel(payload, serialTypes, offsets, rowId);
-            }
-            if (pred.Operator == FilterOp.Neq)
-            {
-                var hiDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Neq, hiValue), hiCol, rowidAliasOrdinal);
-                var loDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Neq, loValue), loCol, rowidAliasOrdinal);
-                return (payload, serialTypes, offsets, rowId) =>
-                    hiDel(payload, serialTypes, offsets, rowId) || loDel(payload, serialTypes, offsets, rowId);
-            }
+            return JitPredicateBuilder.BuildGuidComparison(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
         }
 
         return JitPredicateBuilder.Build(pred, columns, rowidAliasOrdinal);
