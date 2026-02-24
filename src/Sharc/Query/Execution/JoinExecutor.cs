@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using Sharc.Core;
 using Sharc.Query.Intent;
 using Sharc.Query; // For QueryValue
@@ -172,6 +173,13 @@ internal static class JoinExecutor
         return new SharcDataReader(probeStream, columns);
     }
 
+    /// <summary>
+    /// Hash join implementation supporting INNER, LEFT, RIGHT, FULL, and CROSS joins.
+    /// Build side is indexed into a <c>Dictionary&lt;QueryValue, List&lt;int&gt;&gt;</c> mapping
+    /// join keys to build-row indices. FULL JOIN uses a <see cref="System.Collections.BitArray"/>
+    /// to track which build rows were matched — avoiding the destructive-probe pattern
+    /// (<c>hashTable.Remove</c>) which fails for duplicate probe keys.
+    /// </summary>
     private static IEnumerable<QueryValue[]> HashJoin(
         IEnumerable<QueryValue[]> leftRows, Dictionary<string, int> leftSchema,
         IEnumerable<QueryValue[]> rightRows, Dictionary<string, int> rightSchema,
@@ -180,6 +188,29 @@ internal static class JoinExecutor
         int rightColumnCount = rightSchema.Count;
         int leftColumnCount = leftSchema.Count;
         int mergedWidth = leftColumnCount + rightColumnCount;
+
+        // FULL OUTER JOIN: delegate to tiered zero-allocation executor.
+        // Uses PooledBitArray (Tier I/II) or destructive probe (Tier III)
+        // instead of System.Collections.BitArray for matched-row tracking.
+        if (join.Kind == JoinType.Full)
+        {
+            var buildSide = (rightRows as RowSet) ?? rightRows.ToList();
+
+            // FULL JOIN always builds on right, probes with left
+            if (!rightSchema.TryGetValue(join.RightColumn!, out int buildKeyIdx))
+                throw new InvalidOperationException($"Build join column '{join.RightColumn}' not found in schema.");
+            if (!leftSchema.TryGetValue(join.LeftColumn!, out int probeKeyIdx))
+                throw new InvalidOperationException($"Probe join column '{join.LeftColumn}' not found in schema.");
+
+            foreach (var row in TieredHashJoin.Execute(
+                buildSide, buildKeyIdx, rightColumnCount,
+                leftRows, probeKeyIdx, leftColumnCount,
+                buildIsLeft: false, reuseBuffer))
+            {
+                yield return row;
+            }
+            yield break;
+        }
 
         // For INNER JOIN, build the hash table on the smaller side to reduce
         // hash bucket memory. LEFT/CROSS must always build on right.
@@ -229,7 +260,7 @@ internal static class JoinExecutor
         }
         else
         {
-            // LEFT/FULL/CROSS: build on right, probe with left
+            // LEFT/CROSS: build on right, probe with left (FULL handled above)
             buildRows = rightList;
             probeRows = leftRows;
             buildSchema = rightSchema;
@@ -238,8 +269,10 @@ internal static class JoinExecutor
             probeCol = join.LeftColumn;
         }
 
-        // Build Hash Table — same RowSet for all join types.
-        var hashTable = new Dictionary<QueryValue, RowSet>(buildRows.Count);
+        // Build Hash Table — maps join key → list of build-row indices.
+        // Storing indices (not row references) enables the bool[] marker optimization
+        // for FULL JOIN unmatched-row detection.
+        var hashTable = new Dictionary<QueryValue, List<int>>(buildRows.Count, QueryValueComparer.Instance);
         int buildColIdx0 = -1;
 
         if (join.Kind != JoinType.Cross)
@@ -249,16 +282,15 @@ internal static class JoinExecutor
 
             for (int bi = 0; bi < buildRows.Count; bi++)
             {
-                var row = buildRows[bi];
-                var key = row[buildColIdx0];
+                var key = buildRows[bi][buildColIdx0];
                 if (key.IsNull) continue;
 
                 if (!hashTable.TryGetValue(key, out var list))
                 {
-                    list = new RowSet(4);
+                    list = new List<int>(4);
                     hashTable[key] = list;
                 }
-                list.Add(row);
+                list.Add(bi);
             }
         }
 
@@ -271,14 +303,15 @@ internal static class JoinExecutor
         }
 
         // Pre-build null rows for outer joins (reused across all unmatched rows)
+        // Note: FULL JOIN is handled above via TieredHashJoin and never reaches here.
         QueryValue[]? leftJoinNullRow = null;
         QueryValue[]? rightJoinNullRow = null;
-        if (join.Kind == JoinType.Left || join.Kind == JoinType.Full)
+        if (join.Kind == JoinType.Left)
         {
             leftJoinNullRow = new QueryValue[rightColumnCount];
             Array.Fill(leftJoinNullRow, QueryValue.Null);
         }
-        if (join.Kind == JoinType.Right || join.Kind == JoinType.Full)
+        if (join.Kind == JoinType.Right)
         {
             rightJoinNullRow = new QueryValue[leftColumnCount];
             Array.Fill(rightJoinNullRow, QueryValue.Null);
@@ -306,22 +339,17 @@ internal static class JoinExecutor
             }
 
             var key = probeRow[probeColIdx];
-            if (!key.IsNull && hashTable.TryGetValue(key, out var matches))
+            if (!key.IsNull && hashTable.TryGetValue(key, out var matchIndices))
             {
-                // FULL JOIN: remove matched key from hash table so the post-probe
-                // scan only sees unmatched buckets. Safe because we iterate probeRows,
-                // not hashTable. The local 'matches' ref survives removal.
-                if (join.Kind == JoinType.Full)
-                    hashTable.Remove(key);
-
-                foreach (var buildRow in matches)
+                foreach (var idx in matchIndices)
                 {
+                    var buildRow = buildRows[idx];
                     yield return swapped
                         ? MergeRows(buildRow, probeRow, mergedWidth, leftColumnCount, scratch)
                         : MergeRows(probeRow, buildRow, mergedWidth, leftColumnCount, scratch);
                 }
             }
-            else if (join.Kind == JoinType.Left || join.Kind == JoinType.Full)
+            else if (join.Kind == JoinType.Left)
             {
                 // Unmatched left (probe) row -> [left row, null right]
                 yield return MergeRows(probeRow, leftJoinNullRow!, mergedWidth, leftColumnCount, scratch);
@@ -333,30 +361,12 @@ internal static class JoinExecutor
             }
         }
 
-        // FULL OUTER JOIN: emit unmatched build-side rows.
-        // Matched keys were removed from the hash table during probe, so only
-        // unmatched buckets remain. Zero extra allocation — reuses the existing
-        // hash table as the tracking structure.
-        if (join.Kind == JoinType.Full)
-        {
-            // Unmatched non-NULL keys still in the hash table
-            foreach (var bucket in hashTable.Values)
-            {
-                foreach (var row in bucket)
-                    yield return MergeRows(rightJoinNullRow!, row, mergedWidth, leftColumnCount, scratch);
-            }
-
-            // NULL-keyed build rows never entered the hash table
-            for (int bi = 0; bi < buildRows.Count; bi++)
-            {
-                if (buildRows[bi][buildColIdx0].IsNull)
-                    yield return MergeRows(rightJoinNullRow!, buildRows[bi], mergedWidth, leftColumnCount, scratch);
-            }
-        }
     }
 
     private static QueryValue[] MergeRows(QueryValue[] left, QueryValue[] right, int mergedWidth, int leftLen, QueryValue[]? scratch = null)
     {
+        Debug.Assert(left.Length >= leftLen, "Left row shorter than leftLen");
+        Debug.Assert(mergedWidth >= leftLen + right.Length, "Merged width too narrow for left + right");
         var combined = scratch ?? new QueryValue[mergedWidth];
         left.AsSpan(0, leftLen).CopyTo(combined);
         right.AsSpan().CopyTo(combined.AsSpan(leftLen));
@@ -817,6 +827,46 @@ internal static class JoinExecutor
                 newRow[i] = indices[i] >= 0 ? row[indices[i]] : QueryValue.Null;
             }
             yield return newRow;
+        }
+    }
+
+    /// <summary>
+    /// Structural equality comparer for a single <see cref="QueryValue"/>.
+    /// Uses the same <c>ValuesEqual</c> / <c>AddToHash</c> patterns as
+    /// <see cref="QueryValueOps.QvRowEqualityComparer"/> to ensure consistent
+    /// hashing for text, int/double cross-type, and NULL values.
+    /// </summary>
+    private sealed class QueryValueComparer : IEqualityComparer<QueryValue>
+    {
+        internal static readonly QueryValueComparer Instance = new();
+
+        public bool Equals(QueryValue a, QueryValue b)
+        {
+            if (a.Type != b.Type)
+            {
+                if (a.Type == QueryValueType.Int64 && b.Type == QueryValueType.Double)
+                    return (double)a.AsInt64() == b.AsDouble();
+                if (a.Type == QueryValueType.Double && b.Type == QueryValueType.Int64)
+                    return a.AsDouble() == (double)b.AsInt64();
+                if (a.IsNull && b.IsNull) return true;
+                return false;
+            }
+
+            return a.Type switch
+            {
+                QueryValueType.Null => true,
+                QueryValueType.Int64 => a.AsInt64() == b.AsInt64(),
+                QueryValueType.Double => a.AsDouble() == b.AsDouble(),
+                QueryValueType.Text => string.Equals(a.AsString(), b.AsString(), StringComparison.Ordinal),
+                _ => Equals(a.ObjectValue, b.ObjectValue),
+            };
+        }
+
+        public int GetHashCode(QueryValue val)
+        {
+            var hash = new HashCode();
+            QueryValueOps.AddToHash(ref hash, ref val);
+            return hash.ToHashCode();
         }
     }
 }
