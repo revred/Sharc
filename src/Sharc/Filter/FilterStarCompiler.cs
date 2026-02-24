@@ -139,4 +139,20 @@ internal static class FilterStarCompiler
         if (data.IsEmpty || set.Count == 0) return false;
         return set.Contains(Encoding.UTF8.GetString(data));
     }
+
+    /// <summary>
+    /// Zero-allocation UTF-8 set membership check.
+    /// Compares raw byte spans against pre-encoded UTF-8 keys.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool Utf8SetContainsBytes(ReadOnlySpan<byte> data, byte[][] utf8Keys)
+    {
+        if (data.IsEmpty || utf8Keys.Length == 0) return false;
+        for (int i = 0; i < utf8Keys.Length; i++)
+        {
+            if (data.SequenceEqual(utf8Keys[i]))
+                return true;
+        }
+        return false;
+    }
 }

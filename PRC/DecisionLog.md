@@ -4,6 +4,33 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-023: Allocation Technical Debt Audit — 4 of 6 Items Resolved
+
+**Date**: 2026-02-23
+**Status**: Resolved (4/6); 2 remaining gaps documented
+
+**Context**: A full audit of reported allocation gaps between Sharc and native SQLite identified 6 concerns: WHERE predicate overhead, GraphEdge per-row allocation, eager schema parsing, ColumnValue[] pooling, string materialization on scans, and append-only write mode.
+
+**Findings:**
+
+| Item | Status | Evidence |
+| :--- | :--- | :--- |
+| WHERE predicate 1,513x alloc gap | **FIXED** | `FilterStar`/`CompileBaked` achieves 0 B per-row (prepared). Cold path: 680 B. Original 1,089 KB to 0 B. Legacy `SharcFilter` path superseded. |
+| GraphEdge 2,000x alloc spike | **FIXED** | Modern `IEdgeCursor` API uses `ArrayPool` rentals, cursor reuse via `Reset()`. Old `GetEdges()`/`GetIncomingEdges()` marked `[Obsolete]`. |
+| OpenMemory() eager schema parse | **FIXED** | `_schema ??=` lazy init — 0 B at open. Schema deferred until first `.Schema`/`CreateReader()`/`Query()` access. Verified by `AllocationFixTests.cs`. |
+| ColumnValue[] not pooled | **FIXED** | `ArrayPool<ColumnValue>.Shared.Rent()` for row buffers, `ArrayPool<long>` for serial types, `ArrayPool<int>` for offsets. 2-slot `[ThreadStatic]` reader pool. Lazy column decode. |
+| String materialization on scans | **Mostly fixed** | `RawByteComparer` does zero-alloc UTF-8 span comparisons. `GetUtf8Span()` public API avoids string allocation. Remaining: `GetString()` allocates by contract; `Utf8SetContains()` IN/NotIn allocates one string per row. |
+| Append-only write mode | **Not implemented** | No dedicated append-only path exists. Write engine is full B-tree mutator. This remains a gap for logging/Context Space capture. |
+
+**Remaining gaps:**
+
+1. `Utf8SetContains()` per-row string allocation — fixable with `Dictionary<ReadOnlyMemory<byte>>` using a UTF-8 span comparer
+2. Append-only write mode — requires design work for fast-path sequential inserts that skip B-tree splitting
+
+**Files updated**: `FilterActionPlan.md` (status → DONE), `BenchmarkProtocol.md` (backlog items marked done), `PerformanceBaseline.md` (known costs updated)
+
+---
+
 ## ADR-022: B-Tree Leaf Range Cache + Random Lookup 109x (Achieved)
 
 **Date**: 2026-02-23

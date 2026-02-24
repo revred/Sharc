@@ -34,5 +34,8 @@ jobs:
       - name: Pack Sharc.Graph
         run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist
 
+      - name: Pack Sharc.Vector
+        run: dotnet pack src/Sharc.Vector/Sharc.Vector.csproj --configuration Release --no-build -o dist
+
       - name: Push to NuGet
         run: dotnet nuget push "dist/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
