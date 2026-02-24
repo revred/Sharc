@@ -12,7 +12,7 @@ namespace Sharc;
 /// </summary>
 internal readonly struct TypedFilterValue
 {
-    internal enum Tag : byte { Null, Int64, Double, Utf8, Utf8Set, Int64Set, Int64Range, DoubleRange }
+    internal enum Tag : byte { Null, Int64, Double, Utf8, Utf8Set, Int64Set, Int64Range, DoubleRange, Guid }
 
     internal Tag ValueTag { get; }
     private readonly long _int64;
@@ -51,6 +51,12 @@ internal readonly struct TypedFilterValue
     internal static TypedFilterValue FromInt64(long v) => new(Tag.Int64, int64: v);
 
     internal static TypedFilterValue FromDouble(double v) => new(Tag.Double, dbl: v);
+
+    internal static TypedFilterValue FromGuid(Guid v)
+    {
+        var (hi, lo) = Sharc.Core.Primitives.GuidCodec.ToInt64Pair(v);
+        return new TypedFilterValue(Tag.Guid, int64: hi, int64High: lo);
+    }
 
     internal static TypedFilterValue FromUtf8(ReadOnlyMemory<byte> v) => new(Tag.Utf8, utf8: v);
 
