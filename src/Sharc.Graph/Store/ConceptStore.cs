@@ -220,6 +220,33 @@ internal sealed class ConceptStore
         return result;
     }
 
+    /// <summary>
+    /// Full table scan returning only node keys — no data, no JSON, no allocation beyond the key list.
+    /// </summary>
+    internal List<NodeKey> FetchAllKeys()
+    {
+        if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
+
+        _reusableScanCursor ??= _reader.CreateCursor((uint)_tableRootPage);
+        var cursor = _reusableScanCursor;
+        cursor.Reset();
+
+        var keys = new List<NodeKey>();
+        while (cursor.MoveNext())
+        {
+            var payload = cursor.Payload;
+            _decoder.ReadSerialTypes(payload, _serialsBuffer, out int bodyOffset);
+            _decoder.ComputeColumnOffsets(_serialsBuffer, _columnCount, bodyOffset, _offsetsBuffer);
+            long keyVal = _colKey >= 0 && _colKey < _columnCount
+                ? _decoder.DecodeInt64At(payload, _serialsBuffer[_colKey], _offsetsBuffer[_colKey])
+                : 0;
+            if (keyVal != 0)
+                keys.Add(new NodeKey(keyVal));
+        }
+
+        return keys;
+    }
+
     public void Dispose()
     {
         _reusableIndexCursor?.Dispose();

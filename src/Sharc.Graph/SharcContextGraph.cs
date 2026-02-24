@@ -5,6 +5,8 @@ using System.Diagnostics;
 using Sharc.Core;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
+using Sharc.Graph.Algorithms;
+using Sharc.Graph.Cypher;
 using Sharc.Graph.Model;
 using Sharc.Graph.Schema;
 using Sharc.Graph.Store;
@@ -319,6 +321,84 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// Computes PageRank scores for all nodes in the graph.
+    /// Returns results sorted by score descending.
+    /// </summary>
+    /// <param name="options">Algorithm configuration (damping, epsilon, max iterations, kind filter).</param>
+    public IReadOnlyList<NodeScore> PageRank(PageRankOptions options = default)
+    {
+        var keys = _concepts.FetchAllKeys();
+        return GraphAlgorithms.PageRank(keys, k => _relations.CreateEdgeCursor(k), options);
+    }
+
+    /// <summary>
+    /// Computes degree centrality for all nodes. Returns results sorted by total degree descending.
+    /// </summary>
+    /// <param name="kind">Optional edge kind filter.</param>
+    public IReadOnlyList<DegreeResult> DegreeCentrality(RelationKind? kind = null)
+    {
+        var keys = _concepts.FetchAllKeys();
+        return GraphAlgorithms.DegreeCentrality(
+            keys,
+            k => _relations.CreateEdgeCursor(k),
+            k => _relations.CreateIncomingEdgeCursor(k),
+            kind);
+    }
+
+    /// <summary>
+    /// Returns nodes in topological order (dependency-first). Throws if a cycle is detected.
+    /// </summary>
+    /// <param name="kind">Optional edge kind filter.</param>
+    /// <exception cref="InvalidOperationException">The graph contains a cycle.</exception>
+    public IReadOnlyList<NodeKey> TopologicalSort(RelationKind? kind = null)
+    {
+        var keys = _concepts.FetchAllKeys();
+        return GraphAlgorithms.TopologicalSort(keys, k => _relations.CreateEdgeCursor(k), kind);
+    }
+
+    /// <summary>
+    /// Executes a Cypher query against this graph context.
+    /// Compiles the query to a traversal or shortest path call.
+    /// </summary>
+    /// <param name="query">A Cypher MATCH statement.</param>
+    /// <returns>The graph result from executing the query.</returns>
+    /// <example>
+    /// <code>
+    /// var result = graph.Cypher("MATCH (a) |> [r:CALLS] |> (b) WHERE a.key = 42 RETURN b");
+    /// var path = graph.Cypher("MATCH p = shortestPath((a) |> [*] |> (b)) WHERE a.key = 1 AND b.key = 99 RETURN p");
+    /// </code>
+    /// </example>
+    public GraphResult Cypher(string query)
+    {
+        var parser = new CypherParser(query.AsSpan());
+        var stmt = parser.Parse();
+        var plan = CypherCompiler.Compile(stmt);
+        return CypherExecutor.Execute(plan, this);
+    }
+
+    /// <summary>
+    /// Pre-compiles a Cypher query for repeated execution. Parse once, execute many times.
+    /// The prepared statement captures the AST and plan — call <see cref="PreparedCypher.Execute()"/>
+    /// or override start/end keys for parameterized execution.
+    /// </summary>
+    /// <param name="query">A Cypher MATCH statement.</param>
+    /// <returns>A prepared Cypher query that can be executed repeatedly.</returns>
+    /// <example>
+    /// <code>
+    /// var prepared = graph.PrepareCypher("MATCH (a) |> [r:CALLS*..3] |> (b) WHERE a.key = 1 RETURN b");
+    /// var r1 = prepared.Execute();                    // uses compiled start key
+    /// var r2 = prepared.Execute(new NodeKey(999));     // override start key
+    /// </code>
+    /// </example>
+    public PreparedCypher PrepareCypher(string query)
+    {
+        var parser = new CypherParser(query.AsSpan());
+        var stmt = parser.Parse();
+        var plan = CypherCompiler.Compile(stmt);
+        return new PreparedCypher(plan, this);
     }
 
     /// <summary>
