@@ -687,11 +687,21 @@ internal static class JoinExecutor
 
         // Leaf comparison
         QueryValue colVal = QueryValue.Null;
-        if (node.ColumnName != null && schema.TryGetValue(node.ColumnName, out int colIdx))
+        if (node.ColumnName != null)
         {
-            colVal = row[colIdx];
+            if (schema.TryGetValue(node.ColumnName, out int colIdx))
+            {
+                colVal = row[colIdx];
+            }
+            else if (node.ColumnName.IndexOf('.') < 0)
+            {
+                // Unqualified column — resolve against alias-qualified schema keys
+                colIdx = ResolveUnqualifiedColumn(node.ColumnName, schema);
+                if (colIdx >= 0)
+                    colVal = row[colIdx];
+            }
         }
-        
+
         return Compare(node.Op, colVal, node.Value, node.HighValue);
     }
 
@@ -798,6 +808,28 @@ internal static class JoinExecutor
             return text.StartsWith(pattern[..^1], StringComparison.OrdinalIgnoreCase);
         }
         return string.Equals(text, pattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Resolves an unqualified column name against alias-qualified schema keys.
+    /// Returns the column index if exactly one match is found, -1 if none,
+    /// and throws if ambiguous (multiple tables have a column with the same name).
+    /// </summary>
+    private static int ResolveUnqualifiedColumn(string columnName, Dictionary<string, int> schema)
+    {
+        int foundIdx = -1;
+        string suffix = string.Concat(".", columnName);
+        foreach (var kv in schema)
+        {
+            if (kv.Key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                if (foundIdx >= 0)
+                    throw new InvalidOperationException(
+                        $"Ambiguous column reference '{columnName}' in JOIN residual filter — qualify with table alias.");
+                foundIdx = kv.Value;
+            }
+        }
+        return foundIdx;
     }
 
     /// <summary>

@@ -114,6 +114,26 @@ internal readonly struct ScopeDescriptor
         return false;
     }
 
+    /// <summary>
+    /// Returns true if the scope permits reading ALL columns in the given table
+    /// (i.e., contains a "table.*" entry, not just specific columns).
+    /// Used to enforce SELECT * queries — if the scope only allows specific columns,
+    /// a wildcard projection must be denied.
+    /// </summary>
+    internal bool CanReadAllColumns(string tableName)
+    {
+        if (IsUnrestricted) return true;
+        if (_entries == null) return false;
+
+        foreach (var entry in _entries)
+        {
+            if (entry.MatchesTable(tableName) && entry.AllowsAllColumns)
+                return true;
+        }
+
+        return false;
+    }
+
     private readonly struct ScopeEntry
     {
         private readonly string _tableOrPrefix;
@@ -140,5 +160,8 @@ internal readonly struct ScopeDescriptor
             if (_column == null) return true;
             return string.Equals(_column, columnName, StringComparison.OrdinalIgnoreCase);
         }
+
+        /// <summary>True if this entry allows all columns (table.*), not just specific ones.</summary>
+        internal bool AllowsAllColumns => _column == null;
     }
 }

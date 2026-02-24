@@ -707,6 +707,14 @@ public sealed class SharcDatabase : IDisposable
         var cache = _queryCache ??= new QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
+        // Enforce entitlements BEFORE hint routing — prevents CACHED/JIT bypass.
+        // Zero cost when agent is null (no opt-in to entitlements).
+        if (agent is not null)
+        {
+            var tables = TableReferenceCollector.Collect(plan);
+            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
+        }
+
         // Hint routing: CACHED → auto-Prepare, JIT → auto-Jit
         var hinted = _executionRouter.TryRoute(this, plan, sharqQuery, parameters);
         if (hinted != null)
@@ -735,20 +743,6 @@ public sealed class SharcDatabase : IDisposable
             plan.ResolvedViewPlan = resolved;
             plan.ResolvedViewGeneration = effectiveGen;
             plan = resolved;
-        }
-
-        // Pre-materialize only views with Func filters (not expressible as SQL).
-        // Filter-free views stay as null, enabling the lazy Cote resolution path
-        // in CompoundQueryExecutor — ORDER BY column merging and HasJoins guards
-        // ensure correctness without forcing full materialization.
-        if (_viewResolver.HasRegisteredViews)
-            preMaterialized = _viewResolver.PreMaterializeFilteredViews(plan);
-
-        // Enforce entitlements when an agent is specified
-        if (agent is not null)
-        {
-            var tables = TableReferenceCollector.Collect(plan);
-            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
         }
 
         // Compound or Cote queries go through the compound executor
