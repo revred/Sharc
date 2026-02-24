@@ -23,7 +23,7 @@ public static class GetCommand
             {
                 case "--all": all = true; break;
                 default:
-                    if (!args[i].StartsWith("--") && key == null)
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal) && key == null)
                         key = args[i];
                     break;
             }

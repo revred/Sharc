@@ -28,7 +28,7 @@ public static class AnnotateCommand
                 case "--line" when i + 1 < args.Length: lineSpec = args[++i]; break;
                 case "--author" when i + 1 < args.Length: author = args[++i]; break;
                 default:
-                    if (!args[i].StartsWith("--"))
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal))
                     {
                         if (filePath == null) filePath = args[i];
                         else if (content == null) content = args[i];

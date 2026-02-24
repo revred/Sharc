@@ -57,6 +57,7 @@ public class GetContextTests : IDisposable
         _graph.Dispose();
         _writer.Dispose();
         _db.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

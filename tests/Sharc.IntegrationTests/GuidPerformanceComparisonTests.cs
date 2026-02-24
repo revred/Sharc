@@ -70,6 +70,7 @@ public class GuidPerformanceComparisonTests
 
         var tNew = db.Schema.GetTable("new");
         var gCol = tNew.Columns.First(c => c.Name == "g");
+        Assert.NotNull(gCol.MergedPhysicalOrdinals);
         int hiPhys = gCol.MergedPhysicalOrdinals[0];
         int loPhys = gCol.MergedPhysicalOrdinals[1];
 

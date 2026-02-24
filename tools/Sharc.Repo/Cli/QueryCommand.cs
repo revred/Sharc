@@ -26,10 +26,10 @@ public static class QueryCommand
             switch (args[i])
             {
                 case "--limit" when i + 1 < args.Length:
-                    int.TryParse(args[++i], out limit);
+                    if (int.TryParse(args[++i], out int parsed)) limit = parsed;
                     break;
                 default:
-                    if (!args[i].StartsWith("--") && tableName == null)
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal) && tableName == null)
                         tableName = args[i];
                     break;
             }

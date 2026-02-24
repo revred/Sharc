@@ -28,7 +28,7 @@ public static class DecideCommand
                 case "--status" when i + 1 < args.Length: status = args[++i]; break;
                 case "--author" when i + 1 < args.Length: author = args[++i]; break;
                 default:
-                    if (!args[i].StartsWith("--"))
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal))
                     {
                         if (decisionId == null) decisionId = args[i];
                         else if (title == null) title = args[i];
