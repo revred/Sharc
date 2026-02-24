@@ -184,7 +184,7 @@ This is a **safety net**, not the primary defense. Primary validation happens be
 | Weak passwords | User responsibility; Sharc's KDF makes brute-force expensive but can't prevent it |
 | Root/admin access to host | If the attacker owns the machine, they own the process memory |
 | Side-channel attacks on AES | Hardware AES-NI provides constant-time operation; software fallback does not |
-| Database modification | Sharc is read-only; write integrity is out of scope |
+| Database modification | Write engine provides ACID transactions via rollback journal; B-tree mutations are crash-safe via ShadowPageSource copy-on-write. Encrypted writes re-encrypt modified pages with fresh nonces. |
 | Traffic interception | Sharc is not a transport protocol; use TLS for network transfer |
 | Denial of service via large DB | Sharc will process whatever file it's given; callers should validate file size |
 

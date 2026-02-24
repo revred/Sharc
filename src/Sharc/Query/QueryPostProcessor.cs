@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Runtime.InteropServices;
+using Sharc.Query.Execution;
 using Sharc.Query.Intent;
 
 namespace Sharc.Query;
@@ -25,12 +26,13 @@ internal static class QueryPostProcessor
         bool needsDistinct = intent.IsDistinct;
         bool needsSort = intent.OrderBy is { Count: > 0 };
         bool needsLimit = intent.Limit.HasValue || intent.Offset.HasValue;
+        bool needsCase = intent.HasCaseExpressions;
 
-        if (!needsAggregate && !needsDistinct && !needsSort && !needsLimit)
+        if (!needsAggregate && !needsDistinct && !needsSort && !needsLimit && !needsCase)
             return source;
 
         // Streaming top-N: ORDER BY + LIMIT without full materialization
-        if (needsSort && needsLimit && !needsAggregate && !needsDistinct
+        if (needsSort && needsLimit && !needsAggregate && !needsDistinct && !needsCase
             && intent.Limit.HasValue)
         {
             return StreamingTopNProcessor.Apply(
@@ -38,7 +40,7 @@ internal static class QueryPostProcessor
         }
 
         // Streaming aggregate: GROUP BY + aggregates without full materialization
-        if (needsAggregate && !needsDistinct)
+        if (needsAggregate && !needsDistinct && !needsCase)
         {
             return StreamingAggregateProcessor.Apply(source, intent, needsSort, needsLimit);
         }
@@ -52,7 +54,9 @@ internal static class QueryPostProcessor
         var (rows, columnNames) = Materialize(source, checkDistinct: fuseDistinct);
         source.Dispose();
 
-        // Pipeline: Aggregate+GroupBy → Distinct → Sort → Limit/Offset (SQL semantics)
+        // Pipeline: Aggregate+GroupBy → Sort → Limit/Offset → CASE → Distinct (SQL semantics)
+        // Sort and Limit operate on physical columns (before CASE projection),
+        // because ORDER BY may reference columns not in the final SELECT list.
         if (needsAggregate)
         {
             (rows, columnNames) = AggregateProcessor.Apply(
@@ -62,17 +66,87 @@ internal static class QueryPostProcessor
                 intent.Columns);
         }
 
-        // Skip distinct if already handled during materialization
-        if (needsDistinct && !fuseDistinct)
-            rows = SetOperationProcessor.ApplyDistinct(rows, columnNames.Length);
-
+        // Sort on physical rows (ORDER BY may use columns not in SELECT)
         if (needsSort)
             ApplyOrderBy(rows, intent.OrderBy!, columnNames);
 
         if (needsLimit)
             rows = ApplyLimitOffset(rows, intent.Limit, intent.Offset);
 
+        // CASE expression evaluation: rebuild rows from physical to output schema
+        if (needsCase)
+            (rows, columnNames) = ApplyCaseExpressions(rows, columnNames, intent);
+
+        // Skip distinct if already handled during materialization
+        if (needsDistinct && !fuseDistinct)
+            rows = SetOperationProcessor.ApplyDistinct(rows, columnNames.Length);
+
         return new SharcDataReader(rows, columnNames);
+    }
+
+    // ─── CASE expression evaluation ─────────────────────────────
+
+    /// <summary>
+    /// Evaluates CASE expressions and rebuilds rows to match the intended output schema.
+    /// Physical rows contain source columns; output rows have CASE results at their intended ordinals.
+    /// </summary>
+    private static MaterializedResultSet ApplyCaseExpressions(
+        RowSet rows, string[] physicalColumnNames, QueryIntent intent)
+    {
+        var caseExprs = intent.CaseExpressions!;
+        var outputColumns = intent.Columns!;
+        int outputWidth = outputColumns.Count;
+        var outputNames = new string[outputWidth];
+
+        // Build output column names
+        for (int i = 0; i < outputWidth; i++)
+            outputNames[i] = outputColumns[i];
+
+        // Build mapping: for each output ordinal, either it's a CASE expr or a physical column
+        var caseByOrdinal = new Dictionary<int, CaseExpressionIntent>();
+        foreach (var ce in caseExprs)
+            caseByOrdinal[ce.OutputOrdinal] = ce;
+
+        // Map non-CASE output columns to their physical column ordinal
+        var physicalOrdinalMap = new int[outputWidth];
+        for (int i = 0; i < outputWidth; i++)
+        {
+            if (caseByOrdinal.ContainsKey(i))
+            {
+                physicalOrdinalMap[i] = -1; // Will be computed
+            }
+            else
+            {
+                physicalOrdinalMap[i] = QueryValueOps.TryResolveOrdinal(physicalColumnNames, outputColumns[i]);
+                if (physicalOrdinalMap[i] < 0)
+                    throw new InvalidOperationException(
+                        $"Column '{outputColumns[i]}' not found in physical result set.");
+            }
+        }
+
+        // Rebuild each row
+        for (int r = 0; r < rows.Count; r++)
+        {
+            var physicalRow = rows[r];
+            var outputRow = new QueryValue[outputWidth];
+
+            for (int c = 0; c < outputWidth; c++)
+            {
+                if (caseByOrdinal.TryGetValue(c, out var ce))
+                {
+                    outputRow[c] = CaseExpressionEvaluator.Evaluate(
+                        ce.Expression, physicalRow, physicalColumnNames);
+                }
+                else
+                {
+                    outputRow[c] = physicalRow[physicalOrdinalMap[c]];
+                }
+            }
+
+            rows[r] = outputRow;
+        }
+
+        return new MaterializedResultSet(rows, outputNames);
     }
 
     // ─── Materialization ──────────────────────────────────────────

@@ -4,6 +4,37 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-024: Gaps.F24 — Review-Driven Gap Closure (6 Items)
+
+**Date**: 2026-02-24
+**Status**: Complete
+**Branch**: `Gaps.F24`
+
+**Context**: An independent 360-degree code review identified 17 technical debt items. 2 were non-issues (TD-3: intentional materialization; TD-17: query split already done). 6 were addressed in this branch. 7 are deferred to dedicated feature branches.
+
+**Decisions & outcomes:**
+
+| TD | Item | Decision | Outcome |
+| :--- | :--- | :--- | :--- |
+| TD-1 | Ledger >50 entries | Added 200-entry stress test proving B-tree page split | Test passes — `BTreeMutator.InsertCellAndSplit` works for system tables |
+| TD-2 | Entitlement encryption docs | Rewrote XML docs: page-level encryption, entitlement tag filtering | `SharcEntitlementContext.cs` docs now accurate |
+| TD-6 | FULL OUTER JOIN | Implemented via hash join with `Remove`-based matched tracking | Zero extra allocation — matched keys removed from hash table during probe, unmatched keys remain for post-probe scan |
+| TD-7 | CASE expression execution | Post-materialization evaluator over `CaseStar` AST | 8 integration tests. Pipeline order: Sort → Limit → CASE → Distinct |
+| TD-10 | Reputation scoring | Bayesian Beta distribution (Alpha/Beta), exponential time decay (30-day half-life), persistence via `SystemStore` | 9 tests covering observation, persistence, legacy API, weighted observations |
+| TD-13 | Utf8SetContains dead code | Removed allocating `Utf8SetContains` and `BuildUtf8In` — zero-alloc variants already wired | 23 lines removed, no callers remained |
+| TD-16 | SecurityModel.md stale claim | Updated write-integrity claim — write engine has full CRUD + ACID | 1 line changed |
+
+**FULL JOIN zero-alloc design**: During probe, `hashTable.Remove(key)` marks the bucket as matched. The local `matches` variable still holds the `RowSet` reference for iteration. Post-probe, only unmatched buckets remain in the dictionary. Safe because probe iterates `probeRows`, not `hashTable`. No parallel dictionary, no bitmap, no wrapper class — zero extra bytes.
+
+**CASE pipeline ordering**: ORDER BY must run on physical columns before CASE projection strips them. CASE projection is post-sort/limit because computed columns may reference columns not in the final SELECT. Order: Aggregate → Sort → Limit → CASE → Distinct.
+
+**Deferred items** (dedicated feature branches): TD-4 (ArcFileManager extraction), TD-8 (append-only fast path), TD-9 (fuzz testing), TD-11 (IndexedDB page source), TD-12 (BTreeMutator refactor), TD-14 (subquery execution), TD-15 (window functions).
+
+**Files added**: `CaseExpressionIntent.cs`, `CaseExpressionEvaluator.cs`, `CaseProjection.cs`, `CaseExpressionTests.cs`, `ReputationScoringTests.cs`
+**Files modified**: `JoinExecutor.cs`, `IntentCompiler.cs`, `QueryIntent.cs`, `QueryPostProcessor.cs`, `SharcDatabase.cs`, `SharqParser.cs`, `JoinClause.cs`, `JoinIntent.cs`, `ReputationManager.cs`, `ReputationScore.cs`, `SharcDatabaseFactory.cs`, `SharcEntitlementContext.cs`, `SecurityModel.md`, `FilterStarCompiler.cs`, `JitPredicateBuilder.cs`, `TrustLayerStressTests.cs`, `TrustTestFixtures.cs`, `JoinTests.cs`, `DataGenerator.cs`
+
+---
+
 ## ADR-023: Allocation Technical Debt Audit — 4 of 6 Items Resolved
 
 **Date**: 2026-02-23
