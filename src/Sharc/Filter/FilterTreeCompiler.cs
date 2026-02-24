@@ -71,7 +71,8 @@ internal static class FilterTreeCompiler
             int ordinal = pred.ColumnOrdinal.Value;
             if (ordinal < 0 || ordinal >= columns.Count)
                 throw new ArgumentOutOfRangeException(nameof(pred), $"Column ordinal {ordinal} is out of range (0..{columns.Count - 1}).");
-            return ordinal;
+            
+            return columns[ordinal].MergedPhysicalOrdinals?[0] ?? columns[ordinal].Ordinal;
         }
 
         if (pred.ColumnName != null)
@@ -79,7 +80,9 @@ internal static class FilterTreeCompiler
             for (int i = 0; i < columns.Count; i++)
             {
                 if (columns[i].Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase))
-                    return columns[i].Ordinal;
+                {
+                    return columns[i].MergedPhysicalOrdinals?[0] ?? columns[i].Ordinal;
+                }
             }
             throw new ArgumentException($"Filter column '{pred.ColumnName}' not found in table.");
         }
@@ -87,9 +90,24 @@ internal static class FilterTreeCompiler
         throw new ArgumentException("Filter predicate must specify either column name or ordinal.");
     }
 
-    private static PredicateNode CompilePredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
+    private static IFilterNode CompilePredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
     {
-        int ordinal = ResolveOrdinal(pred, columns);
+        ColumnInfo? col = pred.ColumnOrdinal.HasValue
+            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
+            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (col == null)
+            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found.");
+
+        // GUID expansion for merged columns
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
+        {
+            var hiOrdinal = col.MergedPhysicalOrdinals[0];
+            var loOrdinal = col.MergedPhysicalOrdinals[1];
+            return new GuidPredicateNode(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
+        }
+
+        int ordinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal;
         return new PredicateNode(ordinal, pred.Operator, pred.Value, rowidAliasOrdinal);
     }
 
@@ -114,7 +132,16 @@ internal static class FilterTreeCompiler
                 CollectOrdinals(not.Inner, columns, ordinals);
                 break;
             case PredicateExpression pred:
-                ordinals.Add(ResolveOrdinal(pred, columns));
+                var col = pred.ColumnOrdinal.HasValue
+                    ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
+                    : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
+                if (col != null)
+                {
+                    if (col.MergedPhysicalOrdinals != null)
+                        foreach (var o in col.MergedPhysicalOrdinals) ordinals.Add(o);
+                    else
+                        ordinals.Add(col.Ordinal);
+                }
                 break;
         }
     }

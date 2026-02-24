@@ -352,6 +352,29 @@ public sealed class SharcDatabase : IDisposable
     }
 
     /// <summary>
+    /// Registers an <see cref="Views.ILayer"/> as a queryable data source.
+    /// Layers are always pre-materialized when referenced in SQL queries.
+    /// Use this for graph traversal results, external data, or any non-SQL row source.
+    /// </summary>
+    /// <param name="layer">The layer to register. Must have a non-empty name.</param>
+    public void RegisterLayer(Views.ILayer layer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _viewResolver.RegisterLayer(layer);
+    }
+
+    /// <summary>
+    /// Removes a previously registered layer by name.
+    /// </summary>
+    /// <param name="layerName">The name of the layer to remove.</param>
+    /// <returns>True if the layer was found and removed; false otherwise.</returns>
+    public bool UnregisterLayer(string layerName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.UnregisterLayer(layerName);
+    }
+
+    /// <summary>
     /// Opens a named view as a zero-allocation <see cref="Views.IViewCursor"/>.
     /// Checks registered programmatic views first, then falls back to
     /// auto-promotable SQLite views in <c>sqlite_schema</c>.
@@ -912,7 +935,7 @@ public sealed class SharcDatabase : IDisposable
         if (filters is not { Length: > 0 })
             return null;
 
-        var resolved = new ResolvedFilter[filters.Length];
+        var resolved = new List<ResolvedFilter>(filters.Length);
         for (int i = 0; i < filters.Length; i++)
         {
             ColumnInfo? col = null;
@@ -927,16 +950,33 @@ public sealed class SharcDatabase : IDisposable
                 }
             }
 
-            resolved[i] = new ResolvedFilter
+            if (col == null)
             {
-                ColumnOrdinal = col?.Ordinal
-                    ?? throw new ArgumentException(
-                        $"Filter column '{filters[i].ColumnName}' not found in table '{table.Name}'."),
+                throw new ArgumentException(
+                    $"Filter column '{filters[i].ColumnName}' not found in table '{table.Name}'.");
+            }
+
+            // GUID expansion for merged columns
+            if (filters[i].Value is Guid guid && col.MergedPhysicalOrdinals?.Length == 2)
+            {
+                var (hi, lo) = Sharc.Core.Primitives.GuidCodec.ToInt64Pair(guid);
+                
+                if (filters[i].Operator == SharcOperator.Equal)
+                {
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[0], Operator = SharcOperator.Equal, Value = hi });
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[1], Operator = SharcOperator.Equal, Value = lo });
+                    continue;
+                }
+            }
+
+            resolved.Add(new ResolvedFilter
+            {
+                ColumnOrdinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal,
                 Operator = filters[i].Operator,
                 Value = filters[i].Value
-            };
+            });
         }
-        return resolved;
+        return resolved.ToArray();
     }
 
     /// <summary>

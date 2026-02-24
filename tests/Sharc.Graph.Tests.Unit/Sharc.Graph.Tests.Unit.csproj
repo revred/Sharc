@@ -5,6 +5,7 @@
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <NoWarn>CA1707</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,9 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Graph\Sharc.Graph.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Graph.Surface\Sharc.Graph.Surface.csproj" />
   </ItemGroup>
+
 
 </Project>

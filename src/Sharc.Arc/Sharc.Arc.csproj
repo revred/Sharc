@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Sharc.Arc</RootNamespace>
+    <AssemblyName>Sharc.Arc</AssemblyName>
+    <Description>Cross-arc reference resolution, validation, and diff for Sharc distributed arcs. Never-throw resolution, multi-layer security validation, streaming data diff.</Description>
+    <PackageTags>sqlite;arc;distributed;validation;diff;trust;zero-allocation;dotnet;csharp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sharc\Sharc.csproj" />
+    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sharc.Arc.Tests" />
+    <InternalsVisibleTo Include="Sharc.Archive.Tests" />
+  </ItemGroup>
+
+</Project>

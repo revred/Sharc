@@ -111,6 +111,14 @@ public readonly struct ColumnRef
     /// <summary>Column value is greater than or equal to the given string.</summary>
     public IFilterStar Gte(string value) => Predicate(FilterOp.Gte, TypedFilterValue.FromUtf8(value));
 
+    // â”€â”€ Comparison (GUID) â”€â”€
+
+    /// <summary>Column value matches the given GUID.</summary>
+    public IFilterStar Eq(Guid value) => Predicate(FilterOp.Eq, TypedFilterValue.FromGuid(value));
+
+    /// <summary>Column value does not match the given GUID.</summary>
+    public IFilterStar Neq(Guid value) => Predicate(FilterOp.Neq, TypedFilterValue.FromGuid(value));
+
     // â”€â”€ Null â”€â”€
 
     /// <summary>Column value is NULL.</summary>

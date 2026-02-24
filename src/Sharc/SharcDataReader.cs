@@ -246,6 +246,9 @@ public sealed partial class SharcDataReader : IDisposable
     // Per-row generation counter for lazy decode (full 32-bit, ~4.3B row cycle)
     private int _decodedGeneration;
 
+    // F-7: Cursor-based pagination — skip rows with RowId <= this value (0 = disabled)
+    private long _afterRowId;
+
     // Scan mode flags — byte enum with 4 flag bits
     private ScanMode _scanMode;
 
@@ -410,6 +413,8 @@ public sealed partial class SharcDataReader : IDisposable
         public IReadOnlyList<IndexInfo>? TableIndexes { get; init; }
         public ResolvedFilter[]? Filters { get; init; }
         public IFilterNode? FilterNode { get; init; }
+        /// <summary>Optional row-level access evaluator for agent entitlements. Null = no row filtering.</summary>
+        public Trust.IRowAccessEvaluator? RowAccessEvaluator { get; init; }
     }
 
     internal SharcDataReader(
@@ -486,10 +491,10 @@ public sealed partial class SharcDataReader : IDisposable
         _serialTypes.AsSpan(0, bufferSize).Clear();
         _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
-        // Initialize filter state if filters are provided
-        if (config.FilterNode != null || config.Filters != null)
+        // Initialize filter state if filters or row-level access evaluator are provided
+        if (config.FilterNode != null || config.Filters != null || config.RowAccessEvaluator != null)
         {
-            _filter = new FilterState(config.FilterNode, config.Filters, bufferSize);
+            _filter = new FilterState(config.FilterNode, config.Filters, bufferSize, config.RowAccessEvaluator);
         }
 
         // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
@@ -581,6 +586,19 @@ public sealed partial class SharcDataReader : IDisposable
     /// Gets the rowid of the current row.
     /// </summary>
     public long RowId => _composite?.DedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
+
+    /// <summary>
+    /// Configures cursor-based pagination: only rows with RowId greater than
+    /// <paramref name="lastRowId"/> will be returned by subsequent <see cref="Read"/> calls.
+    /// Returns this reader for fluent chaining.
+    /// </summary>
+    /// <param name="lastRowId">The last-seen rowid. Rows with RowId &lt;= this value are skipped.</param>
+    /// <returns>This reader instance.</returns>
+    public SharcDataReader AfterRowId(long lastRowId)
+    {
+        _afterRowId = lastRowId;
+        return this;
+    }
 
     /// <summary>
     /// Returns true if the underlying page source has been mutated since this reader
@@ -836,6 +854,10 @@ public sealed partial class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
     {
+        // F-7: Cursor-based pagination — skip rows at or before the cursor position
+        if (_afterRowId > 0 && rowId <= _afterRowId)
+            return false;
+
         // ── Hot path: concrete FilterNode — write to _serialTypes directly (zero Array.Copy) ──
         if (_filter?.ConcreteFilterNode != null)
         {
@@ -845,6 +867,10 @@ public sealed partial class SharcDataReader : IDisposable
             int stCount = Math.Min(colCount, st.Length);
 
             if (!_filter.ConcreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
+                return false;
+
+            // Row-level access control (zero cost when null)
+            if (_filter.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
                 return false;
 
             _currentBodyOffset = (short)bodyOffset;
@@ -868,6 +894,10 @@ public sealed partial class SharcDataReader : IDisposable
                 _filter.FilterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, rowId))
                 return false;
 
+            // Row-level access control (zero cost when null)
+            if (_filter.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
+                return false;
+
             DecodeCurrentRow(payload);
             return true;
         }
@@ -878,6 +908,11 @@ public sealed partial class SharcDataReader : IDisposable
         {
             return false;
         }
+
+        // Row-level access control — final gate before row acceptance
+        // Zero cost when _filter is null or RowAccessEvaluator is null
+        if (_filter?.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
+            return false;
 
         DecodeCurrentRow(payload);
         return true;
@@ -1583,12 +1618,15 @@ public sealed partial class SharcDataReader : IDisposable
         internal FilterNode? ConcreteFilterNode;
         internal readonly ResolvedFilter[]? Filters;
         internal long[]? FilterSerialTypes;
+        internal readonly Trust.IRowAccessEvaluator? RowAccessEvaluator;
 
-        internal FilterState(IFilterNode? filterNode, ResolvedFilter[]? filters, int bufferSize)
+        internal FilterState(IFilterNode? filterNode, ResolvedFilter[]? filters, int bufferSize,
+            Trust.IRowAccessEvaluator? rowAccessEvaluator = null)
         {
             FilterNode = filterNode;
             ConcreteFilterNode = filterNode as FilterNode;
             Filters = filters;
+            RowAccessEvaluator = rowAccessEvaluator;
 
             if (filterNode != null)
             {

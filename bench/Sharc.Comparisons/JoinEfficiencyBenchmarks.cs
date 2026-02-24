@@ -57,6 +57,32 @@ public class JoinEfficiencyBenchmarks
         }
         return count;
     }
+
+    [Benchmark]
+    public int FullOuterJoin_TieredHashJoin()
+    {
+        var sql = "SELECT u.name, o.amount FROM users u FULL OUTER JOIN orders o ON u.id = o.user_id";
+        using var reader = _db.Query(sql);
+        int count = 0;
+        while (reader.Read())
+        {
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
+    public int LeftJoin_Baseline()
+    {
+        var sql = "SELECT u.name, o.amount FROM users u LEFT JOIN orders o ON u.id = o.user_id";
+        using var reader = _db.Query(sql);
+        int count = 0;
+        while (reader.Read())
+        {
+            count++;
+        }
+        return count;
+    }
 }
 
 /// <summary>

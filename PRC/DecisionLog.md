@@ -4,6 +4,52 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-025: Zero.Hash — Tiered Zero-Allocation FULL OUTER JOIN
+
+**Date**: 2026-02-24
+**Status**: Complete
+**Branch**: `Zero.Hash`
+
+**Context**: ADR-024 (TD-6) implemented FULL OUTER JOIN using `Dictionary.Remove()` for matched-row tracking. This worked but had scalability limits: `Dictionary<QueryValue, List<int>>` allocates heap objects per build-side key, and `System.Collections.BitArray` allocates for the matched tracker. For large build sides (>8,192 rows), cache pressure from Dictionary bucket chaining degrades performance.
+
+**Decision**: Implement a tiered FULL OUTER JOIN executor with three strategies based on build-side cardinality:
+
+| Tier | Build Count | Matched Tracker | Hash Table | Cache Target |
+|:---|:---|:---|:---|:---|
+| I (StackAlloc) | ≤256 | PooledBitArray (32 B) | Dictionary | L1 |
+| II (Pooled) | 257–8,192 | PooledBitArray (≤1 KB) | Dictionary | L2 |
+| III (OpenAddress) | >8,192 | PooledBitArray (scales) | OpenAddressHashTable | L2/L3 |
+
+**Key components:**
+- `JoinTier` — Enum + static `Select(int buildCount)` with thresholds 256/8,192
+- `MergeDescriptor` — Readonly struct for correct-by-construction column ordering across 3 emission paths (matched, probe-unmatched, build-unmatched), handles build/probe side swapping
+- `PooledBitArray` — Bit-packed (Col\<bit\>, 1 bit per row) matched tracker backed by ArrayPool\<byte\>. Replaces System.Collections.BitArray
+- `OpenAddressHashTable<TKey>` — ArrayPool-backed parallel-array open-addressing with backward-shift deletion. Accepts IEqualityComparer\<TKey\> for QueryValue support
+- `TieredHashJoin` — Static executor that dispatches to tier-appropriate strategy
+
+**Integration**: JoinExecutor.HashJoin delegates to TieredHashJoin.Execute for FULL joins via `yield return` forwarding. INNER/LEFT/RIGHT/CROSS paths unchanged.
+
+**Backward-shift deletion fix**: Initial ShouldShift condition `dHome < dEntry` was incorrect for circular wrap-around. Corrected to `dHome == 0 || dHome > dEntry` (shift if home is at gap or further from gap than entry).
+
+**Tier III design evolution**: Original destructive-probe design (drain matches, then RemoveAll from hash table) failed for duplicate probe keys — the second probe row with the same key found nothing after the first removed all entries. Revised to use PooledBitArray for matched tracking at all tiers, with the OpenAddressHashTable providing cache-efficient build-side lookup for Tier III.
+
+**Zero-alloc emission path**: Added `reuseBuffer` parameter to `TieredHashJoin.Execute`. When `reuseBuffer=true` (active when downstream will project), a single scratch `QueryValue[]` is yielded on every iteration — no per-row `CopyRow` allocation. `ProjectRows` reads the buffer before advancing, so the buffer is safely overwritten. This matches the existing pattern in `JoinExecutor.HashJoin` for INNER/LEFT/RIGHT joins.
+
+**Final benchmark results** (with reuseBuffer):
+
+| Benchmark | Users | Time | Allocated | vs LEFT JOIN |
+|:---|:---|:---|:---|:---|
+| FULL OUTER (Tier I) | 1,000 | 749 μs | 630 KB | 0.99x time, 0.99x alloc |
+| FULL OUTER (Tier II) | 5,000 | 4,063 μs | 2,403 KB | 0.80x time, 0.75x alloc |
+| LEFT JOIN baseline | 1,000 | 758 μs | 634 KB | — |
+| LEFT JOIN baseline | 5,000 | 5,056 μs | 3,188 KB | — |
+
+FULL OUTER JOIN is **faster and allocates less** than LEFT JOIN at 5,000 rows — the tiered open-address hash table + bit-packed matched tracker outperforms Dictionary + null-row emission.
+
+**Test coverage**: 91 new tests — 49 primitive tests, 12 TieredHashJoin scenario tests, 30 correctness matrix tests (10 scenarios × 3 tiers). Zero regressions across 2,831 existing tests.
+
+---
+
 ## ADR-024: Gaps.F24 — Review-Driven Gap Closure (6 Items)
 
 **Date**: 2026-02-24

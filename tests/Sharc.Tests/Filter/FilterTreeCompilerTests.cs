@@ -104,12 +104,12 @@ public sealed class FilterTreeCompilerTests
     }
 
     [Fact]
-    public void Compile_OrdinalOutOfRange_ThrowsArgumentOutOfRangeException()
+    public void Compile_OrdinalOutOfRange_ThrowsArgumentException()
     {
         var columns = MakeColumns("id", "name");
         var expr = FilterStar.Column(99).Gt(30);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => FilterTreeCompiler.Compile(expr, columns));
+        Assert.Throws<ArgumentException>(() => FilterTreeCompiler.Compile(expr, columns));
     }
 
     [Fact]
