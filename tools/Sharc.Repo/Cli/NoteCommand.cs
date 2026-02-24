@@ -25,7 +25,7 @@ public static class NoteCommand
                 case "--tag" when i + 1 < args.Length: tag = args[++i]; break;
                 case "--author" when i + 1 < args.Length: author = args[++i]; break;
                 default:
-                    if (content == null && !args[i].StartsWith("--"))
+                    if (content == null && !args[i].StartsWith("--", StringComparison.Ordinal))
                         content = args[i];
                     break;
             }

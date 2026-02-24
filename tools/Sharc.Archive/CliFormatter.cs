@@ -141,7 +141,7 @@ public static class CliFormatter
                     : kv.Value is string s ? $"\"{EscapeJson(s)}\""
                     : kv.Value.ToString());
             }
-            sb.Append("}");
+            sb.Append('}');
         }
         sb.AppendLine();
         sb.AppendLine("]");

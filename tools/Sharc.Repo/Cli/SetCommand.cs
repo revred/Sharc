@@ -26,7 +26,7 @@ public static class SetCommand
             {
                 case "--author" when i + 1 < args.Length: author = args[++i]; break;
                 default:
-                    if (!args[i].StartsWith("--"))
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal))
                     {
                         if (key == null) key = args[i];
                         else if (value == null) value = args[i];

@@ -99,10 +99,10 @@ public sealed class RepoGitLogWalker
             return null;
 
         int added = 0, deleted = 0;
-        if (parts[0] != "-")
-            int.TryParse(parts[0], out added);
-        if (parts[1] != "-")
-            int.TryParse(parts[1], out deleted);
+        if (parts[0] != "-" && int.TryParse(parts[0], out int a))
+            added = a;
+        if (parts[1] != "-" && int.TryParse(parts[1], out int d))
+            deleted = d;
 
         var path = parts[2].Trim();
         if (string.IsNullOrEmpty(path))

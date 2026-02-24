@@ -44,6 +44,7 @@ public class GraphWriterTests : IDisposable
     {
         _writer.Dispose();
         _db.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
