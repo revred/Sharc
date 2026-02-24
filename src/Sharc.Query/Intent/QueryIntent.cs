@@ -54,8 +54,14 @@ public sealed class QueryIntent
     /// <summary>Execution hint controlling query tier routing. Default is Direct.</summary>
     public ExecutionHint Hint { get; init; }
 
+    /// <summary>CASE expressions in the SELECT list, or null if none.</summary>
+    internal IReadOnlyList<CaseExpressionIntent>? CaseExpressions { get; init; }
+
     /// <summary>True if the query contains any aggregate functions.</summary>
     public bool HasAggregates => Aggregates is { Count: > 0 };
+
+    /// <summary>True if the query contains any CASE expressions.</summary>
+    internal bool HasCaseExpressions => CaseExpressions is { Count: > 0 };
 
     // Cached array conversion of Columns — avoids repeated [.. Columns] spread allocations.
     // Safe to cache because QueryIntent is immutable and QueryPlan instances are reused.

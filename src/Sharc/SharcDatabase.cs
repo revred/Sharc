@@ -762,7 +762,9 @@ public sealed class SharcDatabase : IDisposable
 
             string[]? columns = intent.HasAggregates
                 ? AggregateProjection.Compute(intent)
-                : intent.ColumnsArray;
+                : intent.HasCaseExpressions
+                    ? CaseProjection.Compute(intent)
+                    : intent.ColumnsArray;
 
             int[]? projection = null;
             if (columns is { Length: > 0 })

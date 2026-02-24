@@ -134,12 +134,6 @@ internal static class FilterStarCompiler
         _ => false
     };
 
-    public static bool Utf8SetContains(ReadOnlySpan<byte> data, HashSet<string> set)
-    {
-        if (data.IsEmpty || set.Count == 0) return false;
-        return set.Contains(Encoding.UTF8.GetString(data));
-    }
-
     /// <summary>
     /// Zero-allocation UTF-8 set membership check.
     /// Compares raw byte spans against pre-encoded UTF-8 keys.
