@@ -22,7 +22,6 @@ internal static class FilterStarCompiler
     {
         return BuildDelegate(expression, columns, rowidAliasOrdinal);
     }
-
     private static BakedDelegate BuildDelegate(IFilterStar expr, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
     {
         return expr switch
@@ -30,9 +29,49 @@ internal static class FilterStarCompiler
             AndExpression and => BuildAnd(and, columns, rowidAliasOrdinal),
             OrExpression or => BuildOr(or, columns, rowidAliasOrdinal),
             NotExpression not => BuildNot(not, columns, rowidAliasOrdinal),
-            PredicateExpression pred => JitPredicateBuilder.Build(pred, columns, rowidAliasOrdinal),
+            PredicateExpression pred => BuildPredicate(pred, columns, rowidAliasOrdinal),
             _ => throw new NotSupportedException($"Unsupported expression type: {expr.GetType().Name}")
         };
+    }
+
+    private static BakedDelegate BuildPredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
+    {
+        ColumnInfo? col = pred.ColumnOrdinal.HasValue
+            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
+            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (col == null)
+            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found.");
+
+        // GUID expansion for merged columns
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
+        {
+            var hiOrdinal = col.MergedPhysicalOrdinals[0];
+            var loOrdinal = col.MergedPhysicalOrdinals[1];
+            var hiValue = TypedFilterValue.FromInt64(pred.Value.AsInt64());
+            var loValue = TypedFilterValue.FromInt64(pred.Value.AsInt64High());
+
+            // Use logical ordinal 0 in a single-column list to bypass mapping in JitPredicateBuilder
+            var hiCol = new[] { new ColumnInfo { Ordinal = hiOrdinal, Name = "", DeclaredType = "", IsPrimaryKey = false, IsNotNull = false } };
+            var loCol = new[] { new ColumnInfo { Ordinal = loOrdinal, Name = "", DeclaredType = "", IsPrimaryKey = false, IsNotNull = false } };
+
+            if (pred.Operator == FilterOp.Eq)
+            {
+                var hiDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Eq, hiValue), hiCol, rowidAliasOrdinal);
+                var loDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Eq, loValue), loCol, rowidAliasOrdinal);
+                return (payload, serialTypes, offsets, rowId) =>
+                    hiDel(payload, serialTypes, offsets, rowId) && loDel(payload, serialTypes, offsets, rowId);
+            }
+            if (pred.Operator == FilterOp.Neq)
+            {
+                var hiDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Neq, hiValue), hiCol, rowidAliasOrdinal);
+                var loDel = JitPredicateBuilder.Build(new PredicateExpression(null, 0, FilterOp.Neq, loValue), loCol, rowidAliasOrdinal);
+                return (payload, serialTypes, offsets, rowId) =>
+                    hiDel(payload, serialTypes, offsets, rowId) || loDel(payload, serialTypes, offsets, rowId);
+            }
+        }
+
+        return JitPredicateBuilder.Build(pred, columns, rowidAliasOrdinal);
     }
 
     private static BakedDelegate BuildAnd(AndExpression and, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
