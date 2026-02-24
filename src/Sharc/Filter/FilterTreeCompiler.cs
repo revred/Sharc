@@ -104,23 +104,7 @@ internal static class FilterTreeCompiler
         {
             var hiOrdinal = col.MergedPhysicalOrdinals[0];
             var loOrdinal = col.MergedPhysicalOrdinals[1];
-            var hiValue = TypedFilterValue.FromInt64(pred.Value.AsInt64());
-            var loValue = TypedFilterValue.FromInt64(pred.Value.AsInt64High());
-
-            if (pred.Operator == FilterOp.Eq)
-            {
-                return new AndNode([
-                    new PredicateNode(hiOrdinal, FilterOp.Eq, hiValue, rowidAliasOrdinal),
-                    new PredicateNode(loOrdinal, FilterOp.Eq, loValue, rowidAliasOrdinal)
-                ]);
-            }
-            if (pred.Operator == FilterOp.Neq)
-            {
-                return new OrNode([
-                    new PredicateNode(hiOrdinal, FilterOp.Neq, hiValue, rowidAliasOrdinal),
-                    new PredicateNode(loOrdinal, FilterOp.Neq, loValue, rowidAliasOrdinal)
-                ]);
-            }
+            return new GuidPredicateNode(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
         }
 
         int ordinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal;
