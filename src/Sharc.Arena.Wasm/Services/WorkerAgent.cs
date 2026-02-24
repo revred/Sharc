@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Text.Json;
 using Sharc.Arena.Wasm.Models;
 using Sharc.Core.Trust;
@@ -8,7 +11,7 @@ namespace Sharc.Arena.Wasm.Services;
 /// <summary>
 /// Simulates a sensor node pushing telemetry into the Sharc Trust Layer.
 /// </summary>
-public class WorkerAgent
+public sealed class WorkerAgent
 {
     public string AgentId { get; }
     public bool IsReliable { get; }

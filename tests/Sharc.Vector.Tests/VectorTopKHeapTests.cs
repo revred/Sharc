@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Sharc.Vector.Tests;
 
-public class VectorTopKHeapTests
+public sealed class VectorTopKHeapTests
 {
     [Fact]
     public void TryInsert_LessThanK_ReturnsAll()

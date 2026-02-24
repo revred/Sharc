@@ -27,35 +27,42 @@ public static class SharcDatabaseExtensions
         ArgumentException.ThrowIfNullOrEmpty(vectorColumn);
 
         var jit = db.Jit(tableName);
-
-        // Validate that the vector column exists
-        var table = jit.Table
-            ?? throw new ArgumentException($"'{tableName}' is not a table.", nameof(tableName));
-
-        bool columnFound = false;
-        for (int i = 0; i < table.Columns.Count; i++)
+        try
         {
-            if (table.Columns[i].Name.Equals(vectorColumn, StringComparison.OrdinalIgnoreCase))
+            // Validate that the vector column exists
+            var table = jit.Table
+                ?? throw new ArgumentException($"'{tableName}' is not a table.", nameof(tableName));
+
+            bool columnFound = false;
+            for (int i = 0; i < table.Columns.Count; i++)
             {
-                columnFound = true;
-                break;
+                if (table.Columns[i].Name.Equals(vectorColumn, StringComparison.OrdinalIgnoreCase))
+                {
+                    columnFound = true;
+                    break;
+                }
             }
+
+            if (!columnFound)
+                throw new ArgumentException(
+                    $"Column '{vectorColumn}' not found in table '{tableName}'.", nameof(vectorColumn));
+
+            // Probe first row to determine dimensions
+            int dimensions;
+            using (var probe = jit.Query(vectorColumn))
+            {
+                if (!probe.Read())
+                    throw new InvalidOperationException(
+                        $"Table '{tableName}' is empty — cannot determine vector dimensions.");
+                dimensions = BlobVectorCodec.GetDimensions(probe.GetBlobSpan(0).Length);
+            }
+
+            return new VectorQuery(db, jit, vectorColumn, dimensions, metric);
         }
-
-        if (!columnFound)
-            throw new ArgumentException(
-                $"Column '{vectorColumn}' not found in table '{tableName}'.", nameof(vectorColumn));
-
-        // Probe first row to determine dimensions
-        int dimensions;
-        using (var probe = jit.Query(vectorColumn))
+        catch
         {
-            if (!probe.Read())
-                throw new InvalidOperationException(
-                    $"Table '{tableName}' is empty — cannot determine vector dimensions.");
-            dimensions = BlobVectorCodec.GetDimensions(probe.GetBlobSpan(0).Length);
+            jit.Dispose();
+            throw;
         }
-
-        return new VectorQuery(db, jit, vectorColumn, dimensions, metric);
     }
 }

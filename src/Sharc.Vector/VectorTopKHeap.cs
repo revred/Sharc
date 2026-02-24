@@ -36,6 +36,36 @@ internal sealed class VectorTopKHeap
     }
 
     /// <summary>
+    /// Returns true if a candidate with the given distance would be kept by the heap.
+    /// Used to defer expensive metadata extraction until we know the candidate is worth keeping.
+    /// </summary>
+    internal bool ShouldInsert(float distance)
+    {
+        if (_count < _capacity) return true;
+        return _isMinHeap
+            ? distance < _heap[0].Distance
+            : distance > _heap[0].Distance;
+    }
+
+    /// <summary>
+    /// Inserts a candidate unconditionally. Caller must have checked <see cref="ShouldInsert"/> first.
+    /// </summary>
+    internal void ForceInsert(long rowId, float distance, IReadOnlyDictionary<string, object?>? metadata = null)
+    {
+        if (_count < _capacity)
+        {
+            _heap[_count] = (rowId, distance, metadata);
+            _count++;
+            if (_count == _capacity) BuildHeap();
+        }
+        else
+        {
+            _heap[0] = (rowId, distance, metadata);
+            SiftDown(0);
+        }
+    }
+
+    /// <summary>
     /// Tries to insert a candidate. If the heap is full, replaces the worst
     /// element if the candidate is better.
     /// </summary>

@@ -1,16 +1,14 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Buffers.Binary;
 using System.Security.Cryptography;
-using System.Text;
 using Sharc.Core.Trust;
 using Sharc.Trust;
 using Xunit;
 
 namespace Sharc.IntegrationTests;
 
-public class EcdsaTrustTests : IDisposable
+public sealed class EcdsaTrustTests : IDisposable
 {
     private SharcDatabase? _db;
 
@@ -131,7 +129,7 @@ public class EcdsaTrustTests : IDisposable
         var ledger = new LedgerManager(_db);
 
         // Register HMAC agent
-        var hmacSigner = new SharcSigner("hmac-mixed-agent");
+        using var hmacSigner = new SharcSigner("hmac-mixed-agent");
         var hmacInfo = new AgentInfo(
             AgentId: hmacSigner.AgentId,
             Class: AgentClass.User,

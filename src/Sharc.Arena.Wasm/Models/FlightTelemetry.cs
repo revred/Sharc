@@ -1,5 +1,9 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 namespace Sharc.Arena.Wasm.Models;
 
+/// <summary>Types of sensors in the flight simulation.</summary>
 public enum SensorType
 {
     Altimeter,
@@ -24,7 +28,8 @@ public enum AutoPilotMode
     AutoPilot
 }
 
-public class SensorReading
+/// <summary>A single sensor measurement with type, value, unit, and timestamp.</summary>
+public sealed class SensorReading
 {
     public SensorType Type { get; set; }
     public double Value { get; set; }

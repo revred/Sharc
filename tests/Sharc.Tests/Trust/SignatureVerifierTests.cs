@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Sharc.Tests.Trust;
 
-public class SignatureVerifierTests
+public sealed class SignatureVerifierTests
 {
     [Fact]
     public void Verify_HmacSha256_ValidSignature_ReturnsTrue()
@@ -99,15 +99,14 @@ public class SignatureVerifierTests
     }
 
     [Fact]
-    public void Verify_UnknownAlgorithm_ReturnsFalse()
+    public void Verify_UnknownAlgorithm_ThrowsArgumentOutOfRangeException()
     {
         byte[] data = "hello"u8.ToArray();
         byte[] signature = new byte[32];
         byte[] publicKey = new byte[32];
 
-        bool result = SignatureVerifier.Verify(data, signature, publicKey, (SignatureAlgorithm)255);
-
-        Assert.False(result);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SignatureVerifier.Verify(data, signature, publicKey, (SignatureAlgorithm)255));
     }
 
     [Fact]

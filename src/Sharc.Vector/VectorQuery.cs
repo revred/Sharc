@@ -94,11 +94,15 @@ public sealed class VectorQuery : IDisposable
             float distance = _distanceFn(queryVector, storedVector);
             long rowid = reader.RowId;
 
-            IReadOnlyDictionary<string, object?>? metadata = null;
-            if (columnNames.Length > 0)
-                metadata = ExtractMetadata(reader, columnNames);
-
-            heap.TryInsert(rowid, distance, metadata);
+            // Only extract metadata when the heap will actually keep this candidate,
+            // avoiding a Dictionary allocation for every scanned row.
+            if (heap.ShouldInsert(distance))
+            {
+                IReadOnlyDictionary<string, object?>? metadata = null;
+                if (columnNames.Length > 0)
+                    metadata = ExtractMetadata(reader, columnNames);
+                heap.ForceInsert(rowid, distance, metadata);
+            }
         }
 
         return heap.ToResult();

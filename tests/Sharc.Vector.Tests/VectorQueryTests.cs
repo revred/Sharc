@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Sharc.Vector.Tests;
 
-public class VectorQueryTests : IDisposable
+public sealed class VectorQueryTests : IDisposable
 {
     private readonly string _dbPath;
     private readonly SharcDatabase _db;
