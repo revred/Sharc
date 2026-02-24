@@ -352,6 +352,29 @@ public sealed class SharcDatabase : IDisposable
     }
 
     /// <summary>
+    /// Registers an <see cref="Views.ILayer"/> as a queryable data source.
+    /// Layers are always pre-materialized when referenced in SQL queries.
+    /// Use this for graph traversal results, external data, or any non-SQL row source.
+    /// </summary>
+    /// <param name="layer">The layer to register. Must have a non-empty name.</param>
+    public void RegisterLayer(Views.ILayer layer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _viewResolver.RegisterLayer(layer);
+    }
+
+    /// <summary>
+    /// Removes a previously registered layer by name.
+    /// </summary>
+    /// <param name="layerName">The name of the layer to remove.</param>
+    /// <returns>True if the layer was found and removed; false otherwise.</returns>
+    public bool UnregisterLayer(string layerName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.UnregisterLayer(layerName);
+    }
+
+    /// <summary>
     /// Opens a named view as a zero-allocation <see cref="Views.IViewCursor"/>.
     /// Checks registered programmatic views first, then falls back to
     /// auto-promotable SQLite views in <c>sqlite_schema</c>.
