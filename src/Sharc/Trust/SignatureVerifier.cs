@@ -25,7 +25,7 @@ public static class SignatureVerifier
         {
             SignatureAlgorithm.HmacSha256 => SharcSigner.Verify(data, signature, publicKey),
             SignatureAlgorithm.EcdsaP256 => EcdsaP256Verifier.Verify(data, signature, publicKey),
-            _ => false
+            _ => throw new ArgumentOutOfRangeException(nameof(algorithm), algorithm, "Unsupported signature algorithm.")
         };
     }
 }

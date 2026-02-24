@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -8,7 +11,8 @@ using Sharc.Core.Trust;
 
 namespace Sharc.Arena.Wasm.Services;
 
-public class ScenarioContext
+/// <summary>Holds the definition of a single simulation scenario.</summary>
+public sealed class ScenarioContext
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -16,7 +20,11 @@ public class ScenarioContext
     public Func<List<WorkerAgent>, AutoPilotAgent, SimulationEngine, Task>? ScenarioLogic { get; set; }
 }
 
-public class SimulationEngine
+/// <summary>
+/// Drives the 15-scenario flight simulation loop, emitting sensor readings
+/// and orchestrating agent interactions per tick.
+/// </summary>
+public sealed class SimulationEngine
 {
     private readonly AutoPilotAgent _autoPilot;
     private readonly List<WorkerAgent> _workers;

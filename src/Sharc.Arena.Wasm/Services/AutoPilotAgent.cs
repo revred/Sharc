@@ -1,3 +1,6 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
 using System.Text.Json;
 using Sharc.Arena.Wasm.Models;
 using Sharc.Core.Trust;
@@ -9,7 +12,7 @@ namespace Sharc.Arena.Wasm.Services;
 /// The Master Agent that reads the Ledger, cryptographically verifies sensors,
 /// and maintains the "True" state of the aircraft via Byzantine consensus.
 /// </summary>
-public class AutoPilotAgent
+public sealed class AutoPilotAgent
 {
     private readonly LedgerManager _ledger;
     private readonly AgentRegistry _registry;
@@ -137,7 +140,7 @@ public class AutoPilotAgent
 
             return (true, "Buffered");
         }
-        catch
+        catch (JsonException)
         {
             return (false, "Parse Error");
         }
@@ -238,8 +241,17 @@ public class AutoPilotAgent
                 // Cross-check: treat as altimeter consensus input
                 Altitude = value;
                 break;
+            case SensorType.Yaw:
+                // Yaw data accepted via consensus but not applied to a specific state property.
+                break;
         }
     }
+
+    /// <summary>
+    /// Clears the reading buffer. Call at scenario boundaries to prevent stale readings
+    /// from a previous scenario leaking into the next one's quorum.
+    /// </summary>
+    public void ClearReadingBuffer() => _readingBuffer.Clear();
 
     public void ClearWarnings() => ActiveWarnings.Clear();
 }

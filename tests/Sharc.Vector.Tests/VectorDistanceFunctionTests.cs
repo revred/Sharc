@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Sharc.Vector.Tests;
 
-public class VectorDistanceFunctionTests
+public sealed class VectorDistanceFunctionTests
 {
     private const float Tolerance = 1e-5f;
 

@@ -67,8 +67,9 @@ using var db = SharcDatabase.OpenMemory(dbBytes);
 
 // Generate a query vector
 var queryVec = new float[dimensions];
+var queryRng = new Random(99);
 for (int d = 0; d < dimensions; d++)
-    queryVec[d] = (float)(new Random(99).NextDouble() * 2 - 1);
+    queryVec[d] = (float)(queryRng.NextDouble() * 2 - 1);
 
 // --- 1. Cosine similarity: find top-5 nearest neighbors ---
 var sw = Stopwatch.StartNew();

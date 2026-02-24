@@ -36,7 +36,7 @@ public sealed class ArcFileTests
     public async Task RegisterAgent_AgentRetrievableFromRegistry()
     {
         using var arc = ArcFile.CreateInMemory("test.arc");
-        var signer = new SharcSigner("test-agent");
+        using var signer = new SharcSigner("test-agent");
         var pubKey = await signer.GetPublicKeyAsync();
 
         var info = new AgentInfo("test-agent", AgentClass.User, pubKey, 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());
@@ -54,7 +54,7 @@ public sealed class ArcFileTests
     public async Task AppendAsync_IncreasesLedgerEntryCount()
     {
         using var arc = ArcFile.CreateInMemory("test.arc");
-        var signer = new SharcSigner("test-agent");
+        using var signer = new SharcSigner("test-agent");
         var pubKey = await signer.GetPublicKeyAsync();
 
         var info = new AgentInfo("test-agent", AgentClass.User, pubKey, 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());
@@ -72,7 +72,7 @@ public sealed class ArcFileTests
     public async Task VerifyIntegrity_AfterAppend_ReturnsTrue()
     {
         using var arc = ArcFile.CreateInMemory("test.arc");
-        var signer = new SharcSigner("test-agent");
+        using var signer = new SharcSigner("test-agent");
         var pubKey = await signer.GetPublicKeyAsync();
 
         var info = new AgentInfo("test-agent", AgentClass.User, pubKey, 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());
@@ -96,7 +96,7 @@ public sealed class ArcFileTests
         byte[] exported;
         using (var arc = ArcFile.CreateInMemory("roundtrip.arc"))
         {
-            var signer = new SharcSigner("agent-1");
+            using var signer = new SharcSigner("agent-1");
             var pubKey = await signer.GetPublicKeyAsync();
 
             var info = new AgentInfo("agent-1", AgentClass.User, pubKey, 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());
@@ -122,7 +122,7 @@ public sealed class ArcFileTests
     public async Task MultipleAppends_AllCountedCorrectly()
     {
         using var arc = ArcFile.CreateInMemory("count.arc");
-        var signer = new SharcSigner("counter-agent");
+        using var signer = new SharcSigner("counter-agent");
         var pubKey = await signer.GetPublicKeyAsync();
 
         var info = new AgentInfo("counter-agent", AgentClass.User, pubKey, 100, "*", "*", 0, 0, "", false, Array.Empty<byte>());

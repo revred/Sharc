@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Sharc.IntegrationTests;
 
-public class CreateInMemoryTests : IDisposable
+public sealed class CreateInMemoryTests : IDisposable
 {
     private SharcDatabase? _db;
 
@@ -41,7 +41,7 @@ public class CreateInMemoryTests : IDisposable
         var ledger = new LedgerManager(_db);
 
         // Create a signer and register an agent
-        var signer = new SharcSigner("test-sensor-1");
+        using var signer = new SharcSigner("test-sensor-1");
         var info = new AgentInfo(
             AgentId: signer.AgentId,
             Class: AgentClass.User,

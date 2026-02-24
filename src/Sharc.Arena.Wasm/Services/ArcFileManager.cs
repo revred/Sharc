@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using Microsoft.JSInterop;
-using Sharc.Core;
 using Sharc.Core.Trust;
 
 namespace Sharc.Arena.Wasm.Services;
@@ -104,14 +103,16 @@ public sealed class ArcFileManager : IAsyncDisposable
     {
         if (!_opfsAvailable) return;
 
-        var criticalVersion = (CriticalArc.Database.PageSource as IWritablePageSource)?.DataVersion ?? 0;
+        // Use LedgerEntryCount as a change indicator since the PageSource is not
+        // always IWritablePageSource (e.g., ProxyPageSource wraps the real source).
+        long criticalVersion = CriticalArc.LedgerEntryCount;
         if (criticalVersion != _lastCriticalFlushVersion)
         {
             await PersistToOpfsAsync(CriticalArc, CriticalArcFileName);
             _lastCriticalFlushVersion = criticalVersion;
         }
 
-        var agentsVersion = (AgentsArc.Database.PageSource as IWritablePageSource)?.DataVersion ?? 0;
+        long agentsVersion = AgentsArc.LedgerEntryCount;
         if (agentsVersion != _lastAgentsFlushVersion)
         {
             await PersistToOpfsAsync(AgentsArc, AgentsArcFileName);

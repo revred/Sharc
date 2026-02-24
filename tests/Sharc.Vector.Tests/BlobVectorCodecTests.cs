@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Sharc.Vector.Tests;
 
-public class BlobVectorCodecTests
+public sealed class BlobVectorCodecTests
 {
     [Fact]
     public void Encode_Decode_Roundtrip()
