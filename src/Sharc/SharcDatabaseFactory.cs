@@ -23,28 +23,45 @@ internal static class SharcDatabaseFactory
         if (File.Exists(path))
             throw new InvalidOperationException($"File already exists: {path}");
 
+        var data = BuildNewDatabaseBytes();
+        File.WriteAllBytes(path, data);
+        return Open(path, new SharcOpenOptions { Writable = true });
+    }
+
+    /// <summary>
+    /// Creates a new, empty Sharc database entirely in memory (no filesystem access).
+    /// Suitable for Blazor WASM and other environments without file I/O.
+    /// </summary>
+    public static SharcDatabase CreateInMemory()
+    {
+        var data = BuildNewDatabaseBytes();
+        return OpenMemory(data, new SharcOpenOptions { Writable = true });
+    }
+
+    private static byte[] BuildNewDatabaseBytes()
+    {
         int pageSize = 4096;
-        var data = new byte[pageSize * 5]; 
-        
+        var data = new byte[pageSize * 5];
+
         // 1. Database Header
         var dbHeader = new DatabaseHeader(pageSize, 1, 1, 0, 1, 4, 0, 0, 1, 4, 1, 0, 0, 3042000);
         DatabaseHeader.Write(data, dbHeader);
-        
+
         // System table schema
-        var ledgerCols = new[] { 
+        var ledgerCols = new[] {
             ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
             ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_ledger")),
             ColumnValue.FromInt64(3, 2), // RootPage = 2
             ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_ledger(SequenceNumber INTEGER PRIMARY KEY, Timestamp INTEGER, AgentId TEXT, Payload BLOB, PayloadHash BLOB, PreviousHash BLOB, Signature BLOB)"))
         };
-        
+
         var agentsCols = new[] {
             ColumnValue.Text(0, Encoding.UTF8.GetBytes("table")),
             ColumnValue.Text(1, Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.Text(2, Encoding.UTF8.GetBytes("_sharc_agents")),
             ColumnValue.FromInt64(3, 3), // RootPage = 3
-            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents(AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB)"))
+            ColumnValue.Text(4, Encoding.UTF8.GetBytes("CREATE TABLE _sharc_agents(AgentId TEXT PRIMARY KEY, Class INTEGER, PublicKey BLOB, AuthorityCeiling INTEGER, WriteScope TEXT, ReadScope TEXT, ValidityStart INTEGER, ValidityEnd INTEGER, ParentAgent TEXT, CoSignRequired INTEGER, Signature BLOB, Algorithm INTEGER)"))
         };
 
         var scoresCols = new[] {
@@ -66,13 +83,13 @@ internal static class SharcDatabaseFactory
         // Encode records
         byte[] r1 = new byte[RecordEncoder.ComputeEncodedSize(ledgerCols)];
         RecordEncoder.EncodeRecord(ledgerCols, r1);
-        
+
         byte[] r2 = new byte[RecordEncoder.ComputeEncodedSize(agentsCols)];
         RecordEncoder.EncodeRecord(agentsCols, r2);
-        
+
         byte[] r3 = new byte[RecordEncoder.ComputeEncodedSize(scoresCols)];
         RecordEncoder.EncodeRecord(scoresCols, r3);
-        
+
         byte[] r4 = new byte[RecordEncoder.ComputeEncodedSize(auditCols)];
         RecordEncoder.EncodeRecord(auditCols, r4);
 
@@ -113,8 +130,7 @@ internal static class SharcDatabaseFactory
             BTreePageHeader.Write(data.AsSpan(pageSize * i), pHeader);
         }
 
-        File.WriteAllBytes(path, data);
-        return Open(path, new SharcOpenOptions { Writable = true });
+        return data;
     }
 
     public static SharcDatabase Open(string path, SharcOpenOptions? options = null)

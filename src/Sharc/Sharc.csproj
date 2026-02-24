@@ -12,6 +12,8 @@
     <InternalsVisibleTo Include="Sharc.Tests" />
     <InternalsVisibleTo Include="Sharc.IntegrationTests" />
     <InternalsVisibleTo Include="Sharc.Comparisons" />
+    <InternalsVisibleTo Include="Sharc.Vector" />
+    <InternalsVisibleTo Include="Sharc.Vector.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />

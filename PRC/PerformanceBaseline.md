@@ -268,3 +268,26 @@ Absolute times are thermal-sensitive on laptop hardware (±15-20% baseline shift
 3. **GROUP BY AggState arrays** (Tier 2) — inline first 1–2 aggregates to save ~1 KB per query
 4. **Cote pre-materialization** (Tier 3) — skip double-materialization for non-filtered Cotes
 5. **View SQL query path** — 24% overhead from Cote resolution, cacheable for repeated queries
+
+---
+
+## Allocation Debt Resolution Log (2026-02-23)
+
+Tracked via ADR-023 in `DecisionLog.md`. Summary of structural allocation gaps and their resolution status.
+
+### Resolved
+
+| Gap | Before | After | How |
+| :--- | :--- | :--- | :--- |
+| WHERE predicate overhead | 1,089 KB per scan | **0 B** (prepared) / 680 B (cold) | `FilterStar`/`CompileBaked` closure-composed predicates, `ConcreteFilterNode` fast path bypasses `DecodeCurrentRow` |
+| GraphEdge per-row allocation | `GraphEdge` struct per row via `GetEdges()` | **0 B per row** via `IEdgeCursor` | `EdgeCursorBase` rents serial types/offsets via `ArrayPool`, reuses cursor via `Reset()`. `GetEdges()` marked `[Obsolete]` |
+| OpenMemory() eager schema parse | ~40 KB at `OpenMemory()` | **0 B** at open, deferred | `_schema ??=` lazy init pattern. Verified by `AllocationFixTests.cs` |
+| ColumnValue[] per reader | New `ColumnValue[]` per reader | **ArrayPool rental**, reused per row | `ArrayPool<ColumnValue>.Shared.Rent()` + `ArrayPool<long>` (serial types) + `ArrayPool<int>` (offsets). 2-slot `[ThreadStatic]` reader pool. Lazy column decode skips unread columns |
+| String materialization in filters | `Encoding.UTF8.GetString()` per filter eval | **0 B** via `RawByteComparer` | `SequenceCompareTo`, `StartsWith`, `EndsWith`, `IndexOf` on raw UTF-8 spans. `GetUtf8Span()` public API for callers |
+
+### Remaining
+
+| Gap | Current State | Path Forward |
+| :--- | :--- | :--- |
+| `Utf8SetContains()` IN/NotIn | Allocates one `string` per row for set membership check | Convert to `Dictionary<ReadOnlyMemory<byte>>` with UTF-8 span comparer |
+| Append-only write mode | No dedicated path; full B-tree mutator for all writes | Design fast-path for sequential inserts (skip split checks, append to rightmost leaf) |
