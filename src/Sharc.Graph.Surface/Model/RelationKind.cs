@@ -49,18 +49,30 @@ public enum RelationKind
     Follows = 31,  // Step -> Step
 
     // --- Git ---
-    /// <summary>Authored a commit.</summary>
+    /// <summary>Authored a commit or artifact.</summary>
     Authored = 40,
-    /// <summary>Modified a file.</summary>
+    /// <summary>Modified a file or artifact.</summary>
     Modified = 41,
-    /// <summary>Parent commit relationship.</summary>
+    /// <summary>Is the parent of (commit lineage).</summary>
     ParentOf = 42,
-    /// <summary>Branch points to a commit.</summary>
-    PointsTo = 43,
+    /// <summary>Co-modified in the same commit.</summary>
+    CoModified = 43,
+    /// <summary>Blamed for a line or region.</summary>
+    BlamedFor = 44,
 
-    // --- Annotations ---
-    /// <summary>Annotated a file or concept.</summary>
-    Annotated = 50,
-    /// <summary>Decided on a concept or approach.</summary>
-    Decided = 51
+    // --- Annotation ---
+    /// <summary>Produced by an agent or process.</summary>
+    ProducedBy = 45,
+    /// <summary>Annotates a specific location.</summary>
+    AnnotatesAt = 46,
+    /// <summary>Reverts to a previous state.</summary>
+    RevertsTo = 47,
+    /// <summary>Branches from a commit or node.</summary>
+    BranchesFrom = 48,
+    /// <summary>Owned by an agent or author.</summary>
+    OwnedBy = 49,
+    /// <summary>Is a snapshot of an artifact.</summary>
+    SnapshotOf = 50,
+    /// <summary>Contains an annotation.</summary>
+    ContainsAnnotation = 51
 }

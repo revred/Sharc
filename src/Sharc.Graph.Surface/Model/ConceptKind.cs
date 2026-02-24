@@ -53,18 +53,28 @@ public enum ConceptKind
     // --- Git ---
     /// <summary>A git commit.</summary>
     GitCommit = 40,
-    /// <summary>A git author.</summary>
-    GitAuthor = 41,
     /// <summary>A git branch.</summary>
-    GitBranch = 42,
+    GitBranch = 41,
     /// <summary>A git tag.</summary>
-    GitTag = 43,
+    GitTag = 42,
+    /// <summary>A git author.</summary>
+    GitAuthor = 43,
+    /// <summary>A code file tracked by version control.</summary>
+    CodeFile = 44,
 
-    // --- Annotations ---
-    /// <summary>A review annotation.</summary>
+    // --- Annotation ---
+    /// <summary>A user annotation or note.</summary>
     Annotation = 50,
-    /// <summary>A decision record.</summary>
+    /// <summary>An architectural or design decision.</summary>
     Decision = 51,
+    /// <summary>A checkpoint or milestone.</summary>
+    Checkpoint = 52,
+    /// <summary>A conversation session.</summary>
+    Conversation = 53,
+    /// <summary>A single turn within a conversation.</summary>
+    ConvTurn = 54,
+    /// <summary>A snapshot of an artifact at a point in time.</summary>
+    ArtifactSnapshot = 55,
 
     // --- General ---
     /// <summary>A prompt or instruction.</summary>
