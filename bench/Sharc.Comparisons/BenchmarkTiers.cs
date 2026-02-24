@@ -19,9 +19,9 @@ namespace Sharc.Comparisons;
 ///
 /// Tiers:
 ///   micro    ~4 benchmarks,  ~1 min   Engine load + one scan pair
-///   mini     ~12 benchmarks, ~4 min   Core pairs + graph seek + write pair
-///   standard ~38 benchmarks, ~12 min  Core + graph + write benchmarks
-///   mega     all benchmarks, ~15 min  Everything incl. GC pressure + traversal
+///   mini     ~14 benchmarks, ~5 min   Core pairs + graph seek + write pair + vector
+///   standard ~50 benchmarks, ~15 min  Core + graph + write + vector benchmarks
+///   mega     all benchmarks, ~18 min  Everything incl. GC pressure + traversal + vector
 ///   full     (same as mega for this project)
 /// </summary>
 internal static class BenchmarkTiers
@@ -61,6 +61,7 @@ internal static class BenchmarkTiers
         "*IndexAcceleratedBenchmarks*",
         "*ViewBenchmarks.DirectTable*",
         "*ViewBenchmarks.RegisteredView*",
+        "*VectorSearchBenchmarks.*NearestTo*",
     ];
 
     // ── Standard: ~50 benchmarks, ~15 min ──
@@ -80,6 +81,7 @@ internal static class BenchmarkTiers
         "*WriteBenchmarks*",
         "*SharQlParser*",
         "*ViewBenchmarks*",
+        "*VectorSearchBenchmarks*",
     ];
 
     // Mega/Full: null (no filter) — runs everything

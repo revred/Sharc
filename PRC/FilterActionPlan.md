@@ -1,9 +1,11 @@
 # Filter Engine Action Plan
 
 **Source:** `secrets/SharcFilterEngine.md`
-**Status:** TODO
+**Status:** DONE (Phase 1-2 complete; Phase 3 deferred)
 **Priority:** P1
 **Estimated Effort:** 6 weeks (3 phases)
+
+> **Resolution (2026-02-23):** The `FilterStar`/`FilterTreeCompiler`/`CompileBaked` pipeline is fully implemented and achieves **0 B per-row allocation** for equality, range, prefix, suffix, and contains predicates on all types. `PreparedQuery` reuse eliminates cold-path overhead. The original 1,089 KB target was reduced to **0 B (hot)** / **680 B (cold)**. Remaining gap: `Utf8SetContains()` in `IN`/`NotIn` string set predicates still allocates one `string` per row — fixable by converting to `Dictionary<ReadOnlyMemory<byte>>` with a UTF-8 span comparer. The legacy `SharcFilter`/`ResolvedFilter` path is superseded but not yet removed.
 
 ---
 

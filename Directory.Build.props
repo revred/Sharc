@@ -42,9 +42,9 @@
     <RepositoryType>git</RepositoryType>
 
     <!-- Assembly metadata -->
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
-    <Version>1.1.0.0-beta</Version>
+    <AssemblyVersion>1.1.1.1</AssemblyVersion>
+    <FileVersion>1.1.1.1</FileVersion>
+    <Version>1.1.1.1-beta</Version>
 
     <!-- Optimization for WASM/Size -->
     <IsTrimmable>true</IsTrimmable>

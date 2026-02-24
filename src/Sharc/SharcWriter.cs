@@ -221,6 +221,63 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Inserts or updates a record by rowid. If the row exists, it is updated;
+    /// if not, it is inserted with the specified rowid. Auto-commits.
+    /// Returns the rowid.
+    /// </summary>
+    public long Upsert(string tableName, long rowId, params ColumnValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var tableInfo = TryGetTableInfo(tableName);
+        using var tx = BeginAutoCommitTransaction();
+
+        bool updated = UpdateCore(tx, tableName, rowId, values, tableInfo, _tableRootCache);
+        if (!updated)
+            InsertCoreAtRowId(tx, tableName, rowId, values, tableInfo, _tableRootCache);
+
+        CapturePooledShadow(tx);
+        tx.Commit();
+        return rowId;
+    }
+
+    /// <summary>
+    /// Deletes all rows matching the given filter predicate. Auto-commits.
+    /// Returns the number of rows deleted.
+    /// </summary>
+    public int DeleteWhere(string tableName, IFilterStar filter)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Phase 1: Collect matching rowids via JitQuery (read-only scan)
+        var rowIds = new List<long>();
+        using (var jit = _db.Jit(tableName))
+        {
+            jit.Where(filter);
+            using var reader = jit.Query();
+            while (reader.Read())
+                rowIds.Add(reader.RowId);
+        }
+
+        if (rowIds.Count == 0) return 0;
+
+        // Phase 2: Delete in reverse rowid order to avoid B-tree rebalancing interference
+        rowIds.Sort();
+        rowIds.Reverse();
+
+        using var tx = BeginAutoCommitTransaction();
+        int deleted = 0;
+        foreach (long rowId in rowIds)
+        {
+            if (DeleteCore(tx, tableName, rowId, _tableRootCache))
+                deleted++;
+        }
+        CapturePooledShadow(tx);
+        tx.Commit();
+        return deleted;
+    }
+
+    /// <summary>
     /// Creates a <see cref="PreparedWriter"/> for zero-overhead repeated writes to the given table.
     /// Schema and root page are resolved once at creation time.
     /// </summary>
@@ -280,6 +337,38 @@ public sealed class SharcWriter : IDisposable
         RecordEncoder.EncodeRecord(values, recordBuf);
 
         // Insert into B-tree
+        uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
+
+        if (newRoot != rootPage)
+        {
+            if (rootCache != null) rootCache[tableName] = newRoot;
+            UpdateTableRootPage(shadow, tableName, newRoot, usableSize);
+        }
+
+        return rowId;
+    }
+
+    /// <summary>
+    /// Core insert at a specific rowid (for upsert fallback when Update returns false).
+    /// </summary>
+    internal static long InsertCoreAtRowId(Transaction tx, string tableName, long rowId,
+        ColumnValue[] values, TableInfo? tableInfo = null, Dictionary<string, uint>? rootCache = null)
+    {
+        var shadow = tx.GetShadowSource();
+        int usableSize = shadow.PageSize;
+
+        if (tableInfo != null)
+            values = ExpandMergedColumns(values, tableInfo);
+
+        uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
+        if (rootPage == 0)
+            throw new InvalidOperationException($"Table '{tableName}' not found.");
+
+        int encodedSize = RecordEncoder.ComputeEncodedSize(values);
+        Span<byte> recordBuf = encodedSize <= 512 ? stackalloc byte[encodedSize] : new byte[encodedSize];
+        RecordEncoder.EncodeRecord(values, recordBuf);
+
+        var mutator = tx.FetchMutator(usableSize);
         uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
 
         if (newRoot != rootPage)

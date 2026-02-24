@@ -217,7 +217,7 @@ internal static class JitPredicateBuilder
         return pred.Value.ValueTag switch
         {
             TypedFilterValue.Tag.Int64Set => BuildInt64In(ordinal, new HashSet<long>(pred.Value.AsInt64Set()), isNotIn),
-            TypedFilterValue.Tag.Utf8Set => BuildUtf8In(ordinal, new HashSet<string>(pred.Value.AsUtf8Set().Select(m => Encoding.UTF8.GetString(m.Span))), isNotIn),
+            TypedFilterValue.Tag.Utf8Set => BuildUtf8InZeroAlloc(ordinal, pred.Value.AsUtf8Set().Select(m => m.ToArray()).ToArray(), isNotIn),
             _ => static (_, _, _, _) => false
         };
     }
@@ -251,6 +251,27 @@ internal static class JitPredicateBuilder
             {
                 var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
                 contains = FilterStarCompiler.Utf8SetContains(data, set);
+            }
+            return negate ? !contains : contains;
+        };
+    }
+
+    /// <summary>
+    /// Zero-allocation UTF-8 IN predicate. Compares raw byte spans against
+    /// pre-encoded UTF-8 keys — no per-row string materialization.
+    /// </summary>
+    private static BakedDelegate BuildUtf8InZeroAlloc(int ordinal, byte[][] utf8Keys, bool negate)
+    {
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType == SerialTypeCodec.NullSerialType) return false;
+
+            bool contains = false;
+            if (SerialTypeCodec.IsText(serialType))
+            {
+                var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                contains = FilterStarCompiler.Utf8SetContainsBytes(data, utf8Keys);
             }
             return negate ? !contains : contains;
         };
