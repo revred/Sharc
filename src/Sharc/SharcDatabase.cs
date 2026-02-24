@@ -745,6 +745,23 @@ public sealed class SharcDatabase : IDisposable
             plan = resolved;
         }
 
+        // Pre-materialize only views with Func filters (not expressible as SQL).
+        // Filter-free views stay as null, enabling the lazy Cote resolution path
+        // in CompoundQueryExecutor — ORDER BY column merging and HasJoins guards
+        // ensure correctness without forcing full materialization.
+        if (_viewResolver.HasRegisteredViews)
+            preMaterialized = _viewResolver.PreMaterializeFilteredViews(plan);
+
+        // Post-view entitlement enforcement: after view resolution, the plan
+        // references underlying tables. Re-check to prevent view-based escalation
+        // (e.g., agent has v_join.* but not the underlying tables).
+        // Zero cost when agent is null.
+        if (agent is not null)
+        {
+            var tables = TableReferenceCollector.Collect(plan);
+            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
+        }
+
         // Compound or Cote queries go through the compound executor
         if (plan.IsCompound || plan.HasCotes)
             return CompoundQueryExecutor.Execute(this, plan, parameters, preMaterialized);

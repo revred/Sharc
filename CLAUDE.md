@@ -194,29 +194,38 @@ sharc/
 ├── src/
 │   ├── Sharc/                         ← Public API + Trust Layer + Write Engine
 │   ├── Sharc.Core/                    ← Internal engine (B-Tree, Records, IO, Write, Trust models)
+│   ├── Sharc.Query/                   ← SQL pipeline (parser, compiler, executor)
 │   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
-│   ├── Sharc.Graph/                   ← Graph storage (ConceptStore, RelationStore)
-│   └── Sharc.Graph.Surface/           ← Graph models (NodeKey, GraphEdge, RecordId)
+│   ├── Sharc.Graph/                   ← Graph engine (Cypher, PageRank, GraphWriter, algorithms)
+│   ├── Sharc.Graph.Surface/           ← Graph interfaces and models
+│   ├── Sharc.Vector/                  ← SIMD-accelerated vector similarity search
+│   └── Sharc.Arc/                     ← Cross-arc: ArcUri, ArcResolver, ArcDiffer, fragment sync
 ├── tests/
 │   ├── Sharc.Tests/                   ← Unit tests (core + trust + write + crypto + GUID)
 │   ├── Sharc.IntegrationTests/        ← End-to-end tests
 │   ├── Sharc.Query.Tests/             ← Query pipeline tests
-│   ├── Sharc.Graph.Tests.Unit/        ← Graph model tests
+│   ├── Sharc.Graph.Tests.Unit/        ← Graph + Cypher + algorithm tests
+│   ├── Sharc.Arc.Tests/               ← Cross-arc diff + sync tests
+│   ├── Sharc.Archive.Tests/           ← Archive tool tests
+│   ├── Sharc.Vector.Tests/            ← Vector similarity tests
+│   ├── Sharc.Repo.Tests/             ← Repository + MCP tool tests
 │   ├── Sharc.Context.Tests/           ← MCP context query tests
 │   └── Sharc.Index.Tests/             ← Index CLI tests
 ├── bench/
 │   ├── Sharc.Benchmarks/              ← Core BenchmarkDotNet suite (Sharc vs SQLite)
-│   └── Sharc.Comparisons/             ← Graph + core benchmarks
+│   └── Sharc.Comparisons/             ← Graph + query + write benchmarks
 └── tools/
+    ├── Sharc.Archive/                 ← Conversation archiver (schema + sync protocol)
+    ├── Sharc.Repo/                    ← AI agent repository (annotations + decisions + MCP)
     ├── Sharc.Context/                 ← MCP Context Server (queries, benchmarks, tests)
     └── Sharc.Index/                   ← GCD CLI (git history → SQLite)
 ```
 
 ## Current Status
 
-All tests passing across 6 test projects (unit + integration + query + graph + index + context). Run `dotnet test` for current count.
+3,467 tests passing across 11 test projects (unit + integration + query + graph + vector + arc + archive + repo + index + context + graph-perf). Run `dotnet test` for current count.
 
-All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads, generic specialization for JIT devirtualization — 95x faster point lookups), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (full CRUD: INSERT/UPDATE/DELETE with B-tree splits, ACID transactions, freelist recycling, vacuum), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring), Multi-Agent Access (DataVersion/IsStale passive change detection on IWritablePageSource). See README.md for benchmark results.
+All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads, generic specialization for JIT devirtualization — 95x faster point lookups), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (full CRUD: INSERT/UPDATE/DELETE with B-tree splits, ACID transactions, freelist recycling, vacuum), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring), Row-Level Entitlements (table/column/wildcard enforcement with zero-cost opt-in), Multi-Agent Access (DataVersion/IsStale passive change detection on IWritablePageSource), Cross-Arc Sync (ArcDiffer, FragmentSyncProtocol, FusedArcContext), SIMD Vector Search, SQL Pipeline (JOIN/UNION/INTERSECT/EXCEPT/Cote/GROUP BY/ORDER BY). See README.md for benchmark results.
 
 ## What NOT To Do
 

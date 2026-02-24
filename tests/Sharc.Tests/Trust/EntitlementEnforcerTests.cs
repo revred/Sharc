@@ -59,9 +59,24 @@ public class EntitlementEnforcerTests
     }
 
     [Fact]
-    public void Enforce_NullColumns_ChecksTableOnly()
+    public void Enforce_NullColumns_TableWideScope_NoThrow()
     {
         var agent = MakeAgent("users.*");
+        EntitlementEnforcer.Enforce(agent, "users", null);
+    }
+
+    [Fact]
+    public void Enforce_NullColumns_ColumnRestricted_Throws()
+    {
+        var agent = MakeAgent("users.name");
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            EntitlementEnforcer.Enforce(agent, "users", null));
+    }
+
+    [Fact]
+    public void Enforce_NullColumns_Unrestricted_NoThrow()
+    {
+        var agent = MakeAgent("*");
         EntitlementEnforcer.Enforce(agent, "users", null);
     }
 

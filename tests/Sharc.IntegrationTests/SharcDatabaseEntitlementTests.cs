@@ -152,4 +152,75 @@ public class SharcDatabaseEntitlementTests
         Assert.Equal(30L, ages[0]);
         Assert.Equal(26L, ages[4]);
     }
+
+    // ─── SEC-001: Entitlement bypass on hinted query paths ─────
+
+    [Fact]
+    public void Query_CachedHint_DeniedAgent_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("orders.*");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("CACHED SELECT * FROM users", agent));
+    }
+
+    [Fact]
+    public void Query_JitHint_DeniedAgent_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("orders.*");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("JIT SELECT * FROM users", agent));
+    }
+
+    [Fact]
+    public void Query_CachedHint_EntitledAgent_Succeeds()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("users.*");
+
+        using var reader = db.Query("CACHED SELECT name FROM users WHERE age = 25", agent);
+        Assert.True(reader.Read());
+        Assert.Equal("User5", reader.GetString(0));
+    }
+
+    [Fact]
+    public void Query_CachedHint_ColumnRestricted_DeniedColumn_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("users.name");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("CACHED SELECT name, age FROM users", agent));
+    }
+
+    // ─── SEC-002: Column-level entitlement for wildcard/aggregate ─
+
+    [Fact]
+    public void Query_SelectStar_ColumnRestricted_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("users.name");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("SELECT * FROM users", agent));
+    }
+
+    [Fact]
+    public void Query_SelectStar_TableWideScope_Succeeds()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        var agent = MakeAgent("users.*");
+
+        using var reader = db.Query("SELECT * FROM users WHERE age = 25", agent);
+        Assert.True(reader.Read());
+    }
 }

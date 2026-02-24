@@ -3,7 +3,7 @@
 Detailed performance comparison: Sharc vs Microsoft.Data.Sqlite vs IndexedDB.
 
 > BenchmarkDotNet v0.15.8 | .NET 10.0.2 | Windows 11 | Intel i7-11800H (8C/16T)
-> All numbers are **measured**, not estimated. Last run: February 22, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
+> All numbers are **measured**, not estimated. Last run: February 24, 2026. SQLite uses `Microsoft.Data.Sqlite` with pre-opened connections and pre-prepared statements.
 
 ---
 
