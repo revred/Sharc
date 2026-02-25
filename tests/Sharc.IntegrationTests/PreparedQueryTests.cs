@@ -165,4 +165,60 @@ public sealed class PreparedQueryTests
 
         Assert.Throws<ObjectDisposedException>(() => prepared.Execute());
     }
+
+    [Fact]
+    public void Execute_ReusedParameterInstance_DoesNotRehashEveryCall()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var prepared = db.Prepare("SELECT name FROM users WHERE age = $targetAge");
+        var parameters = new CountingParameters(("targetAge", 25L));
+
+        using (var reader = prepared.Execute(parameters))
+        {
+            Assert.True(reader.Read());
+        }
+
+        using (var reader = prepared.Execute(parameters))
+        {
+            Assert.True(reader.Read());
+        }
+
+        Assert.Equal(1, parameters.EnumerationCount);
+    }
+
+    private sealed class CountingParameters : IReadOnlyDictionary<string, object>
+    {
+        private readonly Dictionary<string, object> _inner;
+
+        public CountingParameters(params (string Key, object Value)[] entries)
+        {
+            _inner = new Dictionary<string, object>(StringComparer.Ordinal);
+            for (int i = 0; i < entries.Length; i++)
+                _inner[entries[i].Key] = entries[i].Value;
+        }
+
+        public int EnumerationCount { get; private set; }
+
+        public int Count => _inner.Count;
+        public IEnumerable<string> Keys => _inner.Keys;
+        public IEnumerable<object> Values => _inner.Values;
+
+        public object this[string key] => _inner[key];
+
+        public bool ContainsKey(string key) => _inner.ContainsKey(key);
+
+        public bool TryGetValue(string key, out object value)
+            => _inner.TryGetValue(key, out value!);
+
+        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
+        {
+            EnumerationCount++;
+            return _inner.GetEnumerator();
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+            => GetEnumerator();
+    }
 }

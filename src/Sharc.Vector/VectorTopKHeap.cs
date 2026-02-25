@@ -20,6 +20,8 @@ internal sealed class VectorTopKHeap
     private readonly bool _isMinHeap;
     private int _count;
 
+    internal int Count => _count;
+
     /// <summary>
     /// Creates a new top-K heap.
     /// </summary>

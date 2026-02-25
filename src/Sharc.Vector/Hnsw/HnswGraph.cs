@@ -62,6 +62,10 @@ internal sealed class HnswGraph
     /// <summary>Gets the node index for a rowId.</summary>
     internal int GetNodeIndex(long rowId) => _rowIdToIndex[rowId];
 
+    /// <summary>Tries to get the node index for a rowId.</summary>
+    internal bool TryGetNodeIndex(long rowId, out int nodeIndex)
+        => _rowIdToIndex.TryGetValue(rowId, out nodeIndex);
+
     /// <summary>Sets the rowId for a node index.</summary>
     internal void SetRowId(int nodeIndex, long rowId)
     {

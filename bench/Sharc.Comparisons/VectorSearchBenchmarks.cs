@@ -10,6 +10,7 @@ using System.Numerics.Tensors;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Data.Sqlite;
 using Sharc.Vector;
+using Sharc.Vector.Hnsw;
 
 namespace Sharc.Comparisons;
 
@@ -39,6 +40,7 @@ public class VectorSearchBenchmarks
     private byte[] _dbBytes = null!;
     private SqliteConnection _conn = null!;
     private SharcDatabase _sharcDb = null!;
+    private HnswIndex _hnswIndex = null!;
     private float[] _queryVector = null!;
 
     // Pre-allocated SQLite decode buffer (fair: amortize alloc across iterations)
@@ -60,6 +62,12 @@ public class VectorSearchBenchmarks
         _conn.Open();
 
         _sharcDb = SharcDatabase.OpenMemory(_dbBytes, new SharcOpenOptions { PageCacheSize = 100 });
+        _hnswIndex = _sharcDb.BuildHnswIndex(
+            "vectors",
+            "embedding",
+            DistanceMetric.Cosine,
+            HnswConfig.Default with { Seed = 42 },
+            persist: false);
         _queryVector = VectorDataGenerator.GenerateQueryVector(Dimensions);
 
         _sqliteBlobBuf = new byte[Dimensions * sizeof(float)];
@@ -70,6 +78,7 @@ public class VectorSearchBenchmarks
     public void Cleanup()
     {
         _conn?.Dispose();
+        _hnswIndex?.Dispose();
         _sharcDb?.Dispose();
     }
 
@@ -125,6 +134,17 @@ public class VectorSearchBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("NearestNeighbor")]
+    [BenchmarkCategory("Hnsw")]
+    public int Sharc_Hnsw_NearestTo_Top10()
+    {
+        using var vq = _sharcDb.Vector("vectors", "embedding", DistanceMetric.Cosine);
+        vq.UseIndex(_hnswIndex);
+        var results = vq.NearestTo(_queryVector, k: 10);
+        return results.Count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("NearestNeighbor")]
     public int SQLite_NearestTo_Top10()
     {
         using var cmd = _conn.CreateCommand();
@@ -166,6 +186,30 @@ public class VectorSearchBenchmarks
         vq.Where(FilterStar.Column("category").Eq("science"));
         var results = vq.NearestTo(_queryVector, k: 10);
         return results.Count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("FilteredVector")]
+    [BenchmarkCategory("Hnsw")]
+    public int Sharc_Hnsw_FilterAware_Top10()
+    {
+        using var vq = _sharcDb.Vector("vectors", "embedding", DistanceMetric.Cosine);
+        vq.UseIndex(_hnswIndex);
+        vq.Where(FilterStar.Column("category").Eq("science"));
+        var results = vq.NearestTo(_queryVector, k: 10);
+        return results.Count;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("FilteredVector")]
+    [BenchmarkCategory("Planner")]
+    public int Sharc_Hnsw_FilterAware_Strategy()
+    {
+        using var vq = _sharcDb.Vector("vectors", "embedding", DistanceMetric.Cosine);
+        vq.UseIndex(_hnswIndex);
+        vq.Where(FilterStar.Column("category").Eq("science"));
+        _ = vq.NearestTo(_queryVector, k: 10);
+        return (int)vq.LastExecutionInfo.Strategy;
     }
 
     [Benchmark]
