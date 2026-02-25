@@ -25,6 +25,7 @@ dotnet script ./samples/run-all.csx
 | `EncryptedRead` | Opening encrypted databases with decryption options |
 | `FilterAndProject` | Column filters and projection pipelines |
 | `PointLookup` | Primary-key seek / point lookup path |
+| `PrimeExample` | Streaming TopK with custom scoring (spatial nearest-neighbor) |
 | `TrustComplex` | Multi-agent trust, authority ceilings, and signatures |
 | `UpsertDeleteWhere` | Upsert and predicate-based deletes |
 | `VectorSearch` | Embedding storage and nearest-neighbor vector search |
