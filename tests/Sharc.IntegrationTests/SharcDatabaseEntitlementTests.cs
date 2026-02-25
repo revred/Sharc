@@ -223,4 +223,56 @@ public class SharcDatabaseEntitlementTests
         using var reader = db.Query("SELECT * FROM users WHERE age = 25", agent);
         Assert.True(reader.Read());
     }
+
+    // ─── SEC-002: Aggregate column entitlement enforcement ────────
+
+    [Fact]
+    public void Query_Aggregate_DeniedSourceColumn_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        // Agent can read name but NOT balance
+        var agent = MakeAgent("users.name,users.age");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("SELECT SUM(balance) FROM users", agent));
+    }
+
+    [Fact]
+    public void Query_Aggregate_AllowedSourceColumn_Succeeds()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        // Aggregate produces a synthetic column (COUNT(age)), so table-wide scope is needed
+        var agent = MakeAgent("users.*");
+
+        using var reader = db.Query("SELECT COUNT(age) FROM users", agent);
+        Assert.True(reader.Read());
+    }
+
+    // ─── SEC-002: CASE expression column entitlement enforcement ──
+
+    [Fact]
+    public void Query_CaseExpression_DeniedSourceColumn_Throws()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        // Agent can read name but NOT age
+        var agent = MakeAgent("users.name");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            db.Query("SELECT CASE WHEN age >= 25 THEN 'senior' ELSE 'junior' END FROM users", agent));
+    }
+
+    [Fact]
+    public void Query_CaseExpression_AllowedSourceColumn_Succeeds()
+    {
+        var data = TestDatabaseFactory.CreateUsersDatabase(10);
+        using var db = SharcDatabase.OpenMemory(data);
+        // CASE produces a synthetic column (_case_0), so table-wide scope is needed
+        var agent = MakeAgent("users.*");
+
+        using var reader = db.Query("SELECT CASE WHEN age >= 25 THEN 'senior' ELSE 'junior' END FROM users", agent);
+        Assert.True(reader.Read());
+    }
 }
