@@ -32,7 +32,16 @@
 | Const | PascalCase | `MaxVarintBytes` |
 | Static readonly | PascalCase | `MagicBytes` |
 | Parameter | `camelCase` | `tableName` |
-| Type parameter | `T` prefix | `TValue` |
+| Type parameter | `T` prefix + domain meaning | `TPageSource`, `TJoinKey`, `TFieldValue` |
+
+### Generic Type Parameter Naming
+
+- Avoid bare `T` in public/internal APIs when the role is known.
+- Prefer intent-revealing names:
+  - `TPageSource` for storage backends
+  - `TJoinKey` for hash/join key spaces
+  - `TFieldValue` for typed decode/extract methods
+- Keep the `T` prefix for quick generic recognition.
 
 ### Files
 
@@ -192,6 +201,12 @@ When a non-obvious choice is made, document it inline:
 // returning NULL. Rationale: these types indicate a corrupt or future-format
 // database that Sharc cannot correctly interpret. See DecisionLog.md ADR-007.
 ```
+
+### Comment Quality Rules
+
+- Comments must explain intent, constraints, or trade-offs, not restate code mechanics.
+- Remove stale summary comments after refactors (for example, a helper comment that no longer matches method behavior).
+- For hot-path code, prefer short comments that justify algorithmic choices (allocation strategy, branch shape, cache behavior).
 
 ## 7. Test Code Standards
 

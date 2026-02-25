@@ -21,7 +21,7 @@ public sealed class ScenarioContext
 }
 
 /// <summary>
-/// Drives the 15-scenario flight simulation loop, emitting sensor readings
+/// Drives the flight simulation loop, emitting sensor readings
 /// and orchestrating agent interactions per tick.
 /// </summary>
 public sealed class SimulationEngine
@@ -361,6 +361,58 @@ public sealed class SimulationEngine
                 {
                     var firstReliable = workers.First(w => w.IsReliable);
                     await sim.EmitReadingAsync(firstReliable, SensorReading.CreateWarning("CABIN ALT WARNING — RAPID DECOMPRESSION"));
+                }
+            }
+        });
+
+        // 16. HEAVY NOISE INFERENCE STRESS — mixed burst noise, spoofing, and warning spam
+        _scenarios.Add(new ScenarioContext
+        {
+            Id = 16,
+            Name = "HEAVY NOISE INFERENCE STRESS",
+            Description = "Stress test: noisy sensor bursts and spoofed values. Trust + inference layers must reject outliers and keep stable flight state.",
+            ScenarioLogic = async (workers, ap, sim) =>
+            {
+                ap.Mode = AutoPilotMode.Suggestive;
+
+                var reliables = workers.Where(w => w.IsReliable).ToArray();
+                var noisy = workers.First(w => !w.IsReliable);
+
+                // Smooth underlying truth signal
+                double trueAlt = 33200 + Math.Sin(sim.Tick * 0.45) * 180;
+                double trueSpeed = 244 + Math.Cos(sim.Tick * 0.30) * 9;
+                double trueHeading = 270 + Math.Sin(sim.Tick * 0.22) * 6;
+                double trueVs = Math.Cos(sim.Tick * 0.40) * 550;
+
+                for (int i = 0; i < reliables.Length; i++)
+                {
+                    // Reliable sensors: bounded noise + occasional disturbance bursts.
+                    double altNoise = sim._rng.NextDouble() * 80 - 40;
+                    double speedNoise = sim._rng.NextDouble() * 8 - 4;
+                    double headingNoise = sim._rng.NextDouble() * 4 - 2;
+                    double vsNoise = sim._rng.NextDouble() * 180 - 90;
+
+                    if (i == 1 && sim.Tick % 4 == 0)
+                    {
+                        altNoise += sim._rng.NextDouble() > 0.5 ? 1600 : -1600;
+                        speedNoise += sim._rng.NextDouble() > 0.5 ? 45 : -45;
+                    }
+
+                    await sim.EmitReadingAsync(reliables[i], SensorReading.Create(SensorType.Altimeter, trueAlt + altNoise));
+                    await sim.EmitReadingAsync(reliables[i], SensorReading.Create(SensorType.Airspeed, trueSpeed + speedNoise));
+                    await sim.EmitReadingAsync(reliables[i], SensorReading.Create(SensorType.Heading, trueHeading + headingNoise));
+                    await sim.EmitReadingAsync(reliables[i], SensorReading.Create(SensorType.VerticalSpeed, trueVs + vsNoise));
+                }
+
+                // Unreliable sensor: persistent spoofing plus high-amplitude jitter.
+                await sim.EmitReadingAsync(noisy, SensorReading.Create(SensorType.Altimeter, sim._rng.Next(9000, 47000)));
+                await sim.EmitReadingAsync(noisy, SensorReading.Create(SensorType.Airspeed, sim._rng.Next(80, 520)));
+                await sim.EmitReadingAsync(noisy, SensorReading.Create(SensorType.Heading, sim._rng.Next(0, 360)));
+                await sim.EmitReadingAsync(noisy, SensorReading.Create(SensorType.VerticalSpeed, sim._rng.Next(-9000, 9000)));
+
+                if (sim.Tick % 3 == 0)
+                {
+                    await sim.EmitReadingAsync(noisy, SensorReading.CreateWarning("SPOOFED FIRE WARNING (NOISE TEST)"));
                 }
             }
         });

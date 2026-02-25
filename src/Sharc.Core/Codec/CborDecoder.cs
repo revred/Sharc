@@ -71,12 +71,19 @@ internal static class CborDecoder
 
     /// <summary>
     /// Typed selective field extraction.
+    /// Throws when the field exists but cannot be cast to the requested type.
     /// </summary>
-    public static T? ReadField<T>(ReadOnlySpan<byte> cbor, string fieldName)
+    public static TFieldValue? ReadField<TFieldValue>(ReadOnlySpan<byte> cbor, string fieldName)
     {
         var value = ReadField(cbor, fieldName);
-        if (value is null) return default;
-        return (T)value;
+        if (value is null)
+            return default;
+
+        if (value is TFieldValue typedValue)
+            return typedValue;
+
+        throw new InvalidCastException(
+            $"CBOR field '{fieldName}' is '{value.GetType().Name}', expected '{typeof(TFieldValue).Name}'.");
     }
 
     // ── Map reader ─────────────────────────────────────────────────

@@ -17,6 +17,10 @@
             <span class="query-summary-value">@_sqliteWins</span>
             <span class="query-summary-label">SQLite wins</span>
         </div>
+        <div class="query-summary-item tie-summary">
+            <span class="query-summary-value">@_ties</span>
+            <span class="query-summary-label">Ties</span>
+        </div>
     </div>
 
     <div class="query-table">
@@ -42,6 +46,7 @@
     private IReadOnlyList<QueryResult> _results = [];
     private int _sharcWins;
     private int _sqliteWins;
+    private int _ties;
     private bool _isLive;
 
     protected override async Task OnInitializedAsync()
@@ -50,5 +55,6 @@
         _isLive = QueryEngine.IsLive;
         _sharcWins = _results.Count(r => r.Winner == "sharc");
         _sqliteWins = _results.Count(r => r.Winner == "sqlite");
+        _ties = _results.Count(r => r.Winner == "tie");
     }
 }

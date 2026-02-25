@@ -21,7 +21,7 @@ Welcome to the **Sharc Context Engine** documentation.
 *   [**SQLite Analysis**](SQLiteAnalysis.md): Detailed comparison of Sharc vs. System.Data.SQLite.
 
 ## 📊 Performance
-*   [**Benchmarks**](BENCHMARKS.md): Methodology and results vs. SQLite, DuckDB, and others.
+*   [**Benchmarks**](BENCHMARKS.md): Methodology and results vs. SQLite, DuckDB, and others (latest focused hot-path update: 2026-02-25).
 
 ## 🔀 Comparisons & Alternatives
 
@@ -36,7 +36,7 @@ Welcome to the **Sharc Context Engine** documentation.
 *   [**Vector Search**](VECTOR_SEARCH.md): Embedding storage, similarity search, RAG patterns, comparison vs Pinecone/pgvector.
 
 ## 🛠️ Contributing
-*   [**Coding Standards**](CodingStandards.md): Rules for contributing to the alloc-free codebase.
+*   [**Coding Standards**](CodingStandards.md): Rules for contributing to the alloc-free codebase (including generic type naming and high-value comment guidelines).
 *   [**Migration Guide**](MIGRATION.md): Coming from older versions.
 
 ---

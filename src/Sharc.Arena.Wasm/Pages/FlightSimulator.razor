@@ -3,6 +3,7 @@
 @using Sharc.Arena.Wasm.Models
 @using Sharc.Arena.Wasm.Services
 @inject IJSRuntime JS
+@implements IAsyncDisposable
 
 <PageTitle>Flight Simulator Trust Layer - Sharc</PageTitle>
 
@@ -221,6 +222,7 @@
             <div class="scenario-details">
                 <div class="scenario-name">@ScenarioName</div>
                 <div class="scenario-desc">@ScenarioDescription</div>
+                <div class="scenario-inference">@LastInferenceSummary</div>
             </div>
         </section>
 
@@ -246,6 +248,10 @@
 
             <div class="agent-stats">
                 <div class="stat">TPS: <strong>@Tps</strong></div>
+                <div class="stat">CNS: <strong>@ConsensusRounds</strong></div>
+                <div class="stat">OUT: <strong>@OutlierRejections</strong></div>
+                <div class="stat">FALL: <strong>@FallbackInferences</strong></div>
+                <div class="stat">AUTH: <strong>@AuthorityRejections</strong></div>
             </div>
 
             <div class="ledger-console">
@@ -836,6 +842,13 @@ body {
 }
 .scenario-name { font-size: 1.1rem; color: var(--accent-amber); text-shadow: 0 0 8px var(--accent-amber-glow); margin-bottom: 8px; letter-spacing: 1px; }
 .scenario-desc { line-height: 1.5; color: #cbd5e1; }
+.scenario-inference {
+    margin-top: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    color: #93c5fd;
+    text-shadow: 0 0 6px rgba(56, 189, 248, 0.35);
+}
 
 /* Agent Reputation Cards */
 .agent-cards {
@@ -885,14 +898,15 @@ body {
 /* Ledger Console */
 .agent-stats {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
     margin-bottom: 12px;
     padding: 0 4px;
 }
 .agent-stats .stat {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 1rem;
+    font-size: 0.9rem;
     color: var(--accent-blue);
     text-shadow: 0 0 8px var(--accent-blue-glow);
 }
@@ -1207,6 +1221,9 @@ body {
 @using Sharc.Trust
 
 @code {
+    private static readonly TimeSpan SimulationTickInterval = TimeSpan.FromMilliseconds(250);
+    private const int ScenarioTicksPerWindow = 16;
+
     private bool _isRunning = false;
     private bool _isInitialized = false;
     private bool _showPanoramicView = false;
@@ -1239,10 +1256,15 @@ body {
     public int CurrentScenarioId => _simEngine?.GetCurrentScenario()?.Id ?? 0;
     public string ScenarioName => _simEngine?.GetCurrentScenario()?.Name ?? "SYSTEM IDLE";
     public string ScenarioDescription => _simEngine?.GetCurrentScenario()?.Description ?? "Waiting for simulation to engage.";
-    public int TotalScenarios => _simEngine?.ScenarioCount ?? 15;
+    public int TotalScenarios => _simEngine?.ScenarioCount ?? 16;
 
     // Trust Ledger State
     public int Tps { get; set; } = 0;
+    public int ConsensusRounds => _autoPilot?.ConsensusRounds ?? 0;
+    public int OutlierRejections => _autoPilot?.OutlierRejections ?? 0;
+    public int FallbackInferences => _autoPilot?.FallbackInferences ?? 0;
+    public int AuthorityRejections => _autoPilot?.AuthorityRejections ?? 0;
+    public string LastInferenceSummary => _autoPilot?.LastInferenceSummary ?? "No consensus rounds yet.";
 
     public enum TrustStatus { Valid, InvalidSignature, ReputationTooLow, ConsensusOverride }
 
@@ -1262,29 +1284,49 @@ body {
 
     protected override async Task OnInitializedAsync()
     {
-        // 1. Initialize Arc File Manager — 3 distributed arc files per TheArcFormat.md
+        await InitializeArcManagerAsync();
+        await SetupAgentsAsync();
+        RebuildSimulationEngine();
+        _isInitialized = true;
+    }
+
+    private async Task InitializeArcManagerAsync()
+    {
         _arcManager = new ArcFileManager(JS);
         await _arcManager.InitializeAsync();
+        SubscribeAuditEvents(_arcManager);
+    }
 
-        // 2. Subscribe to SecurityAudit on all 3 arc ledgers
-        _arcManager.TelemetryArc.Ledger.SecurityAudit += OnLedgerAudit;
-        _arcManager.CriticalArc.Ledger.SecurityAudit += OnLedgerAudit;
-        _arcManager.AgentsArc.Ledger.SecurityAudit += OnLedgerAudit;
+    private void SubscribeAuditEvents(ArcFileManager manager)
+    {
+        manager.TelemetryArc.Ledger.SecurityAudit += OnLedgerAudit;
+        manager.CriticalArc.Ledger.SecurityAudit += OnLedgerAudit;
+        manager.AgentsArc.Ledger.SecurityAudit += OnLedgerAudit;
+    }
 
-        // 3. Register Agents across all arcs
-        await SetupAgentsAsync();
+    private void UnsubscribeAuditEvents(ArcFileManager manager)
+    {
+        manager.TelemetryArc.Ledger.SecurityAudit -= OnLedgerAudit;
+        manager.CriticalArc.Ledger.SecurityAudit -= OnLedgerAudit;
+        manager.AgentsArc.Ledger.SecurityAudit -= OnLedgerAudit;
+    }
 
-        // 4. Create Engine — AutoPilot uses TelemetryArc for consensus validation
+    private void RebuildSimulationEngine()
+    {
+        if (_arcManager == null) return;
+
         _autoPilot = new AutoPilotAgent(_arcManager.TelemetryArc.Ledger, _arcManager.TelemetryArc.Registry);
         _autoPilot.InitializeSensors(_workers);
-        _autoPilot.OnReputationChanged = (agentId, newScore) =>
-        {
-            var w = _workers.FirstOrDefault(x => x.AgentId == agentId);
-            if (w != null) w.ReputationScore = newScore;
-        };
+        _autoPilot.OnReputationChanged = OnReputationChanged;
+        _autoPilot.ResetInferenceTelemetry();
         _simEngine = new SimulationEngine(_autoPilot, _workers, OnAgentPushToLedger);
+    }
 
-        _isInitialized = true;
+    private void OnReputationChanged(string agentId, int newScore)
+    {
+        var worker = _workers.FirstOrDefault(x => x.AgentId == agentId);
+        if (worker != null)
+            worker.ReputationScore = newScore;
     }
 
     private async Task SetupAgentsAsync()
@@ -1344,7 +1386,7 @@ body {
             await targetArc.AppendAsync(payload, agent.Signer);
 
             // 2. Evaluate Consensus (AutoPilot)
-            var (accepted, reason) = _autoPilot.ProcessReading(payload, signerId);
+            var accepted = _autoPilot.TryProcessReading(payload, signerId, out var reason);
 
             var arcTag = targetArc == _arcManager.CriticalArc ? "[CRT]" : "[TEL]";
             if (accepted)
@@ -1379,81 +1421,83 @@ body {
 
     private void StartSimulation()
     {
-        if (!_isInitialized) return;
+        if (!_isInitialized || _isRunning || _simTimer != null || _simEngine == null) return;
 
         _isRunning = true;
         _totalTicks = 0;
+        Tps = 0;
         _autoPilot?.ClearWarnings();
+        _autoPilot?.ClearReadingBuffer();
+        _autoPilot?.ResetInferenceTelemetry();
 
-        // Run scenario loop 4 times a second
-        _simTimer = new System.Threading.Timer((_) =>
+        _simTimer = new System.Threading.Timer(static state =>
         {
-            InvokeAsync(async () =>
-            {
-                Tps = 0;
-                if (_simEngine != null) await _simEngine.TickAsync();
+            var simulator = (FlightSimulator)state!;
+            _ = simulator.InvokeAsync(simulator.RunSimulationTickAsync);
+        }, this, TimeSpan.Zero, SimulationTickInterval);
+    }
 
-                _totalTicks++;
-                // Move to next scenario every 4 seconds (16 ticks at 250ms)
-                if (_totalTicks % 16 == 0)
-                {
-                    _autoPilot?.ClearWarnings();
-                    _simEngine?.MoveNextScenario();
-                    // Reset mode to Suggestive at start of each scenario
-                    if (_autoPilot != null) _autoPilot.Mode = AutoPilotMode.Suggestive;
+    private async Task RunSimulationTickAsync()
+    {
+        if (!_isRunning || _simEngine == null) return;
 
-                    // Flush durable arcs to OPFS at scenario boundaries
-                    if (_arcManager != null) await _arcManager.FlushDurableArcsAsync();
-                }
+        Tps = 0;
+        await _simEngine.TickAsync();
 
-                StateHasChanged();
-            });
-        }, null, 0, 250);
+        _totalTicks++;
+        if (_totalTicks % ScenarioTicksPerWindow == 0)
+        {
+            _autoPilot?.ClearWarnings();
+            _autoPilot?.ClearReadingBuffer();
+            _simEngine.MoveNextScenario();
+            if (_autoPilot != null)
+                _autoPilot.Mode = AutoPilotMode.Suggestive;
+
+            if (_arcManager != null)
+                await _arcManager.FlushDurableArcsAsync();
+        }
+
+        StateHasChanged();
     }
 
     private async Task StopSimulation()
     {
-        _isRunning = false;
-        _simTimer?.Dispose();
-
-        // Flush durable arcs to OPFS on stop
-        if (_arcManager != null) await _arcManager.FlushDurableArcsAsync();
-
+        await StopSimulationCoreAsync(flushDurableArcs: true);
         StateHasChanged();
+    }
+
+    private async Task StopSimulationCoreAsync(bool flushDurableArcs)
+    {
+        _isRunning = false;
+        var timer = System.Threading.Interlocked.Exchange(ref _simTimer, null);
+        timer?.Dispose();
+
+        if (flushDurableArcs && _arcManager != null)
+            await _arcManager.FlushDurableArcsAsync();
     }
 
     private async Task ClearFlightData()
     {
         if (_arcManager == null) return;
 
-        // Wipe OPFS data
+        await StopSimulationCoreAsync(flushDurableArcs: false);
+
         await _arcManager.ClearAllOpfsDataAsync();
-
-        // Dispose and re-create the manager
+        UnsubscribeAuditEvents(_arcManager);
         await _arcManager.DisposeAsync();
-        _arcManager = new ArcFileManager(JS);
-        await _arcManager.InitializeAsync();
 
-        // Subscribe audit events on new arcs
-        _arcManager.TelemetryArc.Ledger.SecurityAudit += OnLedgerAudit;
-        _arcManager.CriticalArc.Ledger.SecurityAudit += OnLedgerAudit;
-        _arcManager.AgentsArc.Ledger.SecurityAudit += OnLedgerAudit;
-
-        // Re-register agents
         _workers.Clear();
-        await SetupAgentsAsync();
-
-        // Re-create engine with new arcs
-        _autoPilot = new AutoPilotAgent(_arcManager.TelemetryArc.Ledger, _arcManager.TelemetryArc.Registry);
-        _autoPilot.InitializeSensors(_workers);
-        _autoPilot.OnReputationChanged = (agentId, newScore) =>
-        {
-            var w = _workers.FirstOrDefault(x => x.AgentId == agentId);
-            if (w != null) w.ReputationScore = newScore;
-        };
-        _simEngine = new SimulationEngine(_autoPilot, _workers, OnAgentPushToLedger);
-
+        _simEngine = null;
+        _autoPilot = null;
+        _totalTicks = 0;
+        Tps = 0;
+        _showPanoramicView = false;
         LedgerEntries.Clear();
+
+        await InitializeArcManagerAsync();
+        await SetupAgentsAsync();
+        RebuildSimulationEngine();
+
         StateHasChanged();
     }
 
@@ -1470,6 +1514,18 @@ body {
     {
         _showPanoramicView = !_showPanoramicView;
         StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopSimulationCoreAsync(flushDurableArcs: true);
+
+        if (_arcManager != null)
+        {
+            UnsubscribeAuditEvents(_arcManager);
+            await _arcManager.DisposeAsync();
+            _arcManager = null;
+        }
     }
 
     private string GetLedgerClass(TrustStatus status)

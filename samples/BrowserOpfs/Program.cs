@@ -67,6 +67,7 @@ using (var conn = new SqliteConnection($"Data Source={dbPath}"))
     tx.Commit();
 }
 
+SqliteConnection.ClearAllPools();
 var dbBytes = File.ReadAllBytes(dbPath);
 Console.WriteLine($"  Database size: {dbBytes.Length:N0} bytes ({dbBytes.Length / 1024} KB)");
 Console.WriteLine("  In browser: await OpfsPageSource.CreateFromBytesAsync(js, 'notes.db', bytes);\n");
