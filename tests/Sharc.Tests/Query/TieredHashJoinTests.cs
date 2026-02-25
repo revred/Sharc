@@ -9,7 +9,7 @@ namespace Sharc.Tests.Query;
 
 /// <summary>
 /// Unit tests for <see cref="TieredHashJoin"/> — the zero-allocation FULL OUTER JOIN executor.
-/// Tests all three tiers (StackAlloc, Pooled, DestructiveProbe) via controlled build-side sizes.
+/// Tests all three tiers (StackAlloc, Pooled, OpenAddress) via controlled build-side sizes.
 /// </summary>
 public sealed class TieredHashJoinTests
 {
@@ -273,12 +273,12 @@ public sealed class TieredHashJoinTests
         Assert.Equal(150, buildUnmatched.Count);
     }
 
-    // ───── Tier III: DestructiveProbe (>8,192 build rows) ─────
+    // ───── Tier III: OpenAddress (>8,192 build rows) ─────
 
     [Fact]
-    public void TierIII_FullOuterJoin_BasicMatch_DestructiveProbe()
+    public void TierIII_FullOuterJoin_BasicMatch_OpenAddress()
     {
-        // 9000 build rows → Tier III (DestructiveProbe)
+        // 9000 build rows → Tier III (OpenAddress)
         var build = new List<QueryValue[]>(9000);
         for (int i = 0; i < 9000; i++)
             build.Add(Row(i, $"b{i}"));

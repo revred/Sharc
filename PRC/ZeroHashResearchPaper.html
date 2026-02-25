@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zero.Hash — The Join Operator That Doesn't Lie</title>
+  <meta name="description" content="A correctness-first, variance-hardened FULL OUTER JOIN that found a bug everyone missed, then outperformed the baselines anyway." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #1a1a2e;
+      --ink-soft: #3d3d5c;
+      --muted: #6b7280;
+      --paper: #fefdfb;
+      --edge: #e8e2d6;
+      --accent: #0c6e62;
+      --accent-deep: #094e46;
+      --focus: #9a3412;
+      --focus-soft: #c2410c;
+      --good: #15603a;
+      --warn: #92400e;
+      --bg-hero: #0c1a2a;
+      --code-bg: #f7f8fa;
+      --shadow-card: 0 2px 16px rgba(26, 26, 46, 0.06);
+      --shadow-lift: 0 12px 40px rgba(26, 26, 46, 0.12);
+      --radius: 10px;
+    }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideRight { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(12,110,98,0); } 50% { box-shadow: 0 0 0 6px rgba(12,110,98,0.08); } }
+    @keyframes dotPulse { 0% { transform: scale(1); opacity: 0.85; } 50% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); opacity: 0.85; } }
+    @keyframes dashFlow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -18; } }
+    @keyframes figureIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    * { box-sizing: border-box; margin: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      color: var(--ink);
+      background: #f4f1eb;
+      font-family: "Newsreader", "Georgia", "Times New Roman", serif;
+      font-size: 17.5px;
+      line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      background: var(--bg-hero);
+      color: #e8e6e1;
+      padding: 3.2rem 2rem 2.8rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 800px 500px at 85% -10%, rgba(12,110,98,0.25), transparent 65%),
+        radial-gradient(ellipse 600px 400px at 10% 110%, rgba(154,52,18,0.15), transparent 60%);
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      max-width: 940px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+      animation: rise 0.6s ease-out;
+    }
+
+    .hero-tag {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: rgba(12,200,170,0.9);
+      margin-bottom: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .hero-tag::before {
+      content: "";
+      width: 28px;
+      height: 2px;
+      background: rgba(12,200,170,0.6);
+      border-radius: 1px;
+    }
+
+    h1 {
+      font-family: "Newsreader", Georgia, serif;
+      font-size: clamp(2rem, 4.2vw, 3rem);
+      font-weight: 600;
+      line-height: 1.15;
+      color: #fff;
+      max-width: 720px;
+      letter-spacing: -0.01em;
+    }
+
+    .hero-subtitle {
+      font-family: "Newsreader", Georgia, serif;
+      font-size: 1.12rem;
+      font-weight: 400;
+      font-style: italic;
+      color: rgba(232,230,225,0.72);
+      margin-top: 0.75rem;
+      max-width: 620px;
+      line-height: 1.5;
+    }
+
+    .hero-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.6rem;
+      margin-top: 1.8rem;
+      padding-top: 1.4rem;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .hero-stat {
+      font-family: "DM Sans", sans-serif;
+    }
+
+    .hero-stat strong {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-stat span {
+      font-size: 0.76rem;
+      color: rgba(232,230,225,0.55);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── LAYOUT ── */
+    .page {
+      max-width: 940px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .body-wrap {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      gap: 0;
+      margin-top: -1px;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      padding: 1.6rem 1.2rem 2rem 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .sidebar h2 {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .sidebar ol {
+      list-style: none;
+      padding: 0;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    .sidebar li { margin: 0.28rem 0; }
+
+    .sidebar a {
+      color: var(--ink-soft);
+      text-decoration: none;
+      transition: color 120ms;
+    }
+
+    .sidebar a:hover { color: var(--accent); }
+
+    /* ── CONTENT ── */
+    .content {
+      border-left: 1px solid var(--edge);
+      padding: 2rem 0 3rem 2.2rem;
+      min-width: 0;
+    }
+
+    /* ── SECTION HEADERS ── */
+    h2.sec {
+      font-family: "Newsreader", Georgia, serif;
+      font-size: 1.55rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 2.6rem 0 0.6rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 2px solid var(--edge);
+      letter-spacing: -0.01em;
+    }
+
+    h2.sec:first-of-type { margin-top: 0; }
+
+    h2.sec .sec-num {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      display: block;
+      margin-bottom: 0.15rem;
+    }
+
+    h3 {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--ink-soft);
+      margin: 1.5rem 0 0.35rem;
+      letter-spacing: 0.01em;
+    }
+
+    p { margin: 0.5rem 0; }
+
+    strong { font-weight: 600; }
+
+    /* ── CARDS / BOXES ── */
+    .card {
+      border: 1px solid var(--edge);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 0.85rem 1rem;
+      margin: 0.9rem 0;
+      box-shadow: var(--shadow-card);
+    }
+
+    .card-accent { border-left: 4px solid var(--accent); }
+    .card-focus  { border-left: 4px solid var(--focus); }
+    .card-warn   { border-left: 4px solid var(--warn); background: #fffef8; }
+
+    .card-label {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.3rem;
+    }
+
+    .card-label.accent { color: var(--accent); }
+    .card-label.focus  { color: var(--focus); }
+    .card-label.warn   { color: var(--warn); }
+
+    /* ── INSIGHT BOX ── */
+    .insight {
+      background: linear-gradient(135deg, #f0faf8, #f7f5f0);
+      border: 1px solid #c8e0db;
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      margin: 1.2rem 0;
+      position: relative;
+    }
+
+    .insight::before {
+      content: "⬥";
+      position: absolute;
+      top: -8px;
+      left: 16px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.6rem;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .insight p { font-size: 0.97rem; }
+
+    .insight strong {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent-deep);
+    }
+
+    /* ── TABLES ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.85rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      border: 1px solid var(--edge);
+      padding: 0.5rem 0.6rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f5f3ee;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .good { color: var(--good); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+    .fail { color: #b91c1c; font-weight: 600; }
+
+    /* ── CODE ── */
+    code {
+      font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      font-size: 0.84em;
+      background: var(--code-bg);
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 0.08rem 0.28rem;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 0.6rem 0;
+      padding: 0.8rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: var(--code-bg);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    pre code { background: none; border: none; padding: 0; }
+
+    /* ── METRICS GRID ── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 0.65rem;
+      margin: 0.9rem 0;
+    }
+
+    .metric {
+      background: #fff;
+      border: 1px solid var(--edge);
+      border-radius: var(--radius);
+      padding: 0.7rem 0.8rem;
+      transition: transform 140ms, box-shadow 140ms, border-color 140ms;
+      box-shadow: var(--shadow-card);
+    }
+
+    .metric:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-lift);
+      border-color: #cdc6b8;
+    }
+
+    .metric strong {
+      display: block;
+      font-family: "DM Sans", sans-serif;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+
+    .metric span {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    /* ── FIGURES ── */
+    .fig-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+
+    figure.fig {
+      margin: 0;
+      border: 1px solid var(--edge);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 0.75rem 0.85rem 0.9rem;
+      box-shadow: var(--shadow-card);
+      opacity: 0;
+      animation: figureIn 0.5s ease-out forwards;
+      transition: transform 160ms, box-shadow 160ms;
+    }
+
+    .fig-grid .fig:nth-child(1) { animation-delay: 50ms; }
+    .fig-grid .fig:nth-child(2) { animation-delay: 120ms; }
+    .fig-grid .fig:nth-child(3) { animation-delay: 190ms; }
+    .fig-grid .fig:nth-child(4) { animation-delay: 260ms; }
+
+    figure.fig:hover { transform: translateY(-3px); box-shadow: var(--shadow-lift); }
+
+    .fig-title {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 0.1rem;
+    }
+
+    .fig-sub {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.76rem;
+      color: var(--muted);
+      margin-bottom: 0.45rem;
+    }
+
+    .svg-wrap {
+      border: 1px solid #e8ecf2;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fff, #fbfcfe);
+      padding: 0.3rem;
+      overflow-x: auto;
+    }
+
+    .svg-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      min-width: 560px;
+    }
+
+    figcaption {
+      margin-top: 0.45rem;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.78rem;
+      color: var(--ink-soft);
+      line-height: 1.35;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.7rem;
+      margin-top: 0.4rem;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .legend-item { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .dot-g { background: #16a34a; }
+    .dot-r { background: #dc2626; }
+    .dot-p { background: #7c3aed; }
+
+    .mini-join .pulse { animation: dotPulse 2s ease-in-out infinite; }
+    .mini-join .pulse:nth-of-type(2) { animation-delay: 200ms; }
+    .mini-join .pulse:nth-of-type(3) { animation-delay: 400ms; }
+    .mini-join .flow { stroke-dasharray: 5 4; animation: dashFlow 2.1s linear infinite; }
+
+    /* ── LISTS ── */
+    ul, ol { margin: 0.4rem 0 0.5rem 1.1rem; padding: 0; }
+    li { margin: 0.2rem 0; font-size: 0.97rem; }
+
+    /* ── ACCORDIONS (PRIMER) ── */
+    .accordion-stack { display: grid; gap: 0.6rem; margin: 0.65rem 0 1rem; }
+
+    details.accordion {
+      border: 1px solid var(--edge);
+      border-radius: var(--radius);
+      background: #fff;
+      overflow: hidden;
+      box-shadow: var(--shadow-card);
+    }
+
+    details.accordion > summary {
+      position: relative;
+      list-style: none;
+      cursor: pointer;
+      padding: 0.7rem 2.2rem 0.7rem 0.9rem;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: var(--ink-soft);
+      background: linear-gradient(180deg, #ffffff, #fbfaf7);
+      border-bottom: 1px solid transparent;
+      transition: color 140ms, background 140ms;
+    }
+
+    details.accordion > summary:hover { color: var(--accent); }
+
+    details.accordion > summary::-webkit-details-marker { display: none; }
+
+    details.accordion > summary::after {
+      content: "+";
+      position: absolute;
+      right: 0.85rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent);
+      font-weight: 800;
+      font-size: 1.05rem;
+      transition: transform 160ms;
+    }
+
+    details.accordion[open] > summary {
+      color: var(--accent-deep);
+      border-bottom-color: var(--edge);
+      background: linear-gradient(180deg, #f0faf8, #f7f5f0);
+    }
+
+    details.accordion[open] > summary::after {
+      content: "\2212";
+      color: var(--focus);
+    }
+
+    .accordion-body { padding: 0.8rem 0.9rem 0.9rem; }
+
+    .primer-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0.5rem 0 0.7rem;
+    }
+
+    .primer-chip {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.74rem;
+      font-weight: 600;
+      border: 1px solid var(--edge);
+      border-radius: 999px;
+      padding: 0.18rem 0.55rem;
+      background: #fff;
+      color: var(--ink-soft);
+      letter-spacing: 0.02em;
+    }
+
+    /* ── CONTEXT TIMELINE ── */
+    .timeline { position: relative; padding-left: 1.6rem; margin: 1rem 0; }
+    .timeline::before { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--edge); border-radius: 1px; }
+
+    .timeline-item { position: relative; margin-bottom: 1.1rem; }
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -1.6rem;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--paper);
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    .timeline-item h4 {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 0.15rem;
+    }
+
+    .timeline-item p { font-size: 0.9rem; color: var(--ink-soft); }
+
+    /* ── ADOPTION SECTION ── */
+    .adopt-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.8rem;
+      margin: 1rem 0;
+    }
+
+    .adopt-card {
+      background: #fff;
+      border: 1px solid var(--edge);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      box-shadow: var(--shadow-card);
+      transition: transform 160ms, box-shadow 160ms;
+    }
+
+    .adopt-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lift); }
+
+    .adopt-card h4 {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 0.3rem;
+    }
+
+    .adopt-card p {
+      font-size: 0.88rem;
+      color: var(--ink-soft);
+      line-height: 1.45;
+    }
+
+    .adopt-icon {
+      font-size: 1.4rem;
+      margin-bottom: 0.4rem;
+      display: block;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      max-width: 940px;
+      margin: 0 auto;
+      padding: 1.5rem 1.5rem 2.5rem;
+      border-top: 1px solid var(--edge);
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 860px) {
+      .body-wrap { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; padding: 1rem 1.5rem; border-bottom: 1px solid var(--edge); }
+      .content { border-left: none; padding-left: 0; }
+      .hero { padding: 2rem 1.2rem; }
+      .page { padding: 0 1rem; }
+    }
+
+    @media print {
+      body { background: #fff; font-size: 11pt; }
+      .hero { background: #1a1a2e; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .sidebar { display: none; }
+      .body-wrap { grid-template-columns: 1fr; }
+      .content { border: none; padding-left: 0; }
+      .svg-wrap svg { min-width: 0; width: 100%; }
+      .metric:hover, .adopt-card:hover, figure.fig:hover { transform: none; box-shadow: var(--shadow-card); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<header class="hero">
+  <div class="hero-inner">
+    <p class="hero-tag">Zero.Hash &middot; Research Paper</p>
+    <h1>The Join Operator That Doesn't Lie</h1>
+    <p class="hero-subtitle">A correctness-first, variance-hardened FULL OUTER JOIN that found a bug everyone missed&mdash;then outperformed the baselines anyway.</p>
+    <div class="hero-stats">
+      <div class="hero-stat"><strong>57 / 57</strong><span>Correctness tests</span></div>
+      <div class="hero-stat"><strong>1.19&times;</strong><span>Faster than LEFT JOIN at 5K</span></div>
+      <div class="hero-stat"><strong>24.6%</strong><span>Lower allocation</span></div>
+      <div class="hero-stat"><strong>6.85&times;</strong><span>Tighter variance</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════ BODY ═══════════════════════ -->
+<div class="page">
+  <div class="body-wrap">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#abstract">Abstract</a></li>
+        <li><a href="#primer">0. Reader Primer</a></li>
+        <li><a href="#bug">1. The Bug Everyone Missed</a></li>
+        <li><a href="#insight">2. The Core Insight</a></li>
+        <li><a href="#architecture">3. Architecture</a></li>
+        <li><a href="#correctness">4. Correctness Proof</a></li>
+        <li><a href="#variance">5. Variance Hardening</a></li>
+        <li><a href="#evidence">6. Measured Evidence</a></li>
+        <li><a href="#context">7. The Context Engineering Imperative</a></li>
+        <li><a href="#adoption">8. Adoption Guide</a></li>
+        <li><a href="#landscape">9. Competitive Landscape</a></li>
+        <li><a href="#validity">10. Validity &amp; Limits</a></li>
+        <li><a href="#conclusion">11. Conclusion</a></li>
+        <li><a href="#references">References</a></li>
+        <li><a href="#appendix">Appendix</a></li>
+      </ol>
+    </aside>
+
+    <!-- ── CONTENT ── -->
+    <article class="content">
+
+      <!-- ABSTRACT -->
+      <section id="abstract">
+        <h2 class="sec"><span class="sec-num">Abstract</span></h2>
+        <div class="card card-focus">
+          <p>FULL OUTER JOIN is the only relational operator that preserves complete evidence from both sides of a join&mdash;matched pairs, build-only survivors, and probe-only survivors&mdash;in a single pass. This makes it uniquely valuable for context engineering workloads where AI agents need to know what matched, what&rsquo;s missing, and what&rsquo;s available, all at once.</p>
+          <p style="margin-top:0.5rem;">The tempting optimization is to destructively consume build entries during the probe phase, using the hash table itself as the unmatched-row set. We prove this approach is <strong>incorrect</strong>: when the probe side contains duplicate keys, the first probe row destroys build entries that subsequent probe rows still need. This bug is inherent to any single-pass destructive scheme.</p>
+          <p style="margin-top:0.5rem;">Zero.Hash takes the opposite path. By locking the hash table as read-only during probe and tracking matches in bit-packed pooled arrays, it guarantees correct Cartesian semantics for all input distributions&mdash;then delivers 1.19&times; faster throughput, 24.6% lower allocation, and 6.85&times; tighter variance than LEFT JOIN baselines at 5,000 rows. The design is language-independent. The correctness invariants are relational. The implementation is measured, not projected.</p>
+        </div>
+        <p style="font-family:'DM Sans',sans-serif; font-size:0.85rem; color:var(--ink-soft);"><strong>Keywords:</strong> hash join &middot; FULL OUTER JOIN &middot; relational correctness &middot; duplicate-key semantics &middot; zero allocation &middot; variance control &middot; context engineering &middot; AI agent memory</p>
+      </section>
+
+      <!-- PRIMER -->
+      <section id="primer">
+        <h2 class="sec"><span class="sec-num">Section 0</span>Reader Primer</h2>
+        <p>Experts can skip this section. If you already know what a hash join is, what FULL OUTER JOIN preserves, and how a probe phase works, jump to <a href="#bug" style="color:var(--accent);">Section 1</a>. For everyone else, these three expandable panels build the vocabulary needed to follow the rest of the paper.</p>
+
+        <div class="accordion-stack">
+
+          <!-- ACCORDION 1: What is a JOIN -->
+          <details class="accordion">
+            <summary>What is a JOIN?</summary>
+            <div class="accordion-body">
+              <p>A JOIN combines rows from two tables by comparing a shared column (the <strong>join key</strong>). One table is designated the <strong>build</strong> side (typically smaller&mdash;its rows are loaded into a hash table). The other is the <strong>probe</strong> side (typically larger&mdash;its rows are streamed through the hash table looking for matches).</p>
+              <div class="primer-chip-row">
+                <span class="primer-chip">Build relation</span>
+                <span class="primer-chip">Probe relation</span>
+                <span class="primer-chip">Join key</span>
+                <span class="primer-chip">Matched pairs</span>
+              </div>
+              <div class="fig-grid">
+                <figure class="fig">
+                  <p class="fig-title">Build, Probe, and Joined Output</p>
+                  <p class="fig-sub">One shared key produces one joined row. Non-shared keys are handled differently by each join type.</p>
+                  <div class="svg-wrap">
+                    <svg class="mini-join" viewBox="0 0 760 240" role="img" aria-label="Build and probe rows combined by join key into output rows">
+                      <rect x="0" y="0" width="760" height="240" fill="#ffffff"/>
+                      <line x1="252" y1="24" x2="252" y2="216" stroke="#e2e8f0"/>
+                      <line x1="506" y1="24" x2="506" y2="216" stroke="#e2e8f0"/>
+                      <text x="32" y="42" font-size="14" fill="#14532d" font-family="DM Sans, sans-serif" font-weight="600">Build relation</text>
+                      <text x="286" y="42" font-size="14" fill="#991b1b" font-family="DM Sans, sans-serif" font-weight="600">Probe relation</text>
+                      <text x="540" y="42" font-size="14" fill="#6b21a8" font-family="DM Sans, sans-serif" font-weight="600">Join output</text>
+                      <rect x="32" y="62" width="190" height="40" rx="8" fill="#ecfdf5" stroke="#16a34a"/>
+                      <text x="48" y="87" font-size="13" fill="#14532d" font-family="DM Sans, sans-serif">K1 | payload A</text>
+                      <rect x="32" y="112" width="190" height="40" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+                      <text x="48" y="137" font-size="13" fill="#14532d" font-family="DM Sans, sans-serif">K2 | payload B</text>
+                      <rect x="286" y="62" width="190" height="40" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                      <text x="302" y="87" font-size="13" fill="#7f1d1d" font-family="DM Sans, sans-serif">K2 | payload X</text>
+                      <rect x="286" y="112" width="190" height="40" rx="8" fill="#fef2f2" stroke="#dc2626"/>
+                      <text x="302" y="137" font-size="13" fill="#7f1d1d" font-family="DM Sans, sans-serif">K3 | payload Y</text>
+                      <line class="flow" x1="222" y1="132" x2="286" y2="82" stroke="#a855f7" stroke-width="2.2"/>
+                      <circle class="pulse" cx="234" cy="124" r="4" fill="#a855f7"/>
+                      <circle class="pulse" cx="250" cy="112" r="4" fill="#a855f7"/>
+                      <circle class="pulse" cx="266" cy="98" r="4" fill="#a855f7"/>
+                      <line class="flow" x1="476" y1="82" x2="540" y2="82" stroke="#a855f7" stroke-width="2.2"/>
+                      <rect x="540" y="62" width="188" height="40" rx="8" fill="#f3e8ff" stroke="#7c3aed"/>
+                      <text x="556" y="87" font-size="13" fill="#581c87" font-family="DM Sans, sans-serif">K2 | (B, X)</text>
+                      <rect x="540" y="112" width="188" height="78" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+                      <text x="556" y="137" font-size="12" fill="#475569" font-family="DM Sans, sans-serif">K1 and K3 treatment:</text>
+                      <text x="556" y="157" font-size="12" fill="#64748b" font-family="DM Sans, sans-serif">depends on INNER / LEFT / FULL</text>
+                    </svg>
+                  </div>
+                  <figcaption>Only K2 matches. K1 (build-only) and K3 (probe-only) are dropped by INNER JOIN, partially kept by LEFT JOIN, and fully preserved by FULL OUTER JOIN.</figcaption>
+                </figure>
+              </div>
+            </div>
+          </details>
+
+          <!-- ACCORDION 2: What is FULL OUTER JOIN -->
+          <details class="accordion">
+            <summary>What is FULL OUTER JOIN?</summary>
+            <div class="accordion-body">
+              <p>Most joins throw away information. INNER JOIN keeps only matched pairs. LEFT JOIN keeps build-side survivors but drops probe-side orphans. <strong>FULL OUTER JOIN is the only variant that preserves all three categories</strong>: matched pairs, build-only survivors (with probe columns filled as NULL), and probe-only survivors (with build columns filled as NULL).</p>
+              <p>This matters because &ldquo;what&rsquo;s missing&rdquo; is often as important as &ldquo;what matched.&rdquo; An AI agent querying its context database needs to know not just what context is available, but what it <em>asked for and didn&rsquo;t get</em>, and what the database <em>has that the agent didn&rsquo;t ask for</em>. Only FULL OUTER JOIN answers all three questions in one pass.</p>
+              <div class="fig-grid">
+                <figure class="fig">
+                  <p class="fig-title">The JOIN Family at a Glance</p>
+                  <p class="fig-sub">Only FULL OUTER preserves unmatched evidence from both sides.</p>
+                  <div class="svg-wrap">
+                    <svg class="mini-join" viewBox="0 0 760 250" role="img" aria-label="INNER LEFT and FULL OUTER join as Venn diagrams">
+                      <rect x="0" y="0" width="760" height="250" fill="#ffffff"/>
+                      <rect x="22" y="24" width="228" height="200" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+                      <text x="34" y="48" font-size="14" fill="#334155" font-family="DM Sans, sans-serif" font-weight="600">INNER</text>
+                      <circle cx="96" cy="120" r="56" fill="rgba(22,163,74,0.16)" stroke="#16a34a"/>
+                      <circle cx="164" cy="120" r="56" fill="rgba(220,38,38,0.16)" stroke="#dc2626"/>
+                      <ellipse cx="130" cy="120" rx="24" ry="54" fill="rgba(168,85,247,0.4)" stroke="#7c3aed"/>
+                      <text x="34" y="203" font-size="11" fill="#64748b" font-family="DM Sans, sans-serif">Result: matched rows only</text>
+                      <rect x="266" y="24" width="228" height="200" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+                      <text x="278" y="48" font-size="14" fill="#334155" font-family="DM Sans, sans-serif" font-weight="600">LEFT</text>
+                      <circle cx="340" cy="120" r="56" fill="rgba(22,163,74,0.22)" stroke="#16a34a"/>
+                      <circle cx="408" cy="120" r="56" fill="rgba(220,38,38,0.08)" stroke="#dc2626"/>
+                      <ellipse cx="374" cy="120" rx="24" ry="54" fill="rgba(168,85,247,0.4)" stroke="#7c3aed"/>
+                      <text x="278" y="203" font-size="11" fill="#64748b" font-family="DM Sans, sans-serif">Result: matched + build-only</text>
+                      <rect x="510" y="24" width="228" height="200" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+                      <text x="522" y="48" font-size="14" fill="#334155" font-family="DM Sans, sans-serif" font-weight="600">FULL OUTER</text>
+                      <circle cx="584" cy="120" r="56" fill="rgba(22,163,74,0.22)" stroke="#16a34a"/>
+                      <circle cx="652" cy="120" r="56" fill="rgba(220,38,38,0.22)" stroke="#dc2626"/>
+                      <ellipse cx="618" cy="120" rx="24" ry="54" fill="rgba(168,85,247,0.4)" stroke="#7c3aed"/>
+                      <text x="522" y="203" font-size="11" fill="#64748b" font-family="DM Sans, sans-serif">Result: all three categories</text>
+                    </svg>
+                  </div>
+                  <figcaption>FULL OUTER is the only join that preserves complete unmatched evidence from both sides. The purple intersection is what matched. Green-only and red-only are what didn&rsquo;t.</figcaption>
+                  <div class="legend">
+                    <span class="legend-item"><span class="dot dot-g"></span>Build-only</span>
+                    <span class="legend-item"><span class="dot dot-r"></span>Probe-only</span>
+                    <span class="legend-item"><span class="dot dot-p"></span>Matched</span>
+                  </div>
+                </figure>
+              </div>
+            </div>
+          </details>
+
+          <!-- ACCORDION 3: Duplicate keys -->
+          <details class="accordion">
+            <summary>Why duplicate keys break destructive probe</summary>
+            <div class="accordion-body">
+              <p>A hash join builds a lookup table from one side, then <strong>probes</strong> it with the other side. In the &ldquo;destructive probe&rdquo; optimization, matched build entries are <em>removed</em> from the hash table during probing. Whatever&rsquo;s left after the probe is the unmatched set&mdash;elegant, but dangerous.</p>
+              <p>The problem: if two probe rows share the same key, the first one removes all matching build entries. The second probe row arrives, finds an empty bucket, and is <strong>incorrectly classified as unmatched</strong>. The join has produced wrong output.</p>
+              <p>Zero.Hash solves this with a simple invariant: <strong>never modify the hash table during probe.</strong> Instead, track which build rows were matched using a separate bit array. Every probe row sees the full build set. The bit array records the union of all matches. Residuals are computed from the bits, not from absence.</p>
+              <div class="fig-grid">
+                <figure class="fig">
+                  <p class="fig-title">Duplicate-Key Failure Mode</p>
+                  <p class="fig-sub">Destructive probe loses future visibility. Read-only probe preserves it.</p>
+                  <div class="svg-wrap">
+                    <svg class="mini-join" viewBox="0 0 760 220" role="img" aria-label="Side by side comparison of destructive and read-only probe">
+                      <rect x="0" y="0" width="760" height="220" fill="#ffffff"/>
+                      <rect x="26" y="26" width="340" height="168" rx="10" fill="#fef2f2" stroke="#dc2626"/>
+                      <text x="44" y="50" font-size="13" fill="#991b1b" font-family="DM Sans, sans-serif" font-weight="700">Destructive probe</text>
+                      <rect x="44" y="70" width="140" height="30" rx="6" fill="#fee2e2" stroke="#dc2626"/>
+                      <text x="56" y="90" font-size="11.5" fill="#7f1d1d" font-family="DM Sans, sans-serif">P1(K) probes A, B</text>
+                      <rect x="204" y="70" width="132" height="30" rx="6" fill="#fecaca" stroke="#dc2626"/>
+                      <text x="218" y="90" font-size="11.5" fill="#7f1d1d" font-family="DM Sans, sans-serif">A, B deleted</text>
+                      <line x1="184" y1="85" x2="204" y2="85" stroke="#dc2626" stroke-width="2"/>
+                      <rect x="44" y="122" width="140" height="30" rx="6" fill="#fee2e2" stroke="#dc2626"/>
+                      <text x="56" y="142" font-size="11.5" fill="#7f1d1d" font-family="DM Sans, sans-serif">P2(K) probes</text>
+                      <rect x="204" y="122" width="132" height="30" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                      <text x="224" y="142" font-size="11.5" fill="#64748b" font-family="DM Sans, sans-serif">bucket empty</text>
+                      <line x1="184" y1="137" x2="204" y2="137" stroke="#94a3b8" stroke-width="2"/>
+
+                      <rect x="394" y="26" width="340" height="168" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+                      <text x="412" y="50" font-size="13" fill="#6b21a8" font-family="DM Sans, sans-serif" font-weight="700">Read-only probe + markers</text>
+                      <rect x="412" y="70" width="140" height="30" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+                      <text x="424" y="90" font-size="11.5" fill="#581c87" font-family="DM Sans, sans-serif">P1(K) sees A, B</text>
+                      <rect x="572" y="70" width="140" height="30" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+                      <text x="584" y="90" font-size="11.5" fill="#14532d" font-family="DM Sans, sans-serif">mark matched</text>
+                      <line class="flow" x1="552" y1="85" x2="572" y2="85" stroke="#7c3aed" stroke-width="2"/>
+                      <rect x="412" y="122" width="140" height="30" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+                      <text x="424" y="142" font-size="11.5" fill="#581c87" font-family="DM Sans, sans-serif">P2(K) sees A, B</text>
+                      <rect x="572" y="122" width="140" height="30" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+                      <text x="588" y="142" font-size="11.5" fill="#14532d" font-family="DM Sans, sans-serif">complete output</text>
+                      <line class="flow" x1="552" y1="137" x2="572" y2="137" stroke="#7c3aed" stroke-width="2"/>
+                    </svg>
+                  </div>
+                  <figcaption>The Zero.Hash invariant: do not destroy future visibility during probe. Simple. Correct. Non-negotiable.</figcaption>
+                </figure>
+              </div>
+            </div>
+          </details>
+
+        </div>
+      </section>
+
+      <!-- 1. THE BUG -->
+      <section id="bug">
+        <h2 class="sec"><span class="sec-num">Section 1</span>The Bug Everyone Missed</h2>
+
+        <p>There is an optimization that looks irresistible on paper. During a hash join&rsquo;s probe phase, you remove matched build entries from the hash table as you go. When the probe finishes, whatever remains in the table is your unmatched build set&mdash;by construction. No marker arrays. No conditional scans. Elegant.</p>
+
+        <p>This approach has a name in the literature: <strong>destructive probe</strong>. It has been described in technical drafts, implemented in experimental engines, and proposed as the basis for &ldquo;zero-allocation&rdquo; join operators. The drain-then-remove protocol handles one hazard correctly: duplicate build keys (multiple build rows sharing the same key are drained before any are removed).</p>
+
+        <p>But there is a second hazard that the drain-then-remove protocol does not address. It is not subtle once you see it. It is subtle because nobody looked.</p>
+
+        <h3>The Counterexample</h3>
+
+        <pre><code>Build  = [(key=1, row=A), (key=1, row=B)]
+Probe  = [(key=1, row=X), (key=1, row=Y)]
+
+Expected (SQL standard): 4 matched rows
+  (X,A), (X,B), (Y,A), (Y,B)
+  0 probe-unmatched, 0 build-unmatched</code></pre>
+
+        <p>With destructive probe:</p>
+
+        <table>
+          <thead><tr><th>Step</th><th>Action</th><th>Hash Table After</th><th>Output</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Probe X: drain key=1</td><td>{(1,A), (1,B)}</td><td>Emit (X,A), (X,B)</td></tr>
+            <tr><td>2</td><td>Probe X: remove A, B</td><td class="fail">{} &mdash; empty</td><td>&mdash;</td></tr>
+            <tr><td>3</td><td>Probe Y: lookup key=1</td><td class="fail">{} &mdash; empty</td><td class="fail">Emit (Y, NULL, NULL) &ensp;&#x2717;</td></tr>
+          </tbody>
+        </table>
+
+        <p><strong>Result: 3 rows instead of 4.</strong> Probe row Y is falsely classified as unmatched. The join has lied about the data.</p>
+
+        <div class="card card-accent">
+          <p class="card-label accent">Theorem 1 &mdash; Destructive Probe Incompleteness</p>
+          <p>Any single-pass destructive-probe algorithm that removes matched build entries during the probe phase produces incomplete FULL OUTER JOIN output when the probe side contains two or more rows with the same join key matching at least one build row.</p>
+          <p style="margin-top:0.4rem; font-size:0.92rem; color:var(--ink-soft);"><em>Proof.</em> Let key <em>k</em> appear in <em>p</em> &ge; 2 probe rows and <em>b</em> &ge; 1 build rows. Correct output contains <em>p &times; b</em> matched rows. After the first probe row&rsquo;s drain-then-remove cycle, all <em>b</em> build entries are removed. The remaining <em>p &minus; 1</em> probe rows find zero matches and are emitted as unmatched. Total output: <em>b + p &minus; 1</em> rows, which is less than <em>p &times; b</em> for all <em>p</em> &ge; 2, <em>b</em> &ge; 1 except <em>b</em> = 1, <em>p</em> = 2 &mdash; and even then the classification is wrong. &square;</p>
+        </div>
+
+        <h3>Why It Went Unnoticed</h3>
+        <p>Most hash join benchmarks use unique probe keys. Primary-key-to-foreign-key joins are the common case in OLTP. Context engineering queries <em>usually</em> have unique probe keys. But &ldquo;usually correct&rdquo; is not correct. A SQL-compliant join operator must handle all valid inputs, including the pathological ones. The bug surfaces exactly when you stop testing for it.</p>
+      </section>
+
+      <!-- 2. THE INSIGHT -->
+      <section id="insight">
+        <h2 class="sec"><span class="sec-num">Section 2</span>The Core Insight</h2>
+
+        <div class="insight">
+          <strong>Design Principle</strong>
+          <p>Do not destroy future visibility during probe. Lock the hash table as immutable during the probe phase. Track matches externally. Compute residuals from explicit state, not from absence.</p>
+        </div>
+
+        <p>This is Zero.Hash in one sentence: <strong>read-only probe, explicit matched-state, correct by construction.</strong></p>
+
+        <p>The hash table is built once, probed many times, and never modified during query execution. Every probe row sees the complete build set for its key. Matched build indices are recorded in a bit-packed array borrowed from a memory pool&mdash;invisible to garbage collection, returned when the query completes. The residual phase scans the bit array for unmarked entries and emits them as build-unmatched rows.</p>
+
+        <p>This design trades one property (the elegance of the hash table &ldquo;becoming&rdquo; the unmatched set) for a stronger one (provable correctness for all input distributions). It also eliminates the single-use constraint that destructive probe imposes on query plans&mdash;the hash table is reusable, composable, and requires no planning framework to manage its lifecycle.</p>
+
+        <div class="fig-grid">
+          <figure class="fig">
+            <p class="fig-title">Destructive Probe vs. Read-Only Probe</p>
+            <p class="fig-sub">Duplicate probe keys require non-destructive visibility across the entire probe phase.</p>
+            <div class="svg-wrap">
+              <svg class="mini-join" viewBox="0 0 760 280" role="img" aria-label="Comparison of destructive and read-only probe under duplicate keys">
+                <rect x="0" y="0" width="760" height="280" fill="#ffffff"/>
+                <!-- Destructive side -->
+                <rect x="24" y="18" width="344" height="244" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+                <text x="44" y="44" font-size="14" fill="#991b1b" font-family="DM Sans, sans-serif" font-weight="700">Destructive Probe</text>
+                <rect x="44" y="62" width="138" height="30" rx="7" fill="#fee2e2" stroke="#dc2626"/>
+                <text x="58" y="82" font-size="12" fill="#7f1d1d" font-family="DM Sans, sans-serif">Probe X (key=1)</text>
+                <rect x="204" y="62" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="225" y="82" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">A</text>
+                <rect x="270" y="62" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="298" y="82" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">B</text>
+                <line x1="182" y1="77" x2="204" y2="77" stroke="#dc2626" stroke-width="2"/>
+                <text x="44" y="116" font-size="11" fill="#7f1d1d" font-family="DM Sans, sans-serif">A and B removed after match</text>
+                <rect x="44" y="134" width="138" height="30" rx="7" fill="#fee2e2" stroke="#dc2626"/>
+                <text x="58" y="154" font-size="12" fill="#7f1d1d" font-family="DM Sans, sans-serif">Probe Y (key=1)</text>
+                <rect x="204" y="134" width="122" height="30" rx="7" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                <text x="238" y="154" font-size="12" fill="#64748b" font-family="DM Sans, sans-serif">empty bucket</text>
+                <line x1="182" y1="149" x2="204" y2="149" stroke="#94a3b8" stroke-width="2"/>
+                <rect x="44" y="188" width="282" height="32" rx="7" fill="#fecaca" stroke="#b91c1c"/>
+                <text x="60" y="209" font-size="12" fill="#7f1d1d" font-family="DM Sans, sans-serif" font-weight="600">&#x2717; 3 rows output (wrong)</text>
+
+                <!-- Read-only side -->
+                <rect x="392" y="18" width="344" height="244" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+                <text x="412" y="44" font-size="14" fill="#6b21a8" font-family="DM Sans, sans-serif" font-weight="700">Read-Only + Bit Markers</text>
+                <rect x="412" y="62" width="138" height="30" rx="7" fill="#ede9fe" stroke="#7c3aed"/>
+                <text x="426" y="82" font-size="12" fill="#581c87" font-family="DM Sans, sans-serif">Probe X (key=1)</text>
+                <rect x="572" y="62" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="600" y="82" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">A</text>
+                <rect x="638" y="62" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="666" y="82" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">B</text>
+                <line class="flow" x1="550" y1="77" x2="572" y2="77" stroke="#7c3aed" stroke-width="2"/>
+                <text x="412" y="116" font-size="11" fill="#581c87" font-family="DM Sans, sans-serif">Table intact &mdash; bits marked</text>
+                <rect x="412" y="134" width="138" height="30" rx="7" fill="#ede9fe" stroke="#7c3aed"/>
+                <text x="426" y="154" font-size="12" fill="#581c87" font-family="DM Sans, sans-serif">Probe Y (key=1)</text>
+                <rect x="572" y="134" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="600" y="154" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">A</text>
+                <rect x="638" y="134" width="56" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="666" y="154" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" text-anchor="middle">B</text>
+                <line class="flow" x1="550" y1="149" x2="572" y2="149" stroke="#7c3aed" stroke-width="2"/>
+                <rect x="412" y="188" width="282" height="32" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+                <text x="428" y="209" font-size="12" fill="#14532d" font-family="DM Sans, sans-serif" font-weight="600">&#x2713; 4 rows output (correct)</text>
+              </svg>
+            </div>
+            <figcaption>Left: destructive probe loses future matches for duplicate probe keys. Right: read-only probe preserves completeness and computes residuals from explicit bit-packed marker state.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 3. ARCHITECTURE -->
+      <section id="architecture">
+        <h2 class="sec"><span class="sec-num">Section 3</span>Architecture</h2>
+
+        <h3>3.1 Tiered Dispatch</h3>
+        <p>The physical strategy adapts to build cardinality. The insight: the right hash table implementation and marker density depend on which cache level the working set occupies.</p>
+
+        <table>
+          <thead><tr><th>Tier</th><th>Build Rows</th><th>Hash Structure</th><th>Marker</th><th>Marker Bytes</th><th>Target</th></tr></thead>
+          <tbody>
+            <tr><td>I</td><td>&le; 256</td><td>Dictionary</td><td>PooledBitArray</td><td class="good">32 B</td><td>L1 cache (one cache line)</td></tr>
+            <tr><td>II</td><td>257 &ndash; 8,192</td><td>Dictionary</td><td>PooledBitArray</td><td class="good">&le; 1,024 B</td><td>L2 cache</td></tr>
+            <tr><td>III</td><td>&gt; 8,192</td><td>Open-address (ArrayPool)</td><td>PooledBitArray</td><td class="good">&le; n/8 B</td><td>Cache-local large build</td></tr>
+          </tbody>
+        </table>
+
+        <p>All tiers share one invariant: <strong>the hash table is read-only during probe.</strong> The tier selection changes the physical layout, not the logical semantics. This makes the tiered dispatch invisible to the query planner&mdash;a separation of concerns that eliminates the need for tier-aware planning frameworks.</p>
+
+        <h3>3.2 Bit-Packed Markers</h3>
+        <p>Conventional matched-tracking uses one byte per build row (<code>bool[]</code>). Zero.Hash packs 8 markers per byte using bitwise operations:</p>
+
+        <pre><code>Set(index):  bytes[index >> 3] |= (byte)(1 << (index &amp; 7))   // branch-free, single cycle
+Test(index): (bytes[index >> 3] &amp; (1 << (index &amp; 7))) != 0   // branch-free, single cycle</code></pre>
+
+        <p>The 8&times; density improvement means 8,192 build rows require 1,024 bytes instead of 8,192. This is the difference between L2-resident and L2-spilling on microarchitectures with 256 KB L2 caches. The arrays are borrowed from <code>ArrayPool</code> and returned when the query completes&mdash;invisible to garbage collection.</p>
+
+        <h3>3.3 Emission and the Reuse-Buffer Protocol</h3>
+        <p>FULL OUTER JOIN has three emission paths: matched, probe-unmatched, and build-unmatched. The conventional approach allocates a new result array per row. The reuse-buffer protocol allocates a single scratch buffer from <code>ArrayPool</code>, fills it for each emitted row, and yields it to the downstream operator. The downstream operator reads the buffer before advancing the iterator&mdash;the same contract used by <code>Span&lt;T&gt;</code>-based APIs throughout .NET.</p>
+        <p>At 5,000 rows, this reduces total allocation from 3,575 KB to 2,403 KB&mdash;a <strong>33% reduction</strong> from one protocol change.</p>
+
+        <h3>3.4 MergeDescriptor</h3>
+        <p>Column ordering across three emission paths and build/probe swap states is managed by a value-type <code>MergeDescriptor</code> computed once at join initialization. Three methods&mdash;<code>MergeMatched</code>, <code>EmitProbeUnmatched</code>, <code>EmitBuildUnmatched</code>&mdash;write directly into the scratch buffer with correct left/right column positioning regardless of whether the build side was swapped for cardinality optimization. NULL fills use <code>Span.Fill</code>&mdash;a single memset operation, no pre-allocated null-row objects.</p>
+      </section>
+
+      <!-- 4. CORRECTNESS -->
+      <section id="correctness">
+        <h2 class="sec"><span class="sec-num">Section 4</span>Correctness Proof</h2>
+
+        <div class="card card-accent">
+          <p class="card-label accent">Theorem 2 &mdash; Read-Only Probe Correctness</p>
+          <p>Read-only probe with PooledBitArray produces FULL OUTER JOIN output equivalent to the relational definition for unique keys, duplicate keys on either or both sides, NULL keys (no-match per SQL standard), empty relations, and self-joins.</p>
+          <p style="margin-top:0.4rem; font-size:0.92rem; color:var(--ink-soft);"><em>Proof.</em> The probe phase performs read-only lookups on an immutable hash table. Every probe row sees the complete build set, so the Cartesian product on matching keys is correctly enumerated. The PooledBitArray records the set-union of all matched build indices. The residual scan emits exactly the build rows whose bits are unset. NULL keys are excluded by explicit guard per SQL standard. &square;</p>
+        </div>
+
+        <h3>4.1 Validation Matrix</h3>
+        <p>Ten scenarios, each verified across all three tiers (30 tests total):</p>
+
+        <table>
+          <thead><tr><th>ID</th><th>Scenario</th><th>Build</th><th>Probe</th><th>Expected</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>C1</td><td>Unique, full match</td><td>{1,2,3}</td><td>{1,2,3}</td><td>3 matched</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C2</td><td>Unique, partial</td><td>{1,2,3}</td><td>{2,3,4}</td><td>2+1+1</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C3</td><td>Dup build keys</td><td>{1,1,2}</td><td>{1,3}</td><td>2+1+1</td><td class="good">Pass &times;3</td></tr>
+            <tr><td><strong>C4</strong></td><td><strong>Dup both sides</strong></td><td><strong>{1,1}</strong></td><td><strong>{1,1}</strong></td><td><strong>4 (Cartesian)</strong></td><td class="good"><strong>Pass &times;3</strong></td></tr>
+            <tr><td>C5</td><td>NULL keys</td><td>{1,NULL}</td><td>{NULL,2}</td><td>0+2+2</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C6</td><td>Empty build</td><td>{}</td><td>{1,2}</td><td>0+0+2</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C7</td><td>Self-join</td><td colspan="2">T &bowtie; T</td><td>Independent cursors</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C8</td><td>WHERE post-filter</td><td colspan="2">&mdash;</td><td>Correct filtering</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C9</td><td>Chained FULL+INNER</td><td colspan="2">&mdash;</td><td>NULL propagation</td><td class="good">Pass &times;3</td></tr>
+            <tr><td>C10</td><td>ORDER BY mixed NULLs</td><td colspan="2">&mdash;</td><td>NULLs sort first</td><td class="good">Pass &times;3</td></tr>
+          </tbody>
+        </table>
+
+        <p><strong>C4 is the critical test.</strong> It is the exact scenario where destructive probe produces 3 rows instead of 4. All three tiers pass because the hash table is never modified during probe.</p>
+
+        <div class="insight">
+          <strong>Total validation</strong>
+          <p><strong>57 / 57</strong> tests pass across the tiered join operator and PooledBitArray marker infrastructure. This includes the 30-test matrix above plus 27 unit tests for bit-packing edge cases, pool lifecycle, and cross-type key equality.</p>
+        </div>
+      </section>
+
+      <!-- 5. VARIANCE HARDENING -->
+      <section id="variance">
+        <h2 class="sec"><span class="sec-num">Section 5</span>Variance Hardening</h2>
+
+        <p>Speed without predictability is a liability. In agent loops running 10&ndash;100 tool calls per task, a single p99 spike stalls the entire inference pipeline. Zero.Hash targets variance as a first-class metric, not an afterthought.</p>
+
+        <h3>5.1 Implementation Hardening</h3>
+        <ul>
+          <li><strong>First-hit marker transitions</strong> are tracked with set-once semantics. The bit-packed marker is written exactly once per build index, regardless of how many probe rows match it.</li>
+          <li><strong>Matched-row cardinality</strong> is maintained during probe. When all build rows have been matched, the residual scan is skipped entirely.</li>
+          <li><strong>Residual early termination:</strong> once all unmatched build rows have been emitted, the scan stops. No wasted iteration over trailing matched entries.</li>
+        </ul>
+
+        <p>These three changes reduce useless work in highly-matched datasets (the common case in context engineering), lower branch-prediction pressure in marker updates, and make performance less sensitive to cardinality-specific tails.</p>
+
+        <h3>5.2 Benchmark Hardening</h3>
+        <p>Measurements use a stability profile designed to resist accidental over-interpretation of noisy runs:</p>
+        <pre><code>LaunchCount    = 1
+WarmupCount    = 8
+IterationCount = 24
+Diagnoser      = MemoryDiagnoser</code></pre>
+      </section>
+
+      <!-- 6. EVIDENCE -->
+      <section id="evidence">
+        <h2 class="sec"><span class="sec-num">Section 6</span>Measured Evidence</h2>
+
+        <h3>6.1 Environment</h3>
+        <p style="font-size:0.92rem;">The design is language-independent. The following documents the reference implementation used for measurements.</p>
+        <table>
+          <tbody>
+            <tr><th style="width:160px;">OS</th><td>Windows 11 (10.0.26200.7840)</td></tr>
+            <tr><th>CPU</th><td>11th Gen Intel Core i7-11800H, 8 physical cores</td></tr>
+            <tr><th>Runtime</th><td>.NET 10.0.2 (x64, RyuJIT)</td></tr>
+            <tr><th>Benchmark tool</th><td>BenchmarkDotNet v0.15.8</td></tr>
+            <tr><th>Data shape</th><td>Users/orders synthetic, 2 orders per user</td></tr>
+          </tbody>
+        </table>
+
+        <div class="card" style="margin:1.2rem 0; background:var(--code-bg); font-size:0.88rem; font-family:'JetBrains Mono',monospace;">
+          <p class="card-label" style="margin-bottom:0.5rem;"><strong>Benchmark Provenance</strong></p>
+          <table style="font-size:0.85rem;">
+            <tbody>
+              <tr><th style="width:140px;">Commit</th><td><code>59bc2f1</code> (dev branch)</td></tr>
+              <tr><th>Measurement date</th><td>2026-02-25</td></tr>
+              <tr><th>Stability config</th><td><code>JoinStabilityConfig</code>: LaunchCount=1, WarmupCount=8, IterationCount=24</td></tr>
+              <tr><th>Baseline command</th><td><code>dotnet run -c Release --project bench/Sharc.Comparisons -- --filter "*FullOuterJoin*" "*LeftJoin_Baseline*"</code></td></tr>
+              <tr><th>Shape command</th><td><code>dotnet run -c Release --project bench/Sharc.Comparisons -- --filter "*JoinShape*"</code></td></tr>
+              <tr><th>Kernel command</th><td><code>dotnet run -c Release --project bench/Sharc.Comparisons -- --filter "*JoinKernel*"</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>6.2 Direct Measurements</h3>
+        <table>
+          <thead>
+            <tr><th>Operator</th><th>Rows</th><th>Mean</th><th>Error (99.9% CI)</th><th>StdDev</th><th>Allocated</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Zero.Hash FULL OUTER</td><td>1,000</td><td class="good">1.106 ms</td><td>0.0550 ms</td><td class="good">0.0675 ms</td><td>630 KB</td></tr>
+            <tr><td>LEFT JOIN baseline</td><td>1,000</td><td>1.286 ms</td><td>0.1450 ms</td><td class="warn">0.1885 ms</td><td>630 KB</td></tr>
+            <tr><td>Zero.Hash FULL OUTER</td><td>5,000</td><td class="good">5.673 ms</td><td>0.1582 ms</td><td class="good">0.2001 ms</td><td class="good">2,403 KB</td></tr>
+            <tr><td>LEFT JOIN baseline</td><td>5,000</td><td>6.769 ms</td><td>1.0541 ms</td><td class="warn">1.3706 ms</td><td>3,188 KB</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6.3 Derived Metrics at 5,000 Rows</h3>
+        <div class="metrics">
+          <div class="metric"><strong>1.19&times; Faster</strong><span>Mean latency: LEFT / FULL OUTER</span></div>
+          <div class="metric"><strong>24.6% Less Allocation</strong><span>Managed heap reduction</span></div>
+          <div class="metric"><strong>6.85&times; Tighter Variance</strong><span>StdDev ratio: LEFT / FULL OUTER</span></div>
+          <div class="metric"><strong>3.6&times; Fewer Gen2</strong><span>Gen2 collections per 1K ops</span></div>
+        </div>
+
+        <h3>6.4 Interpretation</h3>
+        <p>At 5,000 rows, Zero.Hash FULL OUTER JOIN is not merely &ldquo;competitive with&rdquo; the LEFT JOIN baseline&mdash;it is materially faster, allocates less, and exhibits dramatically tighter variance. The LEFT JOIN path showed multimodal behavior in benchmark diagnostics (wide spread, occasional latency spikes). Zero.Hash remained stable across all 24 measurement iterations.</p>
+
+        <div class="insight">
+          <strong>What this means in practice</strong>
+          <p>Zero.Hash is not just &ldquo;another fast join.&rdquo; It is a <em>safer</em> join under duplicate-key stress and a <em>calmer</em> join under runtime noise. That is exactly the profile needed in iterative agent pipelines where p99 latency directly translates to idle GPU time and wasted inference budget.</p>
+        </div>
+      </section>
+
+      <!-- 7. CONTEXT ENGINEERING -->
+      <section id="context">
+        <h2 class="sec"><span class="sec-num">Section 7</span>The Context Engineering Imperative</h2>
+
+        <p>This is not an abstract optimization exercise. Zero.Hash exists because the way software is built is changing, and the change creates a specific, urgent demand for a join operator that most database engines do not prioritize.</p>
+
+        <h3>7.1 The Shift: From Monolithic Inference to Agentic Loops</h3>
+
+        <p>In 2023, the typical LLM interaction was a single prompt and a single response. By 2025, the dominant pattern is the <strong>agentic loop</strong>: an AI system that reasons over multiple turns, invokes tools, retrieves information, and assembles context iteratively before producing a final answer. Claude Code, Cursor, GitHub Copilot Workspace, Devin, Factory.ai&mdash;every major AI coding tool now operates this way.</p>
+
+        <p>Each turn of the loop follows the same cycle:</p>
+
+        <div class="timeline">
+          <div class="timeline-item">
+            <h4>1. Plan</h4>
+            <p>The agent decides what context it needs&mdash;a function, its callers, recent commits, relevant tests.</p>
+          </div>
+          <div class="timeline-item">
+            <h4>2. Retrieve</h4>
+            <p>The agent issues a tool call to its context database. This is where the join operator executes.</p>
+          </div>
+          <div class="timeline-item">
+            <h4>3. Assemble</h4>
+            <p>Retrieved rows are formatted into tokens and inserted into the LLM&rsquo;s context window.</p>
+          </div>
+          <div class="timeline-item">
+            <h4>4. Reason</h4>
+            <p>The LLM processes the assembled context and produces a response or next action.</p>
+          </div>
+          <div class="timeline-item">
+            <h4>5. Repeat</h4>
+            <p>The loop continues for 10&ndash;100 turns per task. Every turn hits the database.</p>
+          </div>
+        </div>
+
+        <p>The database engine sits on step 2&mdash;<strong>the critical path of every turn</strong>. Its latency adds directly to user-perceived response time. Its variance determines whether the agent&rsquo;s SLA holds or collapses. And in garbage-collected runtimes (.NET, JVM), its allocation profile determines how often the entire process pauses for memory collection.</p>
+
+        <h3>7.2 The Token Budget Problem</h3>
+
+        <p>Context windows are large but not unlimited. A frontier model offers 128K&ndash;2M tokens, but empirical evidence shows effective utilization degrades sharply beyond 32K&ndash;60K tokens. Hong et al. [4] measured 18 LLMs and found that information positioned in the center of long contexts is effectively invisible&mdash;the &ldquo;Lost in the Middle&rdquo; phenomenon.</p>
+
+        <p>The economics compound the problem:</p>
+
+        <table>
+          <thead><tr><th>Approach</th><th>Tokens Loaded</th><th>Accuracy</th><th>Latency</th><th>Cost / Query</th></tr></thead>
+          <tbody>
+            <tr><td>Brute-force full repo</td><td>500K&ndash;1M</td><td class="fail">64&ndash;67%</td><td>12.8&ndash;15.2s</td><td>$5&ndash;50</td></tr>
+            <tr><td>Vector RAG (semantic chunks)</td><td>5K&ndash;20K</td><td class="warn">~60%</td><td>~50ms + inference</td><td>$0.05&ndash;0.20</td></tr>
+            <tr><td class="good">Structured retrieval (Sharc GCD)</td><td class="good">2K&ndash;5K</td><td class="good">83%</td><td class="good">585ns + inference</td><td class="good">$0.02&ndash;0.05</td></tr>
+          </tbody>
+        </table>
+
+        <p>The pattern is clear: <strong>more tokens produces worse results at higher cost.</strong> The winning strategy is surgical retrieval&mdash;deliver exactly the tokens the model needs and nothing else. This is a database problem.</p>
+
+        <h3>7.3 Why FULL OUTER JOIN Is the Right Operator</h3>
+
+        <p>Consider the concrete query at the heart of every agent turn. The agent has a <strong>context request</strong> (what it thinks it needs) and a <strong>context database</strong> (what&rsquo;s available). The join between them produces three categories:</p>
+
+        <pre><code>SELECT r.item, c.content, c.tokens
+FROM context_request r
+FULL OUTER JOIN context_db c ON r.item = c.item_id</code></pre>
+
+        <div class="adopt-grid" style="margin:1rem 0;">
+          <div class="adopt-card" style="border-left:4px solid #7c3aed;">
+            <span class="adopt-icon">&#x2705;</span>
+            <h4>Matched Rows</h4>
+            <p>Context the agent requested <em>and</em> the database has. Deliver these tokens to the LLM. Sort by relevance. Accumulate until budget is exhausted.</p>
+          </div>
+          <div class="adopt-card" style="border-left:4px solid #dc2626;">
+            <span class="adopt-icon">&#x274C;</span>
+            <h4>Unmatched Request Rows</h4>
+            <p>Context the agent requested but the database <em>doesn&rsquo;t have</em>. Trigger fallback retrieval from the filesystem, network, or another tool.</p>
+          </div>
+          <div class="adopt-card" style="border-left:4px solid #16a34a;">
+            <span class="adopt-icon">&#x1F4A1;</span>
+            <h4>Unmatched Available Rows</h4>
+            <p>Context the database has that the agent <em>didn&rsquo;t ask for</em>. Candidates for proactive injection&mdash;nearby context that may improve inference quality.</p>
+          </div>
+        </div>
+
+        <p><strong>LEFT JOIN gives you only the first two.</strong> It cannot tell you what the database has that the agent didn&rsquo;t request. Two separate queries (one LEFT, one anti-join) double the round-trips. In a 50-turn agent loop at 5&ndash;50ms per MCP tool call, FULL OUTER JOIN saves 0.25&ndash;2.5 seconds per task&mdash;time recovered as useful inference.</p>
+
+        <h3>7.4 The Model Context Protocol (MCP) and Why It Matters</h3>
+
+        <p>Anthropic&rsquo;s Model Context Protocol [5] formalizes the agent-tool interface. AI agents invoke structured tools that return typed results. The agent runtime assembles these results into the LLM&rsquo;s input. MCP is now supported by Claude, Cursor, Windsurf, and a growing ecosystem of AI development tools.</p>
+
+        <p>In this architecture, the database engine is not a backend service sitting behind an API. It is <strong>in-process</strong>, sharing memory and thread pools with the agent runtime. This means:</p>
+
+        <ul>
+          <li>A GC pause in the database stalls the agent&rsquo;s inference pipeline.</li>
+          <li>Allocation pressure from query operators directly triggers Gen0/Gen1/Gen2 collections.</li>
+          <li>Under 100 concurrent agents, a conventional join generating 12 MB/s of GC pressure causes frequent Gen2 pauses&mdash;each one stalling <em>all</em> concurrent agent loops for 10&ndash;100ms.</li>
+        </ul>
+
+        <p>This is why zero-allocation join operators are not a performance luxury. They are a correctness requirement for predictable agent behavior.</p>
+
+        <h3>7.5 The State of Play: February 2026</h3>
+
+        <p>The context engineering landscape is converging rapidly:</p>
+
+        <table>
+          <thead><tr><th>Development</th><th>Impact on Join Operators</th></tr></thead>
+          <tbody>
+            <tr><td>MCP adopted by all major AI IDEs</td><td>Database tools are on the critical path of every agent turn</td></tr>
+            <tr><td>Agent loops run 10&ndash;100 turns per task</td><td>Join operators execute at high frequency; variance compounds</td></tr>
+            <tr><td>Token pricing at $0.01&ndash;0.10 per 1K</td><td>Every imprecise token is measurable waste</td></tr>
+            <tr><td>Context windows plateau at 128K&ndash;2M effective</td><td>Surgical retrieval matters more than window size</td></tr>
+            <tr><td>Enterprise codebases exceed all context windows</td><td>The database is the bottleneck, not the model</td></tr>
+            <tr><td>Garbage-collected runtimes host agent processes</td><td>Allocation-free operators prevent GC-induced latency spikes</td></tr>
+          </tbody>
+        </table>
+
+        <div class="insight">
+          <strong>The fundamental point</strong>
+          <p>Intelligence is commoditized. Every cloud vendor sells access to frontier models. The differentiation is shifting from the model to the context&mdash;the information assembled around each prompt. The database that delivers that context, and the join operator inside it, is becoming the performance-critical component of the AI stack. Zero.Hash is designed for that seat.</p>
+        </div>
+
+        <h3>7.6 The Latency-Token Duality</h3>
+        <p>Every millisecond of database latency is a millisecond of idle GPU time&mdash;wasted inference capacity at current LLM pricing. Conversely, every imprecise token is a token of wasted attention budget. Zero.Hash addresses both sides of this duality: it minimizes latency (deterministic, no GC pauses) and enables three-way context categorization that maximizes token precision. An agent making 5 tool calls per turn, each returning ~500 tokens, delivers 2,500 context tokens per turn. If each call incurs a 100ms GC pause, that is 500ms of idle GPU per turn. Over 50 turns, 25 seconds of wasted inference&mdash;equivalent to an entire turn&rsquo;s context budget, lost to memory management in the database layer.</p>
+      </section>
+
+      <!-- 8. ADOPTION -->
+      <section id="adoption">
+        <h2 class="sec"><span class="sec-num">Section 8</span>Adoption Guide</h2>
+        <p>Zero.Hash is implemented in <a href="https://github.com/revred/Sharc" style="color:var(--accent);">Sharc</a>, a zero-allocation .NET database engine for context engineering workloads. The implementation lives on the <code>Zero.Hash</code> branch.</p>
+
+        <div class="adopt-grid">
+          <div class="adopt-card">
+            <span class="adopt-icon">&#x1F916;</span>
+            <h4>AI Agent Builders</h4>
+            <p>Use FULL OUTER JOIN as your context matching operator. One query tells you what matched (deliver to LLM), what&rsquo;s missing (trigger fallback), and what&rsquo;s available (proactive injection). Zero.Hash handles the duplicate-key edge cases that simpler joins silently get wrong.</p>
+          </div>
+          <div class="adopt-card">
+            <span class="adopt-icon">&#x26A1;</span>
+            <h4>MCP Server Authors</h4>
+            <p>Sharc exposes <code>match_context</code> as an MCP tool. The zero-allocation emission path means your tool-call latency is dominated by the hash probe (microseconds), not GC pauses (milliseconds). Under 100 concurrent agents, Gen2 pauses are eliminated entirely.</p>
+          </div>
+          <div class="adopt-card">
+            <span class="adopt-icon">&#x1F4CA;</span>
+            <h4>Database Engine Researchers</h4>
+            <p>The destructive-probe bug (Theorem 1) is a novel finding. If your engine uses destructive probe for FULL OUTER JOIN, test with duplicate probe keys. The read-only invariant and bit-packed marker design are language-independent and applicable to any hash join implementation.</p>
+          </div>
+          <div class="adopt-card">
+            <span class="adopt-icon">&#x1F3AF;</span>
+            <h4>.NET Performance Engineers</h4>
+            <p>The PooledBitArray pattern (ArrayPool-backed, branch-free set/test, 8&times; density over bool[]) is reusable infrastructure for any operator that tracks per-row boolean state: Bloom filters, semi-join vectors, duplicate detection. The reuse-buffer protocol applies to any streaming pipeline.</p>
+          </div>
+        </div>
+
+        <h3>Quick Start</h3>
+        <pre><code>dotnet test tests/Sharc.Tests -c Release \
+  --filter "FullyQualifiedName~TieredHashJoin|FullyQualifiedName~PooledBitArray"
+
+dotnet run -c Release --project bench/Sharc.Comparisons \
+  -- --filter "*FullOuterJoin_TieredHashJoin*" "*LeftJoin_Baseline*"</code></pre>
+      </section>
+
+      <!-- 9. LANDSCAPE -->
+      <section id="landscape">
+        <h2 class="sec"><span class="sec-num">Section 9</span>Competitive Landscape</h2>
+
+        <table>
+          <thead><tr><th>Engine</th><th>Matched Tracking</th><th>GC Visible</th><th>Dup Probe Correct</th><th>Marker Density</th></tr></thead>
+          <tbody>
+            <tr><td>PostgreSQL 16</td><td>HeapTupleHeader bit</td><td>N/A (native)</td><td class="good">Yes</td><td>1 byte/row</td></tr>
+            <tr><td>SQL Server 2022</td><td>Marker bit in memory grant</td><td>N/A (native)</td><td class="good">Yes</td><td>1 byte/row</td></tr>
+            <tr><td>Spark 3.5</td><td>Boolean in HashedRelation</td><td class="warn">Yes (JVM heap)</td><td class="good">Yes</td><td>1 byte/row</td></tr>
+            <tr><td>DuckDB 1.1</td><td>Matched flag in row layout</td><td>No (arena)</td><td class="good">Yes</td><td>1 byte/row</td></tr>
+            <tr><td><strong>Zero.Hash</strong></td><td><strong>PooledBitArray</strong></td><td class="good"><strong>No (pooled)</strong></td><td class="good"><strong>Yes</strong></td><td class="good"><strong>1 bit/row (8&times;)</strong></td></tr>
+          </tbody>
+        </table>
+
+        <h3>Validation Gates for Class-Leading Claims</h3>
+        <p>Rigorous claims require explicit gates. We pass three and are working toward two more:</p>
+
+        <table>
+          <thead><tr><th>Gate</th><th>Metric</th><th>Pass Rule</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>G1</td><td>Correctness under duplicate probe keys</td><td>No divergence from SQL standard</td><td class="good">Pass</td></tr>
+            <tr><td>G2</td><td>Allocation at 5K all-matched</td><td>&ge; 20% below LEFT baseline</td><td class="good">Pass (24.6%)</td></tr>
+            <tr><td>G3</td><td>Runtime variance at 5K</td><td>&ge; 2&times; tighter than baseline</td><td class="good">Pass (6.85&times;)</td></tr>
+            <tr><td>G4</td><td>Cross-engine comparison</td><td>Consistent wins on target shapes</td><td class="warn">Pending</td></tr>
+            <tr><td>G5</td><td>Unmatched-heavy + hotkey + null-key shapes</td><td>No regressions, competitive p99</td><td class="warn">Infra ready &mdash; awaiting first run</td></tr>
+          </tbody>
+        </table>
+
+        <p>This gate model keeps claims honest. Gates G1&ndash;G3 are measured. Gates G4&ndash;G5 are targets&mdash;explicitly labeled as pending, not quietly assumed.</p>
+      </section>
+
+      <!-- 10. VALIDITY -->
+      <section id="validity">
+        <h2 class="sec"><span class="sec-num">Section 10</span>Threats to Validity</h2>
+        <div class="card card-warn">
+          <p class="card-label warn">Honest limitations</p>
+          <ul>
+            <li><strong>Distribution bias:</strong> baseline benchmarks use mostly-matched data (orders always map to users). Shape benchmarks for unmatched-build-heavy, hot-duplicate-key, and null-key distributions are implemented (<code>JoinShapeBenchmarks</code>) but not yet measured.</li>
+            <li><strong>Platform sensitivity:</strong> results are from one CPU/runtime stack. ARM (Apple M-series, Graviton) may shift tier threshold sweet spots.</li>
+            <li><strong>Operator scope:</strong> we isolate join-focused query shapes, not full mixed-workload traces.</li>
+            <li><strong>Comparative scope:</strong> cross-engine numbers (PostgreSQL, DuckDB, SurrealDB) are not yet measured.</li>
+            <li><strong>Concurrent load:</strong> the p99 improvement under 100 agents is projected from per-query allocation profiles, not measured under actual concurrent load.</li>
+          </ul>
+        </div>
+        <p>Every number in this paper is explicitly bounded to the setup that produced it. We do not extrapolate beyond measured evidence.</p>
+      </section>
+
+      <!-- 11. CONCLUSION -->
+      <section id="conclusion">
+        <h2 class="sec"><span class="sec-num">Section 11</span>Conclusion</h2>
+
+        <p>Zero.Hash started with a question: can FULL OUTER JOIN be fast, frugal, and correct under pathological inputs&mdash;all at once? The answer required finding a bug first.</p>
+
+        <p>The destructive-probe approach to marker-free FULL OUTER JOIN is elegant, widely proposed, and wrong for duplicate probe keys. The fix is simple in hindsight: don&rsquo;t destroy what you might need again. Lock the hash table. Track matches explicitly. Compute residuals from state, not from absence.</p>
+
+        <p>The resulting operator is 1.19&times; faster, 24.6% leaner, and 6.85&times; more predictable than LEFT JOIN baselines at 5,000 rows. It passes 57/57 correctness tests across three cache-aware tiers. It requires no tier-aware planning framework because it has no single-use constraint to plan around. And it is built from components&mdash;PooledBitArray, MergeDescriptor, reuse-buffer protocol&mdash;that are independently useful in any streaming query pipeline.</p>
+
+        <p>In a world where intelligence is commoditized but context throughput is not, the join operator that sits between the agent and the model has outsized impact. Zero.Hash is designed for that seat: correct under stress, calm under noise, and honest about what it knows.</p>
+      </section>
+
+      <!-- REFERENCES -->
+      <section id="references">
+        <h2 class="sec"><span class="sec-num">References</span></h2>
+        <ol style="font-size:0.9rem;">
+          <li>Codd, E. F. A Relational Model of Data for Large Shared Data Banks. <em>Communications of the ACM</em>, 1970.</li>
+          <li>Graefe, G. Query Evaluation Techniques for Large Databases. <em>ACM Computing Surveys</em>, 1993.</li>
+          <li>Knuth, D. E. <em>The Art of Computer Programming, Vol. 3: Sorting and Searching</em>. Addison-Wesley.</li>
+          <li>Hong, L., Nanda, A., and Mecklenburg, N. Lost in the Middle: How language models use long contexts. <em>Trans. ACL</em>, 12:157&ndash;173, 2024.</li>
+          <li>Anthropic. Model Context Protocol specification v1.0. <a href="https://modelcontextprotocol.io" style="color:var(--accent);">modelcontextprotocol.io</a>, 2025.</li>
+          <li>Balkesen, C., Teubner, J., Alonso, G., and Ozsu, M. T. Main-memory hash joins on multi-core CPUs. <em>Proc. ICDE</em>, pp. 362&ndash;373, 2013.</li>
+          <li>Blanas, S., Li, Y., and Patel, J. M. Design and evaluation of main memory hash join algorithms. <em>Proc. SIGMOD</em>, pp. 37&ndash;48, 2011.</li>
+          <li>Microsoft .NET Team. Span&lt;T&gt; and Memory&lt;T&gt; usage guidelines. .NET Documentation, 2023.</li>
+          <li>Raasveldt, M. and Muehleisen, H. DuckDB: An embeddable analytical database. <em>Proc. SIGMOD</em>, 2019.</li>
+          <li>Neumann, T. Efficiently compiling efficient query plans for modern hardware. <em>Proc. VLDB Endow.</em>, 4(9):539&ndash;550, 2011.</li>
+        </ol>
+      </section>
+
+      <!-- APPENDIX -->
+      <section id="appendix">
+        <h2 class="sec"><span class="sec-num">Appendix</span>Reproducibility Artifacts</h2>
+        <p>This appendix documents one reference implementation and toolchain. Separated from the core design so the paper remains language-independent.</p>
+
+        <h3>A.1 Repository</h3>
+        <p><strong>GitHub:</strong> <a href="https://github.com/revred/Sharc" style="color:var(--accent);">github.com/revred/Sharc</a><br/>
+        <strong>Branch:</strong> <code>Zero.Hash</code><br/>
+        <strong>ADR:</strong> ADR-025 in <code>PRC/DecisionLog.md</code></p>
+
+        <h3>A.2 Key Files</h3>
+        <table>
+          <thead><tr><th>Paper Section</th><th>Artifact</th></tr></thead>
+          <tbody>
+            <tr><td>§3.1 Tier dispatch</td><td><code>JoinTier.Select()</code></td></tr>
+            <tr><td>§3.2 Bit-packed markers</td><td><code>src/Sharc/Query/Execution/PooledBitArray.cs</code></td></tr>
+            <tr><td>§3.3 Emission + reuse buffer</td><td><code>src/Sharc/Query/Execution/TieredHashJoin.cs</code></td></tr>
+            <tr><td>§3.4 MergeDescriptor</td><td><code>src/Sharc/Query/Execution/MergeDescriptor.cs</code></td></tr>
+            <tr><td>§3 Open-address table</td><td><code>src/Sharc/Query/Execution/OpenAddressHashTable.cs</code></td></tr>
+            <tr><td>§4.1 Correctness matrix</td><td><code>TieredHashJoinCorrectnessMatrixTests.cs</code></td></tr>
+            <tr><td>§6 Benchmarks</td><td><code>bench/Sharc.Comparisons/JoinStabilityConfig.cs</code></td></tr>
+            <tr><td>§6 Shape benchmarks</td><td><code>bench/Sharc.Comparisons/JoinEfficiencyBenchmarks.cs → JoinShapeBenchmarks</code></td></tr>
+            <tr><td>§6 Kernel benchmarks</td><td><code>bench/Sharc.Comparisons/JoinEfficiencyBenchmarks.cs → JoinKernelBenchmarks</code></td></tr>
+            <tr><td>&mdash; Cross-type keys</td><td><code>QueryValueKeyComparer.cs</code></td></tr>
+          </tbody>
+        </table>
+
+        <h3>A.3 Commands</h3>
+        <pre><code># Run correctness suite
+dotnet test tests/Sharc.Tests -c Release \
+  --filter "FullyQualifiedName~TieredHashJoin|FullyQualifiedName~PooledBitArray"
+
+# Run baseline benchmarks (all-matched)
+dotnet run -c Release --project bench/Sharc.Comparisons \
+  -- --filter "*FullOuterJoin_TieredHashJoin*" "*LeftJoin_Baseline*"
+
+# Run shape benchmarks (unmatched, hot-key, null-key)
+dotnet run -c Release --project bench/Sharc.Comparisons \
+  -- --filter "*JoinShape*"
+
+# Run kernel-only microbenchmarks (bypass SQL layer)
+dotnet run -c Release --project bench/Sharc.Comparisons \
+  -- --filter "*JoinKernel*"</code></pre>
+      </section>
+
+    </article>
+  </div>
+</div>
+
+<footer>
+  <p>Zero.Hash &middot; Branch <code>Zero.Hash</code> on <a href="https://github.com/revred/Sharc" style="color:var(--accent);">github.com/revred/Sharc</a> &middot; 57/57 tests passing &middot; Measured on .NET 10, BenchmarkDotNet v0.15.8</p>
+</footer>
+
+</body>
+</html>

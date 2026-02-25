@@ -9,7 +9,7 @@ namespace Sharc.Tests.Query;
 
 /// <summary>
 /// Tests for <see cref="OpenAddressHashTable{TJoinKey}"/> — ArrayPool-backed open-addressing
-/// hash table with backward-shift deletion for Tier III destructive probe.
+/// hash table with backward-shift deletion for Tier III read-only probe.
 /// </summary>
 public sealed class OpenAddressHashTableTests
 {

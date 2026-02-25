@@ -33,7 +33,7 @@ public sealed class TieredHashJoinCorrectnessMatrixTests
         {
             new object[] { 10 },    // Tier I: StackAlloc
             new object[] { 300 },   // Tier II: Pooled
-            new object[] { 9000 },  // Tier III: DestructiveProbe
+            new object[] { 9000 },  // Tier III: OpenAddress
         };
 
     // ─── C1: Unique full match ───
