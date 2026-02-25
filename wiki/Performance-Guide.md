@@ -72,6 +72,24 @@ while (reader.Read())
         return reader.GetString(1);
 ```
 
+### Use TopK for Ranked Retrieval
+
+```csharp
+// FAST: Streaming top-K with bounded heap — O(K) memory
+var jit = db.Jit("points");
+jit.Where(FilterStar.Column("x").Between(cx - r, cx + r));
+using var reader = jit.TopK(20, new DistanceScorer(cx, cy), "x", "y");
+
+// SLOWER: Materialize all candidates, sort client-side
+var all = new List<(double dist, double x, double y)>();
+while (allReader.Read())
+    all.Add((ComputeDistance(allReader), allReader.GetDouble(0), allReader.GetDouble(1)));
+all.Sort((a, b) => a.dist.CompareTo(b.dist));
+var top20 = all.Take(20);
+```
+
+TopK rejects rows that can't enter the heap **before** materializing them. For 10K candidates with K=20, only 20 rows are ever allocated.
+
 ### Batch Inserts
 
 ```csharp
