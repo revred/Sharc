@@ -64,6 +64,8 @@ internal static class BenchmarkTiers
         "*VarintBenchmarks.Read_9Byte",
         "*SerialTypeCodecBenchmarks.GetContentSize_Null",
         "*DatabaseHeaderBenchmarks.Parse_4096PageSize",
+        "*TopNPathBenchmarks.*",
+        "*SetOpFingerprintBenchmarks.*",
         "*TableScanBenchmarks.*_Scan100_*",
     ];
 
@@ -77,6 +79,8 @@ internal static class BenchmarkTiers
         "*SerialTypeCodecBenchmarks.GetContentSize_Null",
         "*DatabaseHeaderBenchmarks.Parse_4096PageSize",
         // Comparative — Light ops only
+        "*TopNPathBenchmarks.*",
+        "*SetOpFingerprintBenchmarks.*",
         "*DatabaseOpenBenchmarks.Sharc_Memory*",
         "*RealisticWorkloadBenchmarks.Sharc_OpenReadClose*",
     ];

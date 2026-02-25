@@ -36,7 +36,13 @@ public sealed partial class SharcDataReader
         {
             // Fast path: reuse precomputed offsets from DecodeCurrentRow() — zero recomputation
             int colCount = Math.Min(_columnCount, _serialTypes.Length);
-            return ComputeFingerprint(payload, _serialTypes.AsSpan(0, colCount), _columnOffsets.AsSpan(0, colCount));
+            var serialTypes = _serialTypes.AsSpan(0, colCount);
+            var offsets = _columnOffsets.AsSpan(0, colCount);
+
+            if (TryComputeFixedWidthNumericFingerprint(payload, serialTypes, offsets, out var fastFingerprint))
+                return fastFingerprint;
+
+            return ComputeFingerprint(payload, serialTypes, offsets);
         }
 
         // Non-projection path: parse serial types on the fly (stackalloc — zero alloc)
@@ -55,6 +61,9 @@ public sealed partial class SharcDataReader
             offsets[c] = runningOffset;
             runningOffset += SerialTypeCodec.GetContentSize(serialTypes[c]);
         }
+
+        if (TryComputeFixedWidthNumericFingerprint(payload, serialTypes, offsets, out var fastFingerprint))
+            return fastFingerprint;
 
         return ComputeFingerprint(payload, serialTypes, offsets);
     }
@@ -101,6 +110,9 @@ public sealed partial class SharcDataReader
     private Fingerprint128 GetMaterializedRowFingerprint()
     {
         var row = _composite!.CurrentMaterializedRow;
+        if (TryComputeMaterializedNumericFingerprint(row, out var fastFingerprint))
+            return fastFingerprint;
+
         var hasher = new Fnv1aHasher();
         for (int i = 0; i < _columnCount && i < row.Length; i++)
         {
@@ -125,6 +137,116 @@ public sealed partial class SharcDataReader
             }
         }
         return hasher.Hash;
+    }
+
+    private bool TryComputeFixedWidthNumericFingerprint(
+        ReadOnlySpan<byte> payload,
+        ReadOnlySpan<long> serialTypes,
+        ReadOnlySpan<int> offsets,
+        out Fingerprint128 fingerprint)
+    {
+        int projectedCount = _projection?.Length ?? _columnCount;
+        var hasher = new Fnv1aHasher();
+
+        for (int i = 0; i < projectedCount; i++)
+        {
+            int physOrdinal = _projection != null ? _projection[i] : i;
+
+            if (physOrdinal == _rowidAliasOrdinal)
+            {
+                hasher.AddTypeTag(i, 1);
+                hasher.AppendLong(_cursor!.RowId);
+                continue;
+            }
+
+            if ((uint)physOrdinal >= (uint)serialTypes.Length)
+            {
+                fingerprint = default;
+                return false;
+            }
+
+            long serialType = serialTypes[physOrdinal];
+            if (serialType == SerialTypeCodec.NullSerialType)
+            {
+                hasher.AddTypeTag(i, 0);
+                hasher.AppendLong(0);
+                continue;
+            }
+
+            if (SerialTypeCodec.IsIntegral(serialType))
+            {
+                hasher.AddTypeTag(i, 1);
+                if (serialType == SerialTypeCodec.ZeroSerialType)
+                {
+                    hasher.AppendLong(0);
+                    continue;
+                }
+
+                if (serialType == SerialTypeCodec.OneSerialType)
+                {
+                    hasher.AppendLong(1);
+                    continue;
+                }
+
+                int size = SerialTypeCodec.GetContentSize(serialType);
+                int offset = offsets[physOrdinal];
+                hasher.AppendLong(RawByteComparer.DecodeInt64(payload.Slice(offset, size), serialType));
+                continue;
+            }
+
+            if (SerialTypeCodec.IsReal(serialType))
+            {
+                int offset = offsets[physOrdinal];
+                long bits = BitConverter.DoubleToInt64Bits(
+                    RawByteComparer.DecodeDouble(payload.Slice(offset, sizeof(double))));
+                hasher.AddTypeTag(i, 2);
+                hasher.AppendLong(bits);
+                continue;
+            }
+
+            fingerprint = default;
+            return false;
+        }
+
+        fingerprint = hasher.Hash;
+        return true;
+    }
+
+    private bool TryComputeMaterializedNumericFingerprint(
+        QueryValue[] row,
+        out Fingerprint128 fingerprint)
+    {
+        int count = Math.Min(_columnCount, row.Length);
+        var hasher = new Fnv1aHasher();
+
+        for (int i = 0; i < count; i++)
+        {
+            ref readonly var value = ref row[i];
+            switch (value.Type)
+            {
+                case QueryValueType.Null:
+                    hasher.AddTypeTag(i, 0);
+                    hasher.AppendLong(0);
+                    break;
+
+                case QueryValueType.Int64:
+                    hasher.AddTypeTag(i, 1);
+                    hasher.AppendLong(value.AsInt64());
+                    break;
+
+                case QueryValueType.Double:
+                    hasher.AddTypeTag(i, 2);
+                    hasher.AppendLong(BitConverter.DoubleToInt64Bits(value.AsDouble()));
+                    break;
+
+                default:
+                    fingerprint = default;
+                    return false;
+            }
+        }
+
+        fingerprint = hasher.Hash;
+        return true;
     }
 
     /// <summary>

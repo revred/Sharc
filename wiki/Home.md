@@ -64,4 +64,4 @@ All operations go through the B-tree layer, which reads SQLite pages directly fr
 | [Graph DB Comparison](../docs/GRAPH_DB_COMPARISON.md) | Sharc vs SurrealDB, ArangoDB, Neo4j |
 | [Vector Search Guide](../docs/VECTOR_SEARCH.md) | Embedding storage, RAG, semantic cache patterns |
 | [Alternatives](../docs/ALTERNATIVES.md) | Honest comparison vs SQLite, LiteDB, DuckDB |
-| [Samples](../samples/) | 8 runnable sample projects including API comparison |
+| [Samples](../samples/) | 12 runnable sample projects including API comparison and TopK scoring |
