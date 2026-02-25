@@ -95,7 +95,16 @@ internal static class EntitlementEnforcer
             throw new UnauthorizedAccessException(
                 $"Agent '{agentId}' does not have {accessKind} access to table '{tableName}'.");
 
-        if (columns == null) return;
+        // null columns = SELECT * (wildcard) — requires table-wide column access.
+        // If the scope restricts to specific columns, wildcard must be denied.
+        if (columns == null)
+        {
+            if (!scope.CanReadAllColumns(tableName))
+                throw new UnauthorizedAccessException(
+                    $"Agent '{agentId}' does not have {accessKind} access to all columns in table '{tableName}'. " +
+                    $"SELECT * requires unrestricted column access; specify columns explicitly.");
+            return;
+        }
 
         foreach (var column in columns)
         {

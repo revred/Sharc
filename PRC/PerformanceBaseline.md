@@ -1,16 +1,77 @@
-# Performance Baseline — Full Allocation & Throughput Analysis
+# Performance Baseline - Full Allocation & Throughput Analysis
 
-**Date:** 2026-02-23 (v5 Leaf Cache + Random Lookup Proof)
+**Date:** 2026-02-25 (latest side-by-side refresh)
 **Branch:** local.MultiCache
 **Hardware:** 11th Gen Intel Core i7-11800H 2.30GHz, 8P cores / 16 logical
 **Runtime:** .NET 10.0.2 (RyuJIT x86-64-v4), Concurrent Workstation GC
 **Dataset:** 5,000 users (9 columns), 5 departments
-**Change:** v5 B-tree leaf range cache — same-rowid fast path (skip all traversal), same-leaf fast path (skip interior pages), 512-entry circular random buffer for honest benchmarking. Random rowid lookup achieves 276 ns / 0 B (109x vs SQLite). Same-rowid achieves 104 ns / 0 B (257x).
-**Previous:** v4 Prepared Pattern — `PreparedReader`/`PreparedQuery` zero-allocation reuse + ThreadStatic pool. PointLookup was 159 ns / 0 B (prepared) before leaf cache.
+**Latest measured highlight:** point lookup is 38.14 ns / 0 B (609x vs SQLite point lookup), random lookup is 217.71 ns / 0 B (108x), and indexed int seek is 1.036 us (30.5x vs SQLite indexed seek).
+**Source artifacts:** `artifacts/benchmarks/comparisons/results/*.csv`
 
 ---
 
+## 2026-02-25 Refresh Snapshot
+
+This section supersedes older numeric claims later in this file.
+
+### Core read paths
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+|---|---:|---:|---:|---:|---:|
+| Point lookup | **38.14 ns** | 23,226.52 ns | **609x** | **0 B** | 728 B |
+| Batch lookup (6) | **626.14 ns** | 122,401.32 ns | **195x** | **0 B** | 3,712 B |
+| Random lookup | **217.71 ns** | 23,415.67 ns | **108x** | **0 B** | 832 B |
+| Sequential scan | **875.95 us** | 5,630.27 us | **6.4x** | 1,411,576 B | 1,412,320 B |
+| WHERE filter | **261.73 us** | 541.54 us | **2.1x** | **0 B** | 720 B |
+
+### Index and graph
+
+| Operation | Sharc | SQLite | Speedup | Sharc Alloc | SQLite Alloc |
+|---|---:|---:|---:|---:|---:|
+| Int index seek | **1.036 us** | 31.589 us | **30.5x** | 1,272 B | 872 B |
+| Text index seek | **105.833 us** | 248.550 us | **2.35x** | 1,168 B | 728 B |
+| Graph seek (single) | **7.071 us** | 70.553 us | **10.0x** | 888 B | 648 B |
+| Graph seek (batch 6) | **14.767 us** | 203.713 us | **13.8x** | 3,224 B | 3,312 B |
+| Graph BFS 2-hop | **45.59 us** | 205.67 us | **4.5x** | 800 B | 2,952 B |
+
+### Query roundtrip status (2,500 rows/table)
+
+Sharc is faster on 3 of 13 measured queries (`SELECT *`, filtered `SELECT`, `UNION ALL`), near tie on `UNION`, and slower on sort-heavy/set-heavy shapes (`GROUP BY`, `INTERSECT`, `EXCEPT`, `ORDER BY + LIMIT`, CTE composition).
+
+---
+
+## Addendum: Focused Micro-Benchmarks (2026-02-25)
+
+Command:
+
+```bash
+dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *FocusedPerfBenchmarks*
+```
+
+### Candidate span materialization
+
+| Count | Legacy `ToArray().AsSpan()` | Optimized `CollectionsMarshal.AsSpan()` | Time Delta | Alloc Delta |
+|---:|---:|---:|---:|---:|
+| 1 | 5.1912 ns / 32 B | 0.5796 ns / 0 B | **-88.83%** | **-100%** |
+| 8 | 7.2545 ns / 88 B | 0.9640 ns / 0 B | **-86.71%** | **-100%** |
+| 32 | 14.3232 ns / 280 B | 0.5796 ns / 0 B | **-95.95%** | **-100%** |
+| 128 | 40.3487 ns / 1048 B | 0.5719 ns / 0 B | **-98.58%** | **-100%** |
+
+### Prepared-parameter cache key hashing
+
+| Count | Legacy `List+Sort+Indexer` | Optimized pooled pair-sort | Time Delta | Alloc Delta |
+|---:|---:|---:|---:|---:|
+| 1 | 22.6216 ns / 64 B | 11.9880 ns / 0 B | **-47.01%** | **-100%** |
+| 8 | 171.6415 ns / 184 B | 164.4888 ns / 64 B | **-4.17%** | **-65.22%** |
+| 32 | 727.5258 ns / 376 B | 711.7530 ns / 64 B | **-2.17%** | **-82.98%** |
+| 128 | 3,391.4931 ns / 1144 B | 3,305.2322 ns / 64 B | **-2.54%** | **-94.41%** |
+
+Interpretation: candidate span optimization remains a strict win. Parameter-key optimization is now faster at all tested cardinalities in this run, with large allocation/GC reductions.
+
+---
 ## Allocation Tier List
+
+> Historical section: detailed tier breakdown below preserves prior analysis snapshots and may include pre-refresh values.
 
 ### Tier 0 — True Zero Allocation (Prepared Pattern, 0 B)
 
@@ -268,3 +329,27 @@ Absolute times are thermal-sensitive on laptop hardware (±15-20% baseline shift
 3. **GROUP BY AggState arrays** (Tier 2) — inline first 1–2 aggregates to save ~1 KB per query
 4. **Cote pre-materialization** (Tier 3) — skip double-materialization for non-filtered Cotes
 5. **View SQL query path** — 24% overhead from Cote resolution, cacheable for repeated queries
+
+---
+
+## Allocation Debt Resolution Log (2026-02-23)
+
+Tracked via ADR-023 in `DecisionLog.md`. Summary of structural allocation gaps and their resolution status.
+
+### Resolved
+
+| Gap | Before | After | How |
+| :--- | :--- | :--- | :--- |
+| WHERE predicate overhead | 1,089 KB per scan | **0 B** (prepared) / 680 B (cold) | `FilterStar`/`CompileBaked` closure-composed predicates, `ConcreteFilterNode` fast path bypasses `DecodeCurrentRow` |
+| GraphEdge per-row allocation | `GraphEdge` struct per row via `GetEdges()` | **0 B per row** via `IEdgeCursor` | `EdgeCursorBase` rents serial types/offsets via `ArrayPool`, reuses cursor via `Reset()`. `GetEdges()` marked `[Obsolete]` |
+| OpenMemory() eager schema parse | ~40 KB at `OpenMemory()` | **0 B** at open, deferred | `_schema ??=` lazy init pattern. Verified by `AllocationFixTests.cs` |
+| ColumnValue[] per reader | New `ColumnValue[]` per reader | **ArrayPool rental**, reused per row | `ArrayPool<ColumnValue>.Shared.Rent()` + `ArrayPool<long>` (serial types) + `ArrayPool<int>` (offsets). 2-slot `[ThreadStatic]` reader pool. Lazy column decode skips unread columns |
+| String materialization in filters | `Encoding.UTF8.GetString()` per filter eval | **0 B** via `RawByteComparer` | `SequenceCompareTo`, `StartsWith`, `EndsWith`, `IndexOf` on raw UTF-8 spans. `GetUtf8Span()` public API for callers |
+
+### Remaining
+
+| Gap | Current State | Path Forward |
+| :--- | :--- | :--- |
+| `Utf8SetContains()` IN/NotIn | Allocates one `string` per row for set membership check | Convert to `Dictionary<ReadOnlyMemory<byte>>` with UTF-8 span comparer |
+| Append-only write mode | No dedicated path; full B-tree mutator for all writes | Design fast-path for sequential inserts (skip split checks, append to rightmost leaf) |
+

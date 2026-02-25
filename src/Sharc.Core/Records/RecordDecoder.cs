@@ -85,6 +85,82 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         }
     }
 
+    /// <summary>
+    /// Decodes only the first <paramref name="keyCount"/> columns of an index record
+    /// and extracts the trailing rowid (last column). Avoids allocating a full ColumnValue[]
+    /// for the entire record — only the key columns needed for matching are decoded.
+    /// </summary>
+    /// <param name="payload">The raw index record bytes (header + body).</param>
+    /// <param name="keys">Pre-allocated buffer to receive key column values.</param>
+    /// <param name="keyCount">Number of leading key columns to decode.</param>
+    /// <param name="trailingRowId">Receives the integer value of the last column (the table rowid).</param>
+    /// <returns>True if the record has at least keyCount + 1 columns; false otherwise.</returns>
+    public bool TryDecodeIndexRecord(ReadOnlySpan<byte> payload, ColumnValue[] keys,
+        int keyCount, out long trailingRowId)
+    {
+        trailingRowId = 0;
+
+        int offset = VarintDecoder.Read(payload, out long headerSize);
+        int headerEnd = (int)headerSize;
+
+        // Parse serial types — we need keyCount + at least 1 trailing rowid column
+        Span<long> serialTypes = stackalloc long[keyCount + 16];
+        int colCount = 0;
+        int pos = offset;
+        while (pos < headerEnd && colCount < serialTypes.Length)
+        {
+            pos += VarintDecoder.Read(payload[pos..], out long st);
+            serialTypes[colCount++] = st;
+        }
+        // Count remaining if more columns than buffer
+        while (pos < headerEnd)
+        {
+            pos += VarintDecoder.Read(payload[pos..], out _);
+            colCount++;
+        }
+
+        if (colCount < keyCount + 1)
+            return false;
+
+        // Decode only the first keyCount columns
+        int bodyOffset = headerEnd;
+        for (int i = 0; i < keyCount; i++)
+        {
+            long st = serialTypes[i];
+            int contentSize = SerialTypeCodec.GetContentSize(st);
+            keys[i] = DecodeValue(payload.Slice(bodyOffset, contentSize), st);
+            bodyOffset += contentSize;
+        }
+
+        // Skip remaining columns to reach the last one (the rowid)
+        for (int i = keyCount; i < colCount - 1 && i < serialTypes.Length; i++)
+            bodyOffset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+
+        // Decode the trailing rowid (always integer)
+        long rowIdSt = colCount - 1 < serialTypes.Length ? serialTypes[colCount - 1] : 0;
+        trailingRowId = DecodeInt64Value(payload, bodyOffset, rowIdSt);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long DecodeInt64Value(ReadOnlySpan<byte> payload, int offset, long serialType)
+    {
+        return serialType switch
+        {
+            0 => 0, // NULL — treated as 0 for rowid
+            1 => (sbyte)payload[offset],
+            2 => BinaryPrimitives.ReadInt16BigEndian(payload[offset..]),
+            3 => ((payload[offset] & 0x80) != 0)
+                ? (int)((uint)(payload[offset] << 16) | (uint)(payload[offset + 1] << 8) | payload[offset + 2]) | unchecked((int)0xFF000000)
+                : (payload[offset] << 16) | (payload[offset + 1] << 8) | payload[offset + 2],
+            4 => BinaryPrimitives.ReadInt32BigEndian(payload[offset..]),
+            6 => BinaryPrimitives.ReadInt64BigEndian(payload[offset..]),
+            8 => 0,
+            9 => 1,
+            _ => 0
+        };
+    }
+
     /// <inheritdoc />
     public int GetColumnCount(ReadOnlySpan<byte> payload)
     {
@@ -478,10 +554,16 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         }
 
         // 2. Parse serial types (stackalloc to avoid allocation)
-        Span<long> serialTypes = stackalloc long[Math.Max(maxOrdinal + 1, 16)];
+        int stCapacity = Math.Max(maxOrdinal + 1, 16);
+        Span<long> serialTypes = stackalloc long[stCapacity];
         int colCount = ReadSerialTypes(payload, serialTypes, out int bodyOffset);
 
-        // 3. Evaluate each filter
+        // 3. Precompute column offsets once — O(maxOrdinal) instead of O(sum of ordinals) per filter
+        int offsetCount = Math.Min(maxOrdinal + 1, colCount);
+        Span<int> offsets = stackalloc int[stCapacity];
+        ComputeColumnOffsets(serialTypes, offsetCount, bodyOffset, offsets);
+
+        // 4. Evaluate each filter using precomputed offsets
         for (int i = 0; i < filters.Length; i++)
         {
             ref readonly var f = ref filters[i];
@@ -498,19 +580,12 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             if (f.ColumnOrdinal >= colCount)
             {
                 // NULL never matches standard operators
-                return false; 
+                return false;
             }
 
             long st = serialTypes[f.ColumnOrdinal];
-
-            // 4. Locate column data
-            int currentOffset = bodyOffset;
-            for (int c = 0; c < f.ColumnOrdinal; c++)
-            {
-                currentOffset += SerialTypeCodec.GetContentSize(serialTypes[c]);
-            }
             int contentSize = SerialTypeCodec.GetContentSize(st);
-            var data = payload.Slice(currentOffset, contentSize);
+            var data = payload.Slice(offsets[f.ColumnOrdinal], contentSize);
 
             // 5. Compare raw bytes
             if (!MatchesRawValue(data, st, f.Operator, f.Value))

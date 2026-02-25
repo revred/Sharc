@@ -43,7 +43,7 @@ public sealed class AgentRegistry
     /// <param name="transaction">Optional active transaction.</param>
     public void RegisterAgent(AgentInfo agent, Transaction? transaction = null)
     {
-        if (!SharcSigner.Verify(GetVerificationBuffer(agent), agent.Signature, agent.PublicKey))
+        if (!SignatureVerifier.Verify(GetVerificationBuffer(agent), agent.Signature, agent.PublicKey, agent.Algorithm))
              throw new InvalidOperationException("Invalid signature.");
 
         var rootPage = SystemStore.GetRootPage(_db.Schema, AgentsTableName);
@@ -59,7 +59,8 @@ public sealed class AgentRegistry
             ColumnValue.FromInt64(0, agent.ValidityEnd),
             ColumnValue.Text(0, Encoding.UTF8.GetBytes(agent.ParentAgent)),
             ColumnValue.FromInt64(0, agent.CoSignRequired ? 1 : 0),
-            ColumnValue.Blob(0, agent.Signature)
+            ColumnValue.Blob(0, agent.Signature),
+            ColumnValue.FromInt64(0, (long)agent.Algorithm)
         };
 
         EnsureCacheLoaded();
@@ -103,10 +104,14 @@ public sealed class AgentRegistry
         {
             _maxRowId++;
             // Reader index must match column order in RegisterAgent
+            // Read Algorithm column (index 11), defaulting to HmacSha256 for old databases
+            var algorithm = SignatureAlgorithm.HmacSha256;
+            try { algorithm = (SignatureAlgorithm)reader.GetInt64(11); } catch { /* old schema without Algorithm column */ }
+
             var info = new AgentInfo(
                 reader.GetString(0), // AgentId
                 (AgentClass)reader.GetInt64(1), // Class
-                reader.GetBlob(2).ToArray(), // PublicKey
+                reader.GetBlob(2), // PublicKey
                 (ulong)reader.GetInt64(3), // AuthorityCeiling
                 reader.GetString(4), // WriteScope
                 reader.GetString(5), // ReadScope
@@ -114,7 +119,8 @@ public sealed class AgentRegistry
                 reader.GetInt64(7), // ValidityEnd
                 reader.GetString(8), // ParentAgent
                 reader.GetInt64(9) != 0, // CoSignRequired
-                reader.GetBlob(10).ToArray() // Signature
+                reader.GetBlob(10), // Signature
+                algorithm
             );
             _cache[info.AgentId] = info;
         }

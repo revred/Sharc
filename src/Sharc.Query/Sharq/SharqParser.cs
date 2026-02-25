@@ -288,6 +288,7 @@ internal ref struct SharqParser
             if (Match(SharqTokenKind.Inner)) { Expect(SharqTokenKind.Join); kind = JoinKind.Inner; }
             else if (Match(SharqTokenKind.Left)) { MatchIdentifier("OUTER"); Expect(SharqTokenKind.Join); kind = JoinKind.Left; }
             else if (Match(SharqTokenKind.Right)) { MatchIdentifier("OUTER"); Expect(SharqTokenKind.Join); kind = JoinKind.Right; }
+            else if (MatchIdentifier("FULL")) { MatchIdentifier("OUTER"); Expect(SharqTokenKind.Join); kind = JoinKind.Full; }
             else if (Match(SharqTokenKind.Cross)) { Expect(SharqTokenKind.Join); kind = JoinKind.Cross; }
             else if (Match(SharqTokenKind.Join)) { kind = JoinKind.Inner; }
 

@@ -24,9 +24,12 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     private int _currentHeaderOffset;
     private BTreePageHeader _currentHeader;
     private int _currentCellIndex;
-    private bool _initialized;
-    private bool _exhausted;
-    private bool _disposed;
+
+    // Packed flags: initialized | exhausted | disposed
+    private byte _flags;
+    private const byte FlagInitialized = 1;
+    private const byte FlagExhausted = 2;
+    private const byte FlagDisposed = 4;
 
     // Current cell data
     private int _payloadSize;
@@ -92,8 +95,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     {
         ReturnAssembledPayload();
         _stack.Clear();
-        _initialized = false;
-        _exhausted = false;
+        _flags = 0; // clears initialized, exhausted, disposed in one write
         _currentLeafPage = 0;
         _payloadSize = 0;
         _snapshotVersion = _writableSource?.DataVersion ?? 0;
@@ -102,16 +104,16 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     /// <inheritdoc />
     public bool MoveNext()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf((_flags & FlagDisposed) != 0, this);
 
         ReturnAssembledPayload();
 
-        if (_exhausted)
+        if ((_flags & FlagExhausted) != 0)
             return false;
 
-        if (!_initialized)
+        if ((_flags & FlagInitialized) == 0)
         {
-            _initialized = true;
+            _flags |= FlagInitialized;
             if (_snapshotVersion == 0)
                 _snapshotVersion = _writableSource?.DataVersion ?? 0;
             DescendToLeftmostLeaf(_rootPage);
@@ -157,10 +159,9 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     /// <inheritdoc />
     public bool SeekFirst(long firstColumnKey)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf((_flags & FlagDisposed) != 0, this);
         _stack.Clear();
-        _exhausted = false;
-        _initialized = true;
+        _flags = FlagInitialized; // clear exhausted, set initialized
         _snapshotVersion = _writableSource?.DataVersion ?? 0;
 
         bool exactMatch = DescendToLeafByKey(_rootPage, firstColumnKey);
@@ -181,7 +182,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
             }
             else
             {
-                _exhausted = true;
+                _flags |= FlagExhausted;
                 return false;
             }
         }
@@ -190,10 +191,9 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     /// <inheritdoc />
     public bool SeekFirst(ReadOnlySpan<byte> utf8Key)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf((_flags & FlagDisposed) != 0, this);
         _stack.Clear();
-        _exhausted = false;
-        _initialized = true;
+        _flags = FlagInitialized; // clear exhausted, set initialized
 
         bool exactMatch = DescendToLeafByTextKey(_rootPage, utf8Key);
 
@@ -212,7 +212,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
             }
             else
             {
-                _exhausted = true;
+                _flags |= FlagExhausted;
                 return false;
             }
         }
@@ -476,7 +476,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
             0 => 0,                   // NULL
             1 => (sbyte)payload[bodyOffset],
             2 => BinaryPrimitives.ReadInt16BigEndian(payload[bodyOffset..]),
-            3 => ((payload[bodyOffset] << 16) | (payload[bodyOffset + 1] << 8) | payload[bodyOffset + 2]) | 
+            3 => ((payload[bodyOffset] << 16) | (payload[bodyOffset + 1] << 8) | payload[bodyOffset + 2]) |
                  (((payload[bodyOffset] & 0x80) != 0) ? unchecked((int)0xFF000000) : 0),
             4 => BinaryPrimitives.ReadInt32BigEndian(payload[bodyOffset..]),
             5 => ExtractInt48(payload[bodyOffset..]),
@@ -511,7 +511,7 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
 
             if (!MoveToNextLeaf())
             {
-                _exhausted = true;
+                _flags |= FlagExhausted;
                 return false;
             }
 
@@ -617,8 +617,8 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if ((_flags & FlagDisposed) != 0) return;
+        _flags |= FlagDisposed;
         ReturnAssembledPayload();
     }
 }

@@ -62,31 +62,31 @@ internal sealed class ConceptStore
         _tableRootPage = table.RootPage;
         _columnCount = table.Columns.Count;
 
-        _colId = GetOrdinal(table, _schema.NodeIdColumn);
-        _colKey = GetOrdinal(table, _schema.NodeKeyColumn);
-        _colType = GetOrdinal(table, _schema.NodeTypeColumn);
-        _colData = GetOrdinal(table, _schema.NodeDataColumn);
+        _colId = table.GetColumnOrdinal(_schema.NodeIdColumn);
+        _colKey = table.GetColumnOrdinal(_schema.NodeKeyColumn);
+        _colType = table.GetColumnOrdinal(_schema.NodeTypeColumn);
+        _colData = table.GetColumnOrdinal(_schema.NodeDataColumn);
 
-        _colCvn = _schema.NodeCvnColumn != null ? GetOrdinal(table, _schema.NodeCvnColumn) : -1;
-        _colLvn = _schema.NodeLvnColumn != null ? GetOrdinal(table, _schema.NodeLvnColumn) : -1;
-        _colSync = _schema.NodeSyncColumn != null ? GetOrdinal(table, _schema.NodeSyncColumn) : -1;
-        _colUpdated = _schema.NodeUpdatedColumn != null ? GetOrdinal(table, _schema.NodeUpdatedColumn) : -1;
-        _colTokens = _schema.NodeTokensColumn != null ? GetOrdinal(table, _schema.NodeTokensColumn) : -1;
-        _colAlias = _schema.NodeAliasColumn != null ? GetOrdinal(table, _schema.NodeAliasColumn) : -1;
+        _colCvn = _schema.NodeCvnColumn != null ? table.GetColumnOrdinal(_schema.NodeCvnColumn) : -1;
+        _colLvn = _schema.NodeLvnColumn != null ? table.GetColumnOrdinal(_schema.NodeLvnColumn) : -1;
+        _colSync = _schema.NodeSyncColumn != null ? table.GetColumnOrdinal(_schema.NodeSyncColumn) : -1;
+        _colUpdated = _schema.NodeUpdatedColumn != null ? table.GetColumnOrdinal(_schema.NodeUpdatedColumn) : -1;
+        _colTokens = _schema.NodeTokensColumn != null ? table.GetColumnOrdinal(_schema.NodeTokensColumn) : -1;
+        _colAlias = _schema.NodeAliasColumn != null ? table.GetColumnOrdinal(_schema.NodeAliasColumn) : -1;
 
         // Key Index (Integer based)
-        var keyIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
-            idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
-            idx.Columns.Count > 0 &&
-            idx.Columns[0].Name.Equals(_schema.NodeKeyColumn, StringComparison.OrdinalIgnoreCase));
-        _keyIndexRootPage = keyIndex?.RootPage ?? -1;
-    }
-
-    private static int GetOrdinal(TableInfo table, string colName)
-    {
-        var col = table.Columns.FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
-        if (col == null) return -1;
-        return col.Ordinal;
+        int keyIndexRoot = -1;
+        foreach (var idx in schemaInfo.Indexes)
+        {
+            if (idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
+                idx.Columns.Count > 0 &&
+                idx.Columns[0].Name.Equals(_schema.NodeKeyColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                keyIndexRoot = idx.RootPage;
+                break;
+            }
+        }
+        _keyIndexRootPage = keyIndexRoot;
     }
 
     public GraphRecord? Get(NodeKey key, bool includeData = true)
@@ -218,6 +218,33 @@ internal sealed class ConceptStore
         };
 
         return result;
+    }
+
+    /// <summary>
+    /// Full table scan returning only node keys — no data, no JSON, no allocation beyond the key list.
+    /// </summary>
+    internal List<NodeKey> FetchAllKeys()
+    {
+        if (_tableRootPage == 0) throw new InvalidOperationException("Store not initialized.");
+
+        _reusableScanCursor ??= _reader.CreateCursor((uint)_tableRootPage);
+        var cursor = _reusableScanCursor;
+        cursor.Reset();
+
+        var keys = new List<NodeKey>();
+        while (cursor.MoveNext())
+        {
+            var payload = cursor.Payload;
+            _decoder.ReadSerialTypes(payload, _serialsBuffer, out int bodyOffset);
+            _decoder.ComputeColumnOffsets(_serialsBuffer, _columnCount, bodyOffset, _offsetsBuffer);
+            long keyVal = _colKey >= 0 && _colKey < _columnCount
+                ? _decoder.DecodeInt64At(payload, _serialsBuffer[_colKey], _offsetsBuffer[_colKey])
+                : 0;
+            if (keyVal != 0)
+                keys.Add(new NodeKey(keyVal));
+        }
+
+        return keys;
     }
 
     public void Dispose()

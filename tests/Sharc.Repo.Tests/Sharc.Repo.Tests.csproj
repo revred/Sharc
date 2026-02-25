@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>CA1861;CA1707</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\Sharc.Repo\Sharc.Repo.csproj" />
+    <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Arc\Sharc.Arc.csproj" />
+  </ItemGroup>
+</Project>

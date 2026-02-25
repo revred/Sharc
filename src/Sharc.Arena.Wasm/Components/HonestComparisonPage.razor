@@ -1,4 +1,4 @@
-@* Page 6: Where Sharc Excels vs Where SQLite Excels *@
+@* Page 7: Honest veteran comparison with live measurements *@
 @using Sharc.Arena.Wasm.Services
 @using Sharc.Arena.Wasm.Models
 @inject SharcEngine Sharc
@@ -6,50 +6,57 @@
 @inject BenchmarkRunner Runner
 
 <div class="honest-page">
-    <div class="honest-badge">HONEST ASSESSMENT</div>
-    <h2 class="honest-title">Where Each Engine Excels</h2>
+    <div class="honest-badge">VETERAN REALITY CHECK</div>
+    <h2 class="honest-title">Sharc vs Legacy Leaders</h2>
     <p class="honest-subtitle">
-        No database is best at everything. Here's when to choose each.
-        @if (_isMeasuring) { <span class="measuring-note">(Running live measurements...)</span> }
+        Measured live on this device against veteran embedded engines.
+        @if (_isMeasuring) { <span class="measuring-note">Running measurements...</span> }
     </p>
+
+    <div class="honest-matchup">
+        <span class="honest-chip sharc-chip">Sharc</span>
+        <span class="honest-vs">vs</span>
+        <span class="honest-chip sqlite-chip">SQLite</span>
+        <span class="honest-chip idb-chip">IndexedDB</span>
+    </div>
 
     <div class="honest-grid">
         <div class="honest-card sharc-excels">
             <div class="honest-card-header">
                 <span class="honest-icon">&#x1F988;</span>
-                <span class="honest-card-title" style="color: var(--sharc)">Sharc Excels At</span>
+                <span class="honest-card-title" style="color: var(--sharc)">Sharc wins today on</span>
             </div>
             <ul class="honest-list">
-                <li><strong>Cold start</strong> &mdash; @FormatTime(_sharcColdStart) vs @FormatTime(_sqliteColdStart) (@FormatRatio(_sqliteColdStart / _sharcColdStart)x)</li>
-                <li><strong>Point lookups</strong> &mdash; @FormatNs(_sharcPoint) B-tree seeks</li>
-                <li><strong>Graph traversal</strong> &mdash; @FormatTime(_sharcGraph) 2-hop BFS</li>
-                <li><strong>Footprint</strong> &mdash; @(_sharcFootprint.ToString("F0")) KB vs @(_sqliteFootprint.ToString("F0")) KB</li>
-                <li><strong>Page encryption</strong> &mdash; AES-256-GCM built-in</li>
-                <li><strong>Trust layer</strong> &mdash; ECDSA + hash-chain ledger</li>
-                <li><strong>WASM deployment</strong> &mdash; no native dependencies</li>
+                <li><strong>Cold start</strong> &mdash; @FormatTime(_sharcColdStart) vs @FormatTime(_sqliteColdStart) (@FormatRatio(GetRatio(_sqliteColdStart, _sharcColdStart))x faster)</li>
+                <li><strong>Point lookups</strong> &mdash; @FormatNs(_sharcPoint) vs @FormatNs(_sqlitePoint) (@FormatRatio(GetRatio(_sqlitePoint, _sharcPoint))x)</li>
+                <li><strong>Graph traversal</strong> &mdash; @FormatTime(_sharcGraphMs) vs @FormatTime(_sqliteGraphMs) (@FormatRatio(GetRatio(_sqliteGraphMs, _sharcGraphMs))x)</li>
+                <li><strong>Footprint</strong> &mdash; @(_sharcFootprint.ToString("F0")) KB vs @(_sqliteFootprint.ToString("F0")) KB (@FormatRatio(GetRatio(_sqliteFootprint, _sharcFootprint))x smaller)</li>
+                <li><strong>Deployment simplicity</strong> &mdash; pure managed .NET, no native package chain</li>
+                <li><strong>Built-in trust model</strong> &mdash; signed writes + tamper-evident ledger flow</li>
+                <li><strong>WASM readiness</strong> &mdash; tuned for browser-hosted agent memory paths</li>
             </ul>
         </div>
 
         <div class="honest-card sqlite-excels">
             <div class="honest-card-header">
                 <span class="honest-icon">&#x26A1;</span>
-                <span class="honest-card-title" style="color: var(--sqlite)">SQLite Excels At</span>
+                <span class="honest-card-title" style="color: var(--sqlite)">SQLite remains better for</span>
             </div>
             <ul class="honest-list">
-                <li><strong>Complex queries</strong> &mdash; full SQL optimizer (VDBE)</li>
-                <li><strong>WHERE filtering</strong> &mdash; predicate pushdown wins</li>
-                <li><strong>CTEs</strong> &mdash; mature query planner, faster at complex CTEs</li>
-                <li><strong>Write throughput</strong> &mdash; decades of WAL optimization</li>
-                <li><strong>Ecosystem</strong> &mdash; every language has a binding</li>
-                <li><strong>Maturity</strong> &mdash; 24 years of battle testing</li>
-                <li><strong>Full SQL</strong> &mdash; JOINs, subqueries, window functions</li>
+                <li><strong>Complex SQL optimization</strong> &mdash; mature VDBE planner breadth</li>
+                <li><strong>Rich SQL surface area</strong> &mdash; window functions, deep query rewrites</li>
+                <li><strong>Write-heavy systems</strong> &mdash; years of WAL-mode tuning</li>
+                <li><strong>Ecosystem depth</strong> &mdash; broad tooling and language integrations</li>
+                <li><strong>Long-term operational familiarity</strong> &mdash; decades in production stacks</li>
+                <li><strong>Compatibility-first migrations</strong> &mdash; default choice for drop-in SQL workloads</li>
+                <li><strong>Large existing schema estates</strong> &mdash; simpler for teams with strong SQL inertia</li>
             </ul>
         </div>
     </div>
 
     <div class="honest-verdict">
-        <strong>Bottom line:</strong> If your agent needs fast reads, small footprint, and cryptographic trust &mdash; Sharc.
-        If you need complex SQL and write-heavy workloads &mdash; SQLite remains excellent.
+        <strong>Pragmatic verdict:</strong> choose Sharc when you need low-latency reads, small footprint, and trust-aware memory behavior for AI systems.
+        Choose SQLite when you need maximum SQL depth and heavy write optimization.
     </div>
 </div>
 
@@ -58,33 +65,35 @@
     private double _sharcColdStart = 0.004;
     private double _sqliteColdStart = 142;
     private double _sharcPoint = 3444;
-    private double _sharcGraph = 4.0;
+    private double _sqlitePoint = 23226;
+    private double _sharcGraphMs = 4.0;
+    private double _sqliteGraphMs = 205.0;
     private double _sharcFootprint = 50;
     private double _sqliteFootprint = 1536;
 
     protected override async Task OnInitializedAsync()
     {
         _isMeasuring = true;
-        
-        // Yield to allow UI to render the "measuring" state
         await Task.Yield();
 
-        try 
+        try
         {
-            // 1. Cold Start
             var cold = Runner.TimeColdStart(500, 100);
             _sharcColdStart = cold.SharcMs;
             _sqliteColdStart = cold.SqliteMs;
 
-            // 2. Point Lookups (Sharc)
-            var pointResult = Sharc.RunPointLookup();
-            if (pointResult.Value.HasValue) _sharcPoint = pointResult.Value.Value;
+            var sharcPointResult = Sharc.RunPointLookup();
+            if (sharcPointResult.Value.HasValue) _sharcPoint = sharcPointResult.Value.Value;
 
-            // 3. Graph Traversal (Sharc)
-            var graphResult = Sharc.RunGraphTraverse();
-            if (graphResult.Value.HasValue) _sharcGraph = graphResult.Value.Value / 1000.0; // convert us to ms
+            var sqlitePointResult = Sqlite.RunPointLookup();
+            if (sqlitePointResult.Value.HasValue) _sqlitePoint = sqlitePointResult.Value.Value;
 
-            // 4. Memory Footprint
+            var sharcGraphResult = Sharc.RunGraphTraverse();
+            if (sharcGraphResult.Value.HasValue) _sharcGraphMs = sharcGraphResult.Value.Value / 1000.0;
+
+            var sqliteGraphResult = Sqlite.RunGraphTraverse();
+            if (sqliteGraphResult.Value.HasValue) _sqliteGraphMs = sqliteGraphResult.Value.Value / 1000.0;
+
             var sharcMem = Sharc.RunMemoryFootprint();
             if (sharcMem.Value.HasValue) _sharcFootprint = sharcMem.Value.Value;
 
@@ -101,23 +110,30 @@
         }
     }
 
-    private string FormatTime(double ms)
+    private static double GetRatio(double larger, double smaller)
     {
-        if (ms < 0.1) return $"{(ms * 1000):F0} \u00B5s";
+        if (larger <= 0 || smaller <= 0) return 1.0;
+        return larger / smaller;
+    }
+
+    private static string FormatTime(double ms)
+    {
+        if (ms < 0.1) return $"{(ms * 1000):F0} us";
         if (ms < 1000) return $"{ms:F1} ms";
         return $"{(ms / 1000.0):F2} s";
     }
 
-    private string FormatNs(double ns)
+    private static string FormatNs(double ns)
     {
         if (ns < 1000) return $"{ns:F0} ns";
-        return $"{(ns / 1000.0):F1} \u00B5s";
+        return $"{(ns / 1000.0):F1} us";
     }
 
-    private string FormatRatio(double ratio)
+    private static string FormatRatio(double ratio)
     {
-        if (ratio > 1000) return $"{(ratio / 1000.0):F0}k";
-        if (ratio > 10) return ratio.ToString("F0");
-        return ratio.ToString("F1");
+        if (ratio >= 1000) return (ratio / 1000.0).ToString("F0") + "k";
+        if (ratio >= 100) return ratio.ToString("F0");
+        if (ratio >= 10) return ratio.ToString("F1");
+        return ratio.ToString("F2");
     }
 }

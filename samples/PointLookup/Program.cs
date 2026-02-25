@@ -15,6 +15,7 @@ using (var conn = new SqliteConnection($"Data Source={dbPath}"))
 
     using var tx = conn.BeginTransaction();
     cmd.CommandText = "INSERT INTO users VALUES ($id, $name, $age)";
+    cmd.Transaction = tx;
     var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
     var pName = cmd.Parameters.Add("$name", SqliteType.Text);
     var pAge = cmd.Parameters.Add("$age", SqliteType.Integer);

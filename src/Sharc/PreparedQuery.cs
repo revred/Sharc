@@ -1,4 +1,4 @@
-// Copyright (c) Ram Revanur. All rights reserved.
+﻿// Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
 using Sharc.Core;
@@ -27,7 +27,7 @@ public sealed class PreparedQuery : IPreparedReader
     private readonly SharcDatabase _db;
     private volatile bool _disposed;
 
-    // Pre-resolved at Prepare() time — immutable, shared across threads
+    // Pre-resolved at Prepare() time - immutable, shared across threads
     internal readonly TableInfo Table;
     internal readonly int[]? Projection;
     internal readonly int RowidAliasOrdinal;
@@ -35,7 +35,7 @@ public sealed class PreparedQuery : IPreparedReader
     internal readonly QueryIntent Intent;
     internal readonly bool NeedsPostProcessing;
 
-    // Pre-resolved at Prepare() time — avoids TryCreateIndexSeekCursor on every Execute()
+    // Pre-resolved at Prepare() time - avoids TryCreateIndexSeekCursor on every Execute()
     private readonly bool _hasIndexSeek;
 
     // Per-thread execution state
@@ -46,6 +46,8 @@ public sealed class PreparedQuery : IPreparedReader
         internal IBTreeCursor? Cursor;
         internal SharcDataReader? Reader;
         internal Dictionary<long, IFilterNode>? ParamCache;
+        internal IReadOnlyDictionary<string, object>? LastParametersRef;
+        internal IFilterNode? LastFilterNode;
 
         public void Dispose()
         {
@@ -61,6 +63,8 @@ public sealed class PreparedQuery : IPreparedReader
             }
             ParamCache?.Clear();
             ParamCache = null;
+            LastParametersRef = null;
+            LastFilterNode = null;
         }
     }
 
@@ -82,7 +86,7 @@ public sealed class PreparedQuery : IPreparedReader
         NeedsPostProcessing = needsPostProcessing;
         _slot = new ThreadLocal<QuerySlot>(trackAllValues: true);
 
-        // Pre-resolve index seek at Prepare time — determines cursor type once
+        // Pre-resolve index seek at Prepare time - determines cursor type once
         var seekCursor = db.TryCreateIndexSeekCursorForPrepared(intent, table);
         if (seekCursor != null)
         {
@@ -122,16 +126,26 @@ public sealed class PreparedQuery : IPreparedReader
 
         if (node == null && Intent.Filter.HasValue)
         {
-            // Parameterized filter — check per-thread param cache
-            slot.ParamCache ??= new Dictionary<long, IFilterNode>();
-            long paramKey = ComputeParamCacheKey(parameters);
-            if (!slot.ParamCache.TryGetValue(paramKey, out node))
+            if (ReferenceEquals(parameters, slot.LastParametersRef) && slot.LastFilterNode != null)
             {
-                var filterStar = IntentToFilterBridge.Build(
-                    Intent.Filter.Value, parameters, Intent.TableAlias);
-                node = FilterTreeCompiler.CompileBaked(
-                    filterStar, Table.Columns, RowidAliasOrdinal);
-                slot.ParamCache[paramKey] = node;
+                node = slot.LastFilterNode;
+            }
+            else
+            {
+                // Parameterized filter - check per-thread param cache
+                slot.ParamCache ??= new Dictionary<long, IFilterNode>();
+                long paramKey = ComputeParamCacheKey(parameters);
+                if (!slot.ParamCache.TryGetValue(paramKey, out node))
+                {
+                    var filterStar = IntentToFilterBridge.Build(
+                        Intent.Filter.Value, parameters, Intent.TableAlias);
+                    node = FilterTreeCompiler.CompileBaked(
+                        filterStar, Table.Columns, RowidAliasOrdinal);
+                    slot.ParamCache[paramKey] = node;
+                }
+
+                slot.LastParametersRef = parameters;
+                slot.LastFilterNode = node;
             }
         }
 
@@ -167,13 +181,10 @@ public sealed class PreparedQuery : IPreparedReader
             FilterNode = node
         });
 
-        // Cache for reuse — mark reader as owned so Dispose() resets instead of destroying
-        if (!_hasIndexSeek)
-        {
-            reader.MarkReusable();
-            slot.Cursor = cursor;
-            slot.Reader = reader;
-        }
+        // Cache for reuse - mark reader as owned so Dispose() resets instead of destroying
+        reader.MarkReusable();
+        slot.Cursor = cursor;
+        slot.Reader = reader;
 
         if (NeedsPostProcessing)
             return QueryPostProcessor.Apply(reader, Intent);
@@ -195,16 +206,5 @@ public sealed class PreparedQuery : IPreparedReader
     }
 
     private static long ComputeParamCacheKey(IReadOnlyDictionary<string, object>? parameters)
-    {
-        if (parameters is null or { Count: 0 })
-            return 0;
-
-        var hc = new HashCode();
-        foreach (var kvp in parameters)
-        {
-            hc.Add(kvp.Key);
-            hc.Add(kvp.Value);
-        }
-        return hc.ToHashCode();
-    }
+        => ParameterKeyHasher.Compute(parameters);
 }

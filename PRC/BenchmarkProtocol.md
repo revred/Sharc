@@ -197,7 +197,7 @@ After each benchmark cycle:
 
 | Cost | Amount | Why Accepted |
 |------|--------|-------------|
-| Schema allocation | ~40 KB per open | One-time, amortized over all reads |
+| Schema allocation | ~40 KB per open | ~~One-time, amortized over all reads~~ **FIXED:** Lazy schema init — 0 B at open, deferred until first `.Schema` access |
 | String materialization | Variable per string | Inherent: UTF-8 → UTF-16 conversion |
 | TEXT/BLOB data.ToArray() | Per TEXT/BLOB column | Required: page spans are transient |
 | Graph seek allocation | 1,840 B per seek | Includes schema scan — will improve with cached schema in ConceptStore |
@@ -210,5 +210,5 @@ After each benchmark cycle:
 | ConceptStore.Get() | Cache schema root page, avoid re-scan | ~500 B/seek reduction | Low |
 | RecordDecoder TEXT/BLOB | ReadOnlyMemory<byte> backed by page cache | Eliminate per-column copy | High (lifetime) |
 | Graph scan RecordId | Pool or struct-ify RecordId | ~100 B/node reduction | Medium |
-| Schema SQL parsing | Lazy parse on first column access | ~20 KB reduction | Medium |
+| ~~Schema SQL parsing~~ | ~~Lazy parse on first column access~~ | ~~~20 KB reduction~~ | **DONE** — `_schema ??=` lazy init implemented |
 | BTreeCursor Stack<T> | Use fixed-size array (max depth 20) | ~56 B/cursor reduction | Low |

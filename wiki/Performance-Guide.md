@@ -4,11 +4,11 @@
 
 | Operation | Sharc | SQLite | Speedup | Allocation |
 |-----------|-------|--------|---------|------------|
-| Point seek (rowid) | 0.27 us | 25.9 us | **95x** | 664 B vs 728 B |
-| Table scan (1K rows) | 48 us | 187 us | **3.9x** | 0 B vs 37 KB |
-| Graph BFS 2-hop | 2.60 us | 81.55 us | **31x** | 928 B vs 2.8 KB |
-| Graph node seek | 3.4 us | 24.3 us | **7.1x** | 8.3 KB vs 728 B |
-| Filtered scan (5K rows) | 206 us | 891 us | **4.3x** | near-zero |
+| Point seek (rowid) | 0.038 us | 23.227 us | **609x** | 0 B vs 728 B |
+| Table scan (5K rows) | 875.95 us | 5,630.27 us | **6.4x** | 1.41 MB vs 1.41 MB |
+| Graph BFS 2-hop | 45.59 us | 205.67 us | **4.5x** | 800 B vs 2.95 KB |
+| Graph node seek | 7.071 us | 70.553 us | **10.0x** | 888 B vs 648 B |
+| Filtered scan (5K rows) | 261.73 us | 541.54 us | **2.1x** | 0 B vs 720 B |
 
 ## Zero-Allocation Patterns
 
@@ -71,6 +71,24 @@ while (reader.Read())
     if (reader.GetInt64(0) == 42)
         return reader.GetString(1);
 ```
+
+### Use TopK for Ranked Retrieval
+
+```csharp
+// FAST: Streaming top-K with bounded heap — O(K) memory
+var jit = db.Jit("points");
+jit.Where(FilterStar.Column("x").Between(cx - r, cx + r));
+using var reader = jit.TopK(20, new DistanceScorer(cx, cy), "x", "y");
+
+// SLOWER: Materialize all candidates, sort client-side
+var all = new List<(double dist, double x, double y)>();
+while (allReader.Read())
+    all.Add((ComputeDistance(allReader), allReader.GetDouble(0), allReader.GetDouble(1)));
+all.Sort((a, b) => a.dist.CompareTo(b.dist));
+var top20 = all.Take(20);
+```
+
+TopK rejects rows that can't enter the heap **before** materializing them. For 10K candidates with K=20, only 20 rows are ever allocated.
 
 ### Batch Inserts
 

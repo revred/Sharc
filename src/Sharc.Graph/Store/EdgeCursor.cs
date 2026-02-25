@@ -3,6 +3,7 @@
 
 
 using System.Buffers;
+using System.Runtime.InteropServices;
 using Sharc.Core;
 using Sharc.Core.Records;
 
@@ -16,23 +17,29 @@ internal abstract class EdgeCursorBase : IEdgeCursor
     protected readonly RecordDecoder Decoder;
     protected readonly int ColumnCount;
     protected long MatchKey;
-    protected int? MatchKind;
-    protected readonly bool MatchIsOrigin;
-    
-    // Ordinals
-    protected readonly int ColOrigin;
-    protected readonly int ColTarget;
-    protected readonly int ColKind;
-    protected readonly int ColData;
-    protected readonly int ColCvn;
-    protected readonly int ColLvn;
-    protected readonly int ColSync;
-    protected readonly int ColWeight;
+    protected int MatchKind;              // -1 = no filter, >= 0 = filter by kind
+    protected const int NoKindFilter = -1;
+    protected readonly int MatchOrdinal;  // precomputed: ColOrigin if origin, ColTarget if target
+
+    // Column ordinals packed into a single struct
+    protected readonly ColumnOrdinals Cols;
 
     // Cached per row state to avoid allocations
     protected readonly long[] SerialTypes;
     protected readonly int[] Offsets;
     protected int BodyOffset;
+
+    [StructLayout(LayoutKind.Sequential)]
+    protected readonly struct ColumnOrdinals
+    {
+        public readonly int Origin, Target, Kind, Data, Cvn, Lvn, Sync, Weight;
+        public ColumnOrdinals(int origin, int target, int kind, int data,
+            int cvn, int lvn, int sync, int weight)
+        {
+            Origin = origin; Target = target; Kind = kind; Data = data;
+            Cvn = cvn; Lvn = lvn; Sync = sync; Weight = weight;
+        }
+    }
 
     protected EdgeCursorBase(RecordDecoder decoder, int columnCount, long matchKey, int? matchKind, bool matchIsOrigin,
         int colOrigin, int colTarget, int colKind, int colData, int colCvn, int colLvn, int colSync, int colWeight)
@@ -40,17 +47,10 @@ internal abstract class EdgeCursorBase : IEdgeCursor
         Decoder = decoder;
         ColumnCount = columnCount;
         MatchKey = matchKey;
-        MatchKind = matchKind;
-        MatchIsOrigin = matchIsOrigin;
-        ColOrigin = colOrigin;
-        ColTarget = colTarget;
-        ColKind = colKind;
-        ColData = colData;
-        ColCvn = colCvn;
-        ColLvn = colLvn;
-        ColSync = colSync;
-        ColWeight = colWeight;
-        
+        MatchKind = matchKind ?? NoKindFilter;
+        MatchOrdinal = matchIsOrigin ? colOrigin : colTarget;
+        Cols = new ColumnOrdinals(colOrigin, colTarget, colKind, colData, colCvn, colLvn, colSync, colWeight);
+
         SerialTypes = ArrayPool<long>.Shared.Rent(columnCount);
         Offsets = ArrayPool<int>.Shared.Rent(columnCount);
     }
@@ -65,10 +65,10 @@ internal abstract class EdgeCursorBase : IEdgeCursor
         Decoder.ComputeColumnOffsets(SerialTypes, ColumnCount, BodyOffset, Offsets);
     }
 
-    public long OriginKey => GetLong(ColOrigin);
-    public long TargetKey => GetLong(ColTarget);
-    public int Kind => (int)GetLong(ColKind);
-    public float Weight => ColWeight >= 0 ? (float)GetDouble(ColWeight) : 1.0f;
+    public long OriginKey => GetLong(Cols.Origin);
+    public long TargetKey => GetLong(Cols.Target);
+    public int Kind => (int)GetLong(Cols.Kind);
+    public float Weight => Cols.Weight >= 0 ? (float)GetDouble(Cols.Weight) : 1.0f;
 
     public ReadOnlyMemory<byte> JsonDataUtf8 => ReadOnlyMemory<byte>.Empty;
 
@@ -89,7 +89,7 @@ internal abstract class EdgeCursorBase : IEdgeCursor
     public void Reset(long matchKey, int? matchKind)
     {
         MatchKey = matchKey;
-        MatchKind = matchKind;
+        MatchKind = matchKind ?? NoKindFilter;
         BodyOffset = 0;
         OnReset();
     }
@@ -108,7 +108,7 @@ internal sealed class TableScanEdgeCursor : EdgeCursorBase
     private readonly IBTreeCursor _cursor;
 
     public TableScanEdgeCursor(IBTreeReader reader, uint rootPage, long matchKey, int? matchKind, bool matchIsOrigin,
-        RecordDecoder decoder, int colCount, int colOrigin, int colTarget, int colKind, int colData, 
+        RecordDecoder decoder, int colCount, int colOrigin, int colTarget, int colKind, int colData,
         int colCvn, int colLvn, int colSync, int colWeight)
         : base(decoder, colCount, matchKey, matchKind, matchIsOrigin, colOrigin, colTarget, colKind, colData, colCvn, colLvn, colSync, colWeight)
     {
@@ -126,15 +126,14 @@ internal sealed class TableScanEdgeCursor : EdgeCursorBase
             Decoder.ReadSerialTypes(payload, SerialTypes, out BodyOffset);
             PrepareOffsets();
 
-            int matchOrd = MatchIsOrigin ? base.ColOrigin : base.ColTarget;
-            long key = Decoder.DecodeInt64At(payload, SerialTypes[matchOrd], Offsets[matchOrd]);
+            long key = Decoder.DecodeInt64At(payload, SerialTypes[MatchOrdinal], Offsets[MatchOrdinal]);
 
             if (key != MatchKey) continue;
 
-            if (MatchKind.HasValue)
+            if (MatchKind >= 0)
             {
-                int kind = (int)Decoder.DecodeInt64At(payload, SerialTypes[base.ColKind], Offsets[base.ColKind]);
-                if (kind != MatchKind.Value) continue;
+                int kind = (int)Decoder.DecodeInt64At(payload, SerialTypes[Cols.Kind], Offsets[Cols.Kind]);
+                if (kind != MatchKind) continue;
             }
 
             return true;
@@ -196,10 +195,10 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
             if (val < MatchKey) continue;
 
             // Optional kind filter if it's part of the index (multi-column index)
-            if (MatchKind.HasValue && indexColCount >= 3)
+            if (MatchKind >= 0 && indexColCount >= 3)
             {
                 int kind = (int)Decoder.DecodeInt64At(indexPayload, _indexSerials[1], _indexOffsets[1]);
-                if (kind != MatchKind.Value) continue;
+                if (kind != MatchKind) continue;
             }
 
             long rowId = Decoder.DecodeInt64At(indexPayload, _indexSerials[indexColCount - 1], _indexOffsets[indexColCount - 1]);
@@ -210,10 +209,10 @@ internal sealed class IndexEdgeCursor : EdgeCursorBase
                 PrepareOffsets();
 
                 // Double check kind if not in index
-                if (MatchKind.HasValue && indexColCount < 3)
+                if (MatchKind >= 0 && indexColCount < 3)
                 {
-                    int kind = (int)Decoder.DecodeInt64At(tablePayload, SerialTypes[base.ColKind], Offsets[base.ColKind]);
-                    if (kind != MatchKind.Value) continue;
+                    int kind = (int)Decoder.DecodeInt64At(tablePayload, SerialTypes[Cols.Kind], Offsets[Cols.Kind]);
+                    if (kind != MatchKind) continue;
                 }
 
                 return true;

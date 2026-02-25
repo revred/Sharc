@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
-    branches: [main, dev]
+    branches: [dev, main]
 
 permissions:
   contents: read
@@ -24,13 +24,31 @@ jobs:
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      - name: Determine version suffix
+        id: version
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "0" ]; then
+            echo "suffix=1.2.1.$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "Version: 1.2.1.$PR_NUMBER (PR #$PR_NUMBER)"
+          else
+            echo "suffix=" >> "$GITHUB_OUTPUT"
+            echo "Version: using default from Directory.Build.props"
+          fi
+
       - name: Restore dependencies
         run: |
           dotnet restore Sharc.sln
           dotnet restore bench/Sharc.Benchmarks/Sharc.Benchmarks.csproj
 
       - name: Build
-        run: dotnet build --no-restore --configuration Release
+        run: |
+          VERSION="${{ steps.version.outputs.suffix }}"
+          if [ -n "$VERSION" ]; then
+            dotnet build --no-restore --configuration Release /p:Version=$VERSION
+          else
+            dotnet build --no-restore --configuration Release
+          fi
 
       - name: Run all tests
         run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --filter "Category!=Performance"
@@ -46,4 +64,3 @@ jobs:
 
       - name: Verify Arena build
         run: dotnet publish src/Sharc.Arena.Wasm/Sharc.Arena.Wasm.csproj -c Release --nologo
-

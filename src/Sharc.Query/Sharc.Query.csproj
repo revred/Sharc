@@ -2,7 +2,8 @@
   <PropertyGroup>
     <RootNamespace>Sharc.Query</RootNamespace>
     <AssemblyName>Sharc.Query</AssemblyName>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile></PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc" />

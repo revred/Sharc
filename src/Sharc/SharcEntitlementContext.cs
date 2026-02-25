@@ -5,14 +5,13 @@
 namespace Sharc;
 
 /// <summary>
-/// Holds the set of entitlement tags that the current caller is authorized to decrypt.
-/// Pass this to <see cref="SharcOpenOptions"/> to enable row-level decryption for entitled rows.
-/// Rows encrypted with tags not in this context are silently skipped during iteration.
+/// Holds the set of entitlement tags used for table-level and column-level access control.
+/// Pass this to <see cref="SharcOpenOptions"/> to enforce entitlement-based filtering.
 /// </summary>
 /// <remarks>
-/// Row-level entitlement encryption allows a single database file to contain rows
-/// encrypted with different keys, each derived from an entitlement tag. Only callers
-/// holding the correct tags can decrypt and see those rows.
+/// Entitlement enforcement operates at the API level via <c>EntitlementEnforcer</c>,
+/// which checks tags against agent scopes to grant or deny access to tables and columns.
+/// Encryption is page-level (AES-256-GCM via <c>AesGcmPageTransform</c>), not row-level.
 /// <para>
 /// Entitlement tag examples: "tenant:acme", "role:admin", "team:engineering", "classification:pii".
 /// </para>

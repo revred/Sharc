@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 using Sharc.Core;
 using Sharc.Core.BTree;
@@ -10,6 +11,7 @@ using Sharc.Core.IO;
 using Sharc.Core.Schema;
 using Sharc.Core.Query;
 using Sharc.Query;
+using Sharc.Views;
 
 namespace Sharc;
 
@@ -28,7 +30,7 @@ namespace Sharc;
 /// }
 /// </code>
 /// </remarks>
-public sealed partial class SharcDataReader : IDisposable
+public sealed partial class SharcDataReader : IRowAccessor, IDisposable
 {
     // ══════════════════════════════════════════════════════════════════════
     // FIELD LAYOUT & FILE ORGANIZATION
@@ -222,6 +224,7 @@ public sealed partial class SharcDataReader : IDisposable
     // Index seek support
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
+    private ColumnValue[]? _indexKeyBuffer; // reusable buffer for TryDecodeIndexRecord
 
     // Mode-projected composition (null in cursor mode → 0 B overhead on PointLookup)
     private readonly CompositeState? _composite;
@@ -237,6 +240,9 @@ public sealed partial class SharcDataReader : IDisposable
     // Cached column names — built once on first call to GetColumnNames()
     private string[]? _cachedColumnNames;
 
+    // Cached ordinal map — built once on first call to GetOrdinal()
+    private Dictionary<string, int>? _ordinalCache;
+
     // ── Value-type fields ───────────────────────────────────────────────
     //
     // Physical layout (CLR auto): int(4) + 5×short(10) + byte(1) = 15 B → 16 B padded.
@@ -245,6 +251,9 @@ public sealed partial class SharcDataReader : IDisposable
 
     // Per-row generation counter for lazy decode (full 32-bit, ~4.3B row cycle)
     private int _decodedGeneration;
+
+    // F-7: Cursor-based pagination — skip rows with RowId <= this value (0 = disabled)
+    private long _afterRowId;
 
     // Scan mode flags — byte enum with 4 flag bits
     private ScanMode _scanMode;
@@ -410,6 +419,8 @@ public sealed partial class SharcDataReader : IDisposable
         public IReadOnlyList<IndexInfo>? TableIndexes { get; init; }
         public ResolvedFilter[]? Filters { get; init; }
         public IFilterNode? FilterNode { get; init; }
+        /// <summary>Optional row-level access evaluator for agent entitlements. Null = no row filtering.</summary>
+        public Trust.IRowAccessEvaluator? RowAccessEvaluator { get; init; }
     }
 
     internal SharcDataReader(
@@ -486,10 +497,10 @@ public sealed partial class SharcDataReader : IDisposable
         _serialTypes.AsSpan(0, bufferSize).Clear();
         _decodedGenerations.AsSpan(0, bufferSize).Clear();
 
-        // Initialize filter state if filters are provided
-        if (config.FilterNode != null || config.Filters != null)
+        // Initialize filter state if filters or row-level access evaluator are provided
+        if (config.FilterNode != null || config.Filters != null || config.RowAccessEvaluator != null)
         {
-            _filter = new FilterState(config.FilterNode, config.Filters, bufferSize);
+            _filter = new FilterState(config.FilterNode, config.Filters, bufferSize, config.RowAccessEvaluator);
         }
 
         // Detect INTEGER PRIMARY KEY (rowid alias) — SQLite stores NULL in the record
@@ -583,6 +594,19 @@ public sealed partial class SharcDataReader : IDisposable
     public long RowId => _composite?.DedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
 
     /// <summary>
+    /// Configures cursor-based pagination: only rows with RowId greater than
+    /// <paramref name="lastRowId"/> will be returned by subsequent <see cref="Read"/> calls.
+    /// Returns this reader for fluent chaining.
+    /// </summary>
+    /// <param name="lastRowId">The last-seen rowid. Rows with RowId &lt;= this value are skipped.</param>
+    /// <returns>This reader instance.</returns>
+    public SharcDataReader AfterRowId(long lastRowId)
+    {
+        _afterRowId = lastRowId;
+        return this;
+    }
+
+    /// <summary>
     /// Returns true if the underlying page source has been mutated since this reader
     /// was created or last refreshed. Useful for multi-agent scenarios where one agent
     /// may have committed changes that invalidate this reader's cached state.
@@ -665,26 +689,73 @@ public sealed partial class SharcDataReader : IDisposable
         using var indexCursor = _bTreeReader.CreateIndexCursor((uint)indexInfo.RootPage);
 
         // Determine sort direction for the first key column to enable early exit.
-        // Index entries are stored in sorted order, so once we've passed the target
-        // value we can stop scanning instead of reading the entire index.
         bool firstColumnDescending = indexInfo.Columns.Count > 0 && indexInfo.Columns[0].IsDescending;
 
-        while (indexCursor.MoveNext())
+        // Use SeekFirst for O(log N) positioning on the first key column
+        bool seeked = false;
+        switch (keyValues[0])
         {
-            var indexRecord = _recordDecoder!.DecodeRecord(indexCursor.Payload);
-            if (indexRecord.Length < 2) continue; // Need at least one key column + rowid
+            case long l:
+                seeked = indexCursor.SeekFirst(l);
+                break;
+            case int i:
+                seeked = indexCursor.SeekFirst((long)i);
+                break;
+            case string s:
+                int maxUtf8 = Encoding.UTF8.GetMaxByteCount(s.Length);
+                Span<byte> utf8Buf = maxUtf8 <= 256 ? stackalloc byte[256] : new byte[maxUtf8];
+                int written = Encoding.UTF8.GetBytes(s, utf8Buf);
+                seeked = indexCursor.SeekFirst(utf8Buf[..written]);
+                break;
+            default:
+                // double or unsupported type — fall back to full scan from start
+                break;
+        }
 
-            // Compare key values against the first N columns of the index record
-            bool match = true;
-            for (int i = 0; i < keyValues.Length && i < indexRecord.Length - 1; i++)
+        // If SeekFirst found no match and we had a seekable type, no match exists
+        if (!seeked && keyValues[0] is long or int or string)
+        {
+            _currentRow = null;
+            IsLazy = false;
+            return false;
+        }
+
+        // If we seeked successfully, cursor is positioned at first match — scan from here.
+        // If we didn't seek (unsupported type), scan from the beginning via MoveNext.
+        bool useCurrentPosition = seeked;
+
+        while (true)
+        {
+            if (useCurrentPosition)
             {
-                if (!IndexKeyMatches(indexRecord[i], keyValues[i]))
+                // First iteration after SeekFirst: cursor already points to the entry
+                useCurrentPosition = false;
+            }
+            else
+            {
+                if (!indexCursor.MoveNext())
+                    break;
+            }
+
+            // Decode only key columns + trailing rowid (avoids full ColumnValue[] allocation)
+            var indexKeys = _indexKeyBuffer ??= new ColumnValue[Math.Max(keyValues.Length, 4)];
+            if (indexKeys.Length < keyValues.Length)
+                _indexKeyBuffer = indexKeys = new ColumnValue[keyValues.Length];
+
+            if (!_recordDecoder!.TryDecodeIndexRecord(indexCursor.Payload, indexKeys, keyValues.Length, out long rowId))
+                continue;
+
+            // Compare key values against the decoded index key columns
+            bool match = true;
+            for (int i = 0; i < keyValues.Length; i++)
+            {
+                if (!IndexKeyMatches(indexKeys[i], keyValues[i]))
                 {
                     match = false;
 
                     // Early exit: if the first key column is past the target value,
                     // no subsequent entries can match (B-tree sorted order).
-                    if (i == 0 && IndexKeyIsPastTarget(indexRecord[0], keyValues[0], firstColumnDescending))
+                    if (i == 0 && IndexKeyIsPastTarget(indexKeys[0], keyValues[0], firstColumnDescending))
                     {
                         _currentRow = null;
                         IsLazy = false;
@@ -697,8 +768,6 @@ public sealed partial class SharcDataReader : IDisposable
 
             if (!match) continue;
 
-            // Last column in the index record is the table rowid
-            long rowId = indexRecord[^1].AsInt64();
             return Seek(rowId);
         }
 
@@ -836,6 +905,10 @@ public sealed partial class SharcDataReader : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
     {
+        // F-7: Cursor-based pagination — skip rows at or before the cursor position
+        if (_afterRowId > 0 && rowId <= _afterRowId)
+            return false;
+
         // ── Hot path: concrete FilterNode — write to _serialTypes directly (zero Array.Copy) ──
         if (_filter?.ConcreteFilterNode != null)
         {
@@ -845,6 +918,10 @@ public sealed partial class SharcDataReader : IDisposable
             int stCount = Math.Min(colCount, st.Length);
 
             if (!_filter.ConcreteFilterNode.Evaluate(payload, st.AsSpan(0, stCount), bodyOffset, rowId))
+                return false;
+
+            // Row-level access control (zero cost when null)
+            if (_filter.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
                 return false;
 
             _currentBodyOffset = (short)bodyOffset;
@@ -868,6 +945,10 @@ public sealed partial class SharcDataReader : IDisposable
                 _filter.FilterSerialTypes.AsSpan(0, stCount), _filterBodyOffset, rowId))
                 return false;
 
+            // Row-level access control (zero cost when null)
+            if (_filter.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
+                return false;
+
             DecodeCurrentRow(payload);
             return true;
         }
@@ -878,6 +959,11 @@ public sealed partial class SharcDataReader : IDisposable
         {
             return false;
         }
+
+        // Row-level access control — final gate before row acceptance
+        // Zero cost when _filter is null or RowAccessEvaluator is null
+        if (_filter?.RowAccessEvaluator != null && !_filter.RowAccessEvaluator.CanAccess(payload, rowId))
+            return false;
 
         DecodeCurrentRow(payload);
         return true;
@@ -1093,12 +1179,16 @@ public sealed partial class SharcDataReader : IDisposable
     /// <exception cref="ArgumentException">No column with the specified name exists.</exception>
     public int GetOrdinal(string columnName)
     {
-        for (int i = 0; i < FieldCount; i++)
+        var cache = _ordinalCache;
+        if (cache == null)
         {
-            if (string.Equals(GetColumnName(i), columnName, StringComparison.OrdinalIgnoreCase))
-                return i;
+            cache = new Dictionary<string, int>(FieldCount, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < FieldCount; i++)
+                cache[GetColumnName(i)] = i;
+            _ordinalCache = cache;
         }
-
+        if (cache.TryGetValue(columnName, out int ordinal))
+            return ordinal;
         throw new ArgumentException($"Column '{columnName}' not found.");
     }
 
@@ -1252,6 +1342,7 @@ public sealed partial class SharcDataReader : IDisposable
         _currentRow = null;
         _decodedGeneration++;
         _cachedColumnNames = null;
+        _ordinalCache = null;
 
         // Recompute scan mode — preserve lifecycle flags (Reusable, Pooled), replace dispatch bits
         ScanFlags = (ScanFlags & (ScanMode.Reusable | ScanMode.Pooled)) | ResolveScanMode();
@@ -1372,7 +1463,7 @@ public sealed partial class SharcDataReader : IDisposable
             DedupUnderlying = underlying;
             DedupMode = mode;
             DedupRightIndex = rightIndex;
-            DedupSeen = IndexSet.Rent();
+            DedupSeen = mode == SetDedupMode.Intersect ? null : IndexSet.Rent();
             ColumnNames = underlying.GetColumnNames();
         }
 
@@ -1399,17 +1490,35 @@ public sealed partial class SharcDataReader : IDisposable
             // Dedup streaming mode: filter rows by index
             if (DedupUnderlying != null)
             {
+                if (DedupMode == SetDedupMode.Union)
+                {
+                    while (DedupUnderlying.Read())
+                    {
+                        var fp = DedupUnderlying.GetRowFingerprint();
+                        if (DedupSeen!.Add(fp))
+                            return true;
+                    }
+                    return false;
+                }
+
+                if (DedupMode == SetDedupMode.Intersect)
+                {
+                    // INTERSECT emits distinct rows. Removing from right index
+                    // makes repeated left duplicates fail without a second seen set.
+                    while (DedupUnderlying.Read())
+                    {
+                        var fp = DedupUnderlying.GetRowFingerprint();
+                        if (DedupRightIndex!.Remove(fp))
+                            return true;
+                    }
+                    return false;
+                }
+
                 while (DedupUnderlying.Read())
                 {
                     var fp = DedupUnderlying.GetRowFingerprint();
-                    bool pass = DedupMode switch
-                    {
-                        SetDedupMode.Union => DedupSeen!.Add(fp),
-                        SetDedupMode.Intersect => DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
-                        SetDedupMode.Except => !DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
-                        _ => false,
-                    };
-                    if (pass) return true;
+                    if (!DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp))
+                        return true;
                 }
                 return false;
             }
@@ -1583,12 +1692,15 @@ public sealed partial class SharcDataReader : IDisposable
         internal FilterNode? ConcreteFilterNode;
         internal readonly ResolvedFilter[]? Filters;
         internal long[]? FilterSerialTypes;
+        internal readonly Trust.IRowAccessEvaluator? RowAccessEvaluator;
 
-        internal FilterState(IFilterNode? filterNode, ResolvedFilter[]? filters, int bufferSize)
+        internal FilterState(IFilterNode? filterNode, ResolvedFilter[]? filters, int bufferSize,
+            Trust.IRowAccessEvaluator? rowAccessEvaluator = null)
         {
             FilterNode = filterNode;
             ConcreteFilterNode = filterNode as FilterNode;
             Filters = filters;
+            RowAccessEvaluator = rowAccessEvaluator;
 
             if (filterNode != null)
             {

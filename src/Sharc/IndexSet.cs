@@ -126,6 +126,65 @@ internal sealed class IndexSet : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Removes an entry if present.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool Remove(in Fingerprint128 fp)
+    {
+        if (_lo == null || _hi == null) return false;
+
+        ulong fpLo = fp.Lo, fpHi = fp.Hi;
+        EscapeSentinel(ref fpLo, ref fpHi);
+
+        int slot = (int)(fpLo >> 1) & _mask;
+        int capacity = _mask + 1;
+        for (int probe = 0; probe < capacity; probe++)
+        {
+            ulong lo = _lo[slot];
+            ulong hi = _hi[slot];
+            if (lo == 0 & hi == 0) return false;
+            if (lo == fpLo & hi == fpHi)
+            {
+                DeleteAndRehashCluster(slot);
+                _count--;
+                return true;
+            }
+            slot = (slot + 1) & _mask;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Deletes the slot and rehashes the subsequent linear-probe cluster.
+    /// </summary>
+    private void DeleteAndRehashCluster(int deletedSlot)
+    {
+        _lo![deletedSlot] = 0;
+        _hi![deletedSlot] = 0;
+
+        int slot = (deletedSlot + 1) & _mask;
+        while (true)
+        {
+            ulong lo = _lo[slot];
+            ulong hi = _hi[slot];
+            if (lo == 0 & hi == 0)
+                return;
+
+            // Remove entry from current slot, then reinsert at its ideal cluster position.
+            _lo[slot] = 0;
+            _hi[slot] = 0;
+
+            int reinsert = (int)(lo >> 1) & _mask;
+            while (_lo[reinsert] != 0 | _hi[reinsert] != 0)
+                reinsert = (reinsert + 1) & _mask;
+
+            _lo[reinsert] = lo;
+            _hi[reinsert] = hi;
+            slot = (slot + 1) & _mask;
+        }
+    }
+
     private void Grow()
     {
         int oldCapacity = _lo != null ? _mask + 1 : 0;

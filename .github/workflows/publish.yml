@@ -1,17 +1,22 @@
 name: Publish NuGet Packages
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-publish:
+  build-and-test:
+    name: Build & Test
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 10.0
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -19,20 +24,66 @@ jobs:
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      - name: Restore dependencies
+        run: |
+          dotnet restore Sharc.sln
+          dotnet restore bench/Sharc.Benchmarks/Sharc.Benchmarks.csproj
+
       - name: Build
-        run: dotnet build Sharc.sln --configuration Release
+        run: dotnet build --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test Sharc.sln --configuration Release --no-build --verbosity normal
+      - name: Run all tests
+        run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance"
 
-      - name: Pack Sharc
-        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist
+  publish:
+    name: Pack & Publish
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Determine version
+        id: version
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          VERSION="1.2.${PR_NUMBER}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
+
+      - name: Build Release
+        run: dotnet build --configuration Release /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Core
+        run: dotnet pack src/Sharc.Core/Sharc.Core.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Query
+        run: dotnet pack src/Sharc.Query/Sharc.Query.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Crypto
-        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist
+        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Graph.Surface
+        run: dotnet pack src/Sharc.Graph.Surface/Sharc.Graph.Surface.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc
+        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Graph
-        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist
+        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Vector
+        run: dotnet pack src/Sharc.Vector/Sharc.Vector.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Arc
+        run: dotnet pack src/Sharc.Arc/Sharc.Arc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
       - name: Push to NuGet
         run: dotnet nuget push "dist/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

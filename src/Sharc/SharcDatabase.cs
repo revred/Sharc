@@ -291,6 +291,13 @@ public sealed class SharcDatabase : IDisposable
     public static SharcDatabase Create(string path) => SharcDatabaseFactory.Create(path);
 
     /// <summary>
+    /// Creates a new, empty Sharc database entirely in memory (no filesystem access).
+    /// Suitable for Blazor WASM and other environments without file I/O.
+    /// </summary>
+    /// <returns>An open database instance with Write mode enabled.</returns>
+    public static SharcDatabase CreateInMemory() => SharcDatabaseFactory.CreateInMemory();
+
+    /// <summary>
     /// Opens a SQLite database from a file path.
     /// </summary>
     /// <param name="path">Path to the SQLite database file.</param>
@@ -342,6 +349,29 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _viewResolver.UnregisterView(viewName);
+    }
+
+    /// <summary>
+    /// Registers an <see cref="Views.ILayer"/> as a queryable data source.
+    /// Layers are always pre-materialized when referenced in SQL queries.
+    /// Use this for graph traversal results, external data, or any non-SQL row source.
+    /// </summary>
+    /// <param name="layer">The layer to register. Must have a non-empty name.</param>
+    public void RegisterLayer(Views.ILayer layer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _viewResolver.RegisterLayer(layer);
+    }
+
+    /// <summary>
+    /// Removes a previously registered layer by name.
+    /// </summary>
+    /// <param name="layerName">The name of the layer to remove.</param>
+    /// <returns>True if the layer was found and removed; false otherwise.</returns>
+    public bool UnregisterLayer(string layerName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _viewResolver.UnregisterLayer(layerName);
     }
 
     /// <summary>
@@ -677,6 +707,14 @@ public sealed class SharcDatabase : IDisposable
         var cache = _queryCache ??= new QueryPlanCache();
         var plan = cache.GetOrCompilePlan(sharqQuery);
 
+        // Enforce entitlements BEFORE hint routing — prevents CACHED/JIT bypass.
+        // Zero cost when agent is null (no opt-in to entitlements).
+        if (agent is not null)
+        {
+            var tables = TableReferenceCollector.Collect(plan);
+            Trust.EntitlementEnforcer.EnforceAll(agent, tables);
+        }
+
         // Hint routing: CACHED → auto-Prepare, JIT → auto-Jit
         var hinted = _executionRouter.TryRoute(this, plan, sharqQuery, parameters);
         if (hinted != null)
@@ -714,7 +752,10 @@ public sealed class SharcDatabase : IDisposable
         if (_viewResolver.HasRegisteredViews)
             preMaterialized = _viewResolver.PreMaterializeFilteredViews(plan);
 
-        // Enforce entitlements when an agent is specified
+        // Post-view entitlement enforcement: after view resolution, the plan
+        // references underlying tables. Re-check to prevent view-based escalation
+        // (e.g., agent has v_join.* but not the underlying tables).
+        // Zero cost when agent is null.
         if (agent is not null)
         {
             var tables = TableReferenceCollector.Collect(plan);
@@ -755,7 +796,9 @@ public sealed class SharcDatabase : IDisposable
 
             string[]? columns = intent.HasAggregates
                 ? AggregateProjection.Compute(intent)
-                : intent.ColumnsArray;
+                : intent.HasCaseExpressions
+                    ? CaseProjection.Compute(intent)
+                    : intent.ColumnsArray;
 
             int[]? projection = null;
             if (columns is { Length: > 0 })
@@ -845,14 +888,7 @@ public sealed class SharcDatabase : IDisposable
     {
         var hc = new HashCode();
         hc.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(intent));
-        if (parameters != null)
-        {
-            foreach (var kvp in parameters)
-            {
-                hc.Add(kvp.Key);
-                hc.Add(kvp.Value);
-            }
-        }
+        hc.Add(ParameterKeyHasher.Compute(parameters));
         return hc.ToHashCode();
     }
 
@@ -872,10 +908,10 @@ public sealed class SharcDatabase : IDisposable
             projection = new int[columns.Length];
             for (int i = 0; i < columns.Length; i++)
             {
-                var col = table.Columns.FirstOrDefault(c =>
-                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
-                projection[i] = col?.Ordinal
-                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+                int ordinal = table.GetColumnOrdinal(columns[i]);
+                projection[i] = ordinal >= 0
+                    ? ordinal
+                    : throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
             }
         }
 
@@ -903,7 +939,7 @@ public sealed class SharcDatabase : IDisposable
         if (filters is not { Length: > 0 })
             return null;
 
-        var resolved = new ResolvedFilter[filters.Length];
+        var resolved = new List<ResolvedFilter>(filters.Length);
         for (int i = 0; i < filters.Length; i++)
         {
             ColumnInfo? col = null;
@@ -918,16 +954,33 @@ public sealed class SharcDatabase : IDisposable
                 }
             }
 
-            resolved[i] = new ResolvedFilter
+            if (col == null)
             {
-                ColumnOrdinal = col?.Ordinal
-                    ?? throw new ArgumentException(
-                        $"Filter column '{filters[i].ColumnName}' not found in table '{table.Name}'."),
+                throw new ArgumentException(
+                    $"Filter column '{filters[i].ColumnName}' not found in table '{table.Name}'.");
+            }
+
+            // GUID expansion for merged columns
+            if (filters[i].Value is Guid guid && col.MergedPhysicalOrdinals?.Length == 2)
+            {
+                var (hi, lo) = Sharc.Core.Primitives.GuidCodec.ToInt64Pair(guid);
+                
+                if (filters[i].Operator == SharcOperator.Equal)
+                {
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[0], Operator = SharcOperator.Equal, Value = hi });
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[1], Operator = SharcOperator.Equal, Value = lo });
+                    continue;
+                }
+            }
+
+            resolved.Add(new ResolvedFilter
+            {
+                ColumnOrdinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal,
                 Operator = filters[i].Operator,
                 Value = filters[i].Value
-            };
+            });
         }
-        return resolved;
+        return resolved.ToArray();
     }
 
     /// <summary>

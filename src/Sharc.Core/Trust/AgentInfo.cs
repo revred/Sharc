@@ -17,6 +17,7 @@ namespace Sharc.Core.Trust;
 /// <param name="ParentAgent">Agent ID of the parent CA (if any).</param>
 /// <param name="CoSignRequired">True if actions require co-signatures.</param>
 /// <param name="Signature">Self-signature of (AgentId + PublicKey + ValidityStart + ValidityEnd).</param>
+/// <param name="Algorithm">Cryptographic algorithm used for signing (default: HMAC-SHA256).</param>
 public record AgentInfo(
     string AgentId,
     AgentClass Class,
@@ -28,4 +29,5 @@ public record AgentInfo(
     long ValidityEnd,
     string ParentAgent,
     bool CoSignRequired,
-    byte[] Signature);
+    byte[] Signature,
+    SignatureAlgorithm Algorithm = SignatureAlgorithm.HmacSha256);

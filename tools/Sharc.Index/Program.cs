@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc;
 using Sharc.Index;
 
 // Parse CLI arguments
@@ -53,7 +54,8 @@ var commits = await walker.GetCommitsAsync(since);
 Console.WriteLine($"{commits.Count} commits found.");
 
 // Step 3: Write commits and file changes
-using var writer = new CommitWriter(outputPath);
+using var db = SharcDatabase.Open(outputPath);
+using var writer = new CommitWriter(db);
 
 Console.Write("Writing commits... ");
 writer.WriteCommits(commits);
