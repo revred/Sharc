@@ -71,6 +71,9 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     private SharcDataReader? _cachedTableReader;
     private int[]? _cachedReaderProjection; // projection at time of reader creation (reference equality)
 
+    // Optional row-level access evaluator for agent entitlements
+    private Trust.IRowAccessEvaluator? _rowAccessEvaluator;
+
     // Optional transaction binding for mutations
     private SharcWriteTransaction? _transaction;
 
@@ -137,6 +140,29 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         _cachedViewFilter = null;
         _cachedProjection = null;
         _cachedProjectionColumns = null;
+        return this;
+    }
+
+    // ── Row-Level Access ────────────────────────────────────────────
+
+    /// <summary>
+    /// Sets the row-level access evaluator for agent entitlement filtering.
+    /// When set, rows that fail the evaluator are silently skipped during scans.
+    /// </summary>
+    internal JitQuery WithRowAccess(Trust.IRowAccessEvaluator? evaluator)
+    {
+        if (!ReferenceEquals(_rowAccessEvaluator, evaluator))
+        {
+            _rowAccessEvaluator = evaluator;
+            // Invalidate cached reader — evaluator changed
+            if (_cachedTableReader != null)
+            {
+                _cachedTableReader.DisposeForReal();
+                _cachedTableCursor?.Dispose();
+                _cachedTableReader = null;
+                _cachedTableCursor = null;
+            }
+        }
         return this;
     }
 
@@ -250,7 +276,8 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
             Projection = projection,
             BTreeReader = db.BTreeReaderInternal,
             TableIndexes = Table.Indexes,
-            FilterNode = filterNode
+            FilterNode = filterNode,
+            RowAccessEvaluator = _rowAccessEvaluator
         });
 
         // Apply LIMIT/OFFSET if set — can't cache (post-processor wraps the reader)
@@ -627,6 +654,7 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
 
         _filters?.Clear();
         _filters = null;
+        _rowAccessEvaluator = null;
         _transaction = null;
         _rootCache = null;
         _sourceLayer = null;
