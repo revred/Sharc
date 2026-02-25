@@ -6,6 +6,7 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core.Primitives;
+using System.Buffers;
 
 namespace Sharc;
 
@@ -35,8 +36,10 @@ internal sealed class FilterNode : IFilterNode
     public FilterNode(BakedDelegate compiledDelegate, HashSet<int> referencedOrdinals)
     {
         _compiledDelegate = compiledDelegate;
-        _referencedOrdinals = referencedOrdinals.OrderBy(x => x).ToArray();
-        _maxOrdinal = _referencedOrdinals.Length > 0 ? _referencedOrdinals.Max() : -1;
+        _referencedOrdinals = new int[referencedOrdinals.Count];
+        referencedOrdinals.CopyTo(_referencedOrdinals);
+        Array.Sort(_referencedOrdinals);
+        _maxOrdinal = _referencedOrdinals.Length == 0 ? -1 : _referencedOrdinals[^1];
     }
 
     public bool Evaluate(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes, 
@@ -44,26 +47,40 @@ internal sealed class FilterNode : IFilterNode
     {
         if (_maxOrdinal < 0) return _compiledDelegate(payload, serialTypes, [], rowId);
 
-        // Tier 2: Offset Hoisting
-        // Use stackalloc for the offsets buffer to keep it zero-alloc
-        Span<int> offsets = stackalloc int[serialTypes.Length];
-        // offsets.Clear(); // Redundant: We only read offsets at indices that we explicitly write to in the loop below.
-        
+        int maxTrackedOrdinal = _maxOrdinal;
+        if (maxTrackedOrdinal >= serialTypes.Length)
+            maxTrackedOrdinal = serialTypes.Length - 1;
+        if (maxTrackedOrdinal < 0)
+            return _compiledDelegate(payload, serialTypes, [], rowId);
+
+        int neededOffsets = maxTrackedOrdinal + 1;
+        int[]? pooled = null;
+        Span<int> offsets = neededOffsets <= 256
+            ? stackalloc int[neededOffsets]
+            : (pooled = ArrayPool<int>.Shared.Rent(neededOffsets)).AsSpan(0, neededOffsets);
+
         int currentOffset = bodyOffset;
         int refIdx = 0;
 
-        for (int i = 0; i <= _maxOrdinal && i < serialTypes.Length; i++)
+        try
         {
-            if (refIdx < _referencedOrdinals.Length && i == _referencedOrdinals[refIdx])
+            for (int i = 0; i <= maxTrackedOrdinal; i++)
             {
-                offsets[i] = currentOffset;
-                refIdx++;
-            }
-            
-            // Still need to track currentOffset to find subsequent referenced columns
-            currentOffset += SerialTypeCodec.GetContentSize(serialTypes[i]);
-        }
+                if (refIdx < _referencedOrdinals.Length && i == _referencedOrdinals[refIdx])
+                {
+                    offsets[i] = currentOffset;
+                    refIdx++;
+                }
 
-        return _compiledDelegate(payload, serialTypes, offsets, rowId);
+                currentOffset += SerialTypeCodec.GetContentSize(serialTypes[i]);
+            }
+
+            return _compiledDelegate(payload, serialTypes, offsets, rowId);
+        }
+        finally
+        {
+            if (pooled != null)
+                ArrayPool<int>.Shared.Return(pooled, clearArray: false);
+        }
     }
 }

@@ -126,7 +126,9 @@ public sealed class DataGenerator
                 Score            REAL NOT NULL,
                 Confidence       REAL NOT NULL,
                 LastUpdated      INTEGER NOT NULL,
-                LastRatingCount  INTEGER NOT NULL
+                RatingCount      INTEGER NOT NULL,
+                Alpha            REAL NOT NULL DEFAULT 1.0,
+                Beta             REAL NOT NULL DEFAULT 1.0
             );
 
             CREATE TABLE _sharc_audit (

@@ -42,9 +42,9 @@
     <RepositoryType>git</RepositoryType>
 
     <!-- Assembly metadata -->
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
-    <Version>1.1.0.0-beta</Version>
+    <AssemblyVersion>1.2.1.0</AssemblyVersion>
+    <FileVersion>1.2.1.0</FileVersion>
+    <Version>1.2.1</Version>
 
     <!-- Optimization for WASM/Size -->
     <IsTrimmable>true</IsTrimmable>
@@ -70,8 +70,11 @@
     <IsTestProject>true</IsTestProject>
     <!-- Don't treat warnings as errors in test projects — xUnit analyzers can be noisy -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <!-- CA1707 — Method_Scenario_Expected naming is the project's test convention -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- CA1707 — Method_Scenario_Expected naming is the project's test convention
+         CA1861 — Tests commonly use inline array literals for readability
+         CA1305 — Locale-sensitive formatting is acceptable in test helpers
+         CA1310 — Locale-sensitive StartsWith/EndsWith is acceptable in tests -->
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA1305;CA1310</NoWarn>
   </PropertyGroup>
 
   <!-- ─── Benchmark projects (bench/**) ─── -->

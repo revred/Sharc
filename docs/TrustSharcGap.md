@@ -38,20 +38,9 @@ The trust layer today consists of 4 source files and 2 test files:
 ### GAP-1: Ledger Limited to ~50 Entries (No Page Splits)
 
 **Severity**: 🟡 P1 — Blocks any real workload  
-**Status**: 🔧 READY  
-**File**: `LedgerManager.cs:125-128`
+**Status**: ✅ FIXED  
 
-**Problem**: When the B-tree leaf page fills up, `Append` throws `InvalidOperationException("Ledger leaf page is full. Splits are not yet implemented.")`. A 4096-byte page holds roughly 50 ledger entries before overflow.
-
-**Impact on vision**: A 30-agent enterprise generates hundreds of decisions per day. The ledger overflows within hours.
-
-**Fix path**: Implement B-tree leaf page splitting in `AppendToTableBTree`. The core engine already supports B-tree cursors (`BTreeCursor.cs`) but the trust layer bypasses them with raw page manipulation. Two options:
-1. **Use the existing B-tree insert path** — route ledger writes through the standard insert mechanism
-2. **Implement leaf splits in LedgerManager** — split the full page, promote the median key to a new interior page
-
-**Recommendation**: Option 1. The B-tree cursor already handles splits. Refactor `LedgerManager.Append` to use it instead of raw page writes.
-
-**Estimated effort**: 4-8 hours
+**Resolution**: Ledger writes now route through `BTreeMutator` (Option 1 from original recommendation), which handles page splits natively. The `InvalidOperationException("Ledger leaf page is full")` error has been removed. The ledger can now hold unlimited entries, bounded only by database size. Fixed in branch `Gaps.F24` (TD-1).
 
 ---
 

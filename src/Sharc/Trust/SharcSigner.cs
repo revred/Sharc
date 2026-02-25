@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Security.Cryptography;
+using Sharc.Core.Trust;
 using Sharc.Crypto;
 
 namespace Sharc.Trust;
@@ -9,7 +10,7 @@ namespace Sharc.Trust;
 /// <summary>
 /// HMAC-SHA256 implementation of <see cref="ISharcSigner"/> for Wasm compatibility.
 /// </summary>
-public sealed class SharcSigner : ISharcSigner, IDisposable
+public sealed class SharcSigner : ISharcSigner
 {
     private readonly HMACSHA256 _hmac;
     private readonly byte[] _key;
@@ -28,6 +29,9 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
 
     /// <inheritdoc />
     public string AgentId { get; }
+
+    /// <inheritdoc />
+    public SignatureAlgorithm Algorithm => SignatureAlgorithm.HmacSha256;
 
     /// <inheritdoc />
     public byte[] Sign(ReadOnlySpan<byte> data)
@@ -51,7 +55,7 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     {
         Span<byte> hash = stackalloc byte[SignatureSize];
         _hmac.TryComputeHash(data, hash, out int written);
-        return hash.Slice(0, written).SequenceEqual(signature);
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(hash.Slice(0, written), signature);
     }
 
     /// <inheritdoc />
@@ -68,12 +72,29 @@ public sealed class SharcSigner : ISharcSigner, IDisposable
     {
         Span<byte> hash = stackalloc byte[32]; // HMACSHA256 output is always 32 bytes
         HMACSHA256.HashData(publicKey, data, hash);
-        return hash.SequenceEqual(signature);
+        return CryptographicOperations.FixedTimeEquals(hash, signature);
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
         _hmac.Dispose();
+    }
+    /// <inheritdoc />
+    public Task<byte[]> SignAsync(byte[] data)
+    {
+        return Task.FromResult(Sign(data));
+    }
+
+    /// <inheritdoc />
+    public Task<bool> VerifyAsync(byte[] data, byte[] signature)
+    {
+        return Task.FromResult(Verify(data, signature));
+    }
+
+    /// <inheritdoc />
+    public Task<byte[]> GetPublicKeyAsync()
+    {
+        return Task.FromResult(GetPublicKey());
     }
 }

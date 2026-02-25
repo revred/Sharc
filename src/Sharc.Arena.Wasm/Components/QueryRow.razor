@@ -1,6 +1,6 @@
 @* Expandable query result row *@
 
-<div class="query-row @(Result.Winner == "sharc" ? "sharc-wins" : "sqlite-wins")" @onclick="@(() => _expanded = !_expanded)">
+<div class="query-row @GetWinnerClass(Result.Winner)" @onclick="@(() => _expanded = !_expanded)">
     <div class="query-row-main">
         <span class="query-row-num">#@(Index + 1)</span>
         <span class="query-row-query">@Result.Query</span>
@@ -11,9 +11,13 @@
             {
                 <span style="color: var(--sharc)">Sharc @Result.Speedup.ToString("F1")x</span>
             }
-            else
+            else if (Result.Winner == "sqlite")
             {
                 <span style="color: var(--sqlite)">SQLite @Result.Speedup.ToString("F1")x</span>
+            }
+            else
+            {
+                <span class="query-row-tie">Tie (&plusmn;10%)</span>
             }
         </span>
     </div>
@@ -39,5 +43,15 @@
         if (us >= 1000) return $"{us / 1000.0:F1} ms";
         if (us < 1) return $"{us * 1000:F0} ns";
         return $"{us:F0} \u03BCs";
+    }
+
+    private static string GetWinnerClass(string winner)
+    {
+        return winner switch
+        {
+            "sharc" => "sharc-wins",
+            "sqlite" => "sqlite-wins",
+            _ => "tie"
+        };
     }
 }

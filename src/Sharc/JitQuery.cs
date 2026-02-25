@@ -1,9 +1,5 @@
-/*-------------------------------------------------------------------------------------------------!
-  "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
-
-  A collaborative work shaped by Artificial Intelligence and curated with intent by Ram Revanur.
-  Licensed under the MIT License — free for personal and commercial use.                           |
---------------------------------------------------------------------------------------------------*/
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
 
 using Sharc.Core;
 using Sharc.Core.Schema;
@@ -31,33 +27,55 @@ namespace Sharc;
 /// <see cref="NotSupportedException"/>.</para>
 /// <para>This type is <b>not thread-safe</b>. Each instance should be used from a single thread.</para>
 /// </remarks>
-public sealed class JitQuery : IPreparedReader, IPreparedWriter
+public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
 {
+    // ── Sentinel constants for limit/offset (avoids 16-byte Nullable<long>) ──
+    private const long NoLimit = -1;
+    private const long NoOffset = -1;
+
+    // ── Shared state (both table-backed and view-backed) ──
     private SharcDatabase? _db;
-
-    // Pre-resolved at creation (never re-computed) — null when view-backed
-    internal readonly TableInfo? Table;
-    internal readonly int RowidAliasOrdinal;
-
-    // Layer source — non-null when view/layer-backed (DIP: depends on ILayer, not SharcView)
-    private ILayer? _sourceLayer;
-
-    // Mutable filter accumulation
     private List<IFilterStar>? _filters;
-    private long? _limit;
-    private long? _offset;
+    private long _limit = NoLimit;
+    private long _offset = NoOffset;
+    private int _filterVersion;
+    private int _compiledFilterVersion = -1;
+    private int[]? _cachedProjection;
+    private string[]? _cachedProjectionColumns;
 
-    // ── Compiled-state cache (version-based staleness, matches BTreeCursor.IsStale pattern) ──
-    // Avoids recompiling filters and re-resolving projections on repeated Query() calls.
-    // _filterVersion is bumped on Where() and ClearFilters(); the compiled cache is stale
-    // when _compiledFilterVersion != _filterVersion. Monotonic — no bool to get out of sync.
-    private int _filterVersion;                            // bumped on every filter mutation
-    private int _compiledFilterVersion = -1;               // version at which cache was compiled
-    private IFilterNode? _cachedFilterNode;                // table-backed compiled filter
-    private Func<IRowAccessor, bool>? _cachedViewFilter;   // view-backed compiled filter
-    private string[]? _cachedViewColumnNames;              // view column names (stable per view)
-    private int[]? _cachedProjection;                      // last resolved projection ordinals
-    private string[]? _cachedProjectionColumns;            // column names that produced _cachedProjection
+    // ── Mode-specific state (exactly one is non-null) ──
+    internal readonly TableState? _table;
+    private ViewState? _view;
+
+    /// <summary>Table-backed state — holds cursor/reader caches, filter nodes, mutation state.</summary>
+    internal sealed class TableState
+    {
+        internal readonly TableInfo Info;
+        internal readonly int RowidAliasOrdinal;
+        internal IFilterNode? CachedFilterNode;
+        internal IBTreeCursor? CachedCursor;
+        internal SharcDataReader? CachedReader;
+        internal int[]? ReaderProjection; // projection at time of reader creation (reference equality)
+        internal Trust.IRowAccessEvaluator? RowAccessEvaluator;
+        internal SharcWriteTransaction? Transaction;
+        internal Dictionary<string, uint>? RootCache;
+
+        internal TableState(TableInfo table, int rowidAliasOrdinal)
+        {
+            Info = table;
+            RowidAliasOrdinal = rowidAliasOrdinal;
+        }
+    }
+
+    /// <summary>View-backed state — holds layer source and cached view filters.</summary>
+    private sealed class ViewState
+    {
+        internal readonly ILayer Source;
+        internal Func<IRowAccessor, bool>? CachedFilter;
+        internal string[]? CachedColumnNames;
+
+        internal ViewState(ILayer source) => Source = source;
+    }
 
     /// <summary>
     /// True when the compiled filter cache is out of date with accumulated filters.
@@ -65,32 +83,30 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     /// </summary>
     private bool IsFilterStale => _compiledFilterVersion != _filterVersion;
 
-    // Cached cursor + reader for table-backed queries: created on first Query(),
-    // reused via Reset() on subsequent calls when projection hasn't changed.
-    private IBTreeCursor? _cachedTableCursor;
-    private SharcDataReader? _cachedTableReader;
-    private int[]? _cachedReaderProjection; // projection at time of reader creation (reference equality)
+    /// <summary>The pre-resolved table info, or null when view-backed.</summary>
+    internal TableInfo? Table => _table?.Info;
 
-    // Optional transaction binding for mutations
-    private SharcWriteTransaction? _transaction;
+    /// <summary>The rowid alias ordinal for the table, or -1 when view-backed.</summary>
+    internal int RowidAliasOrdinal => _table?.RowidAliasOrdinal ?? -1;
 
-    // Root page cache for auto-commit mutations
-    private Dictionary<string, uint>? _rootCache;
+    /// <summary>True when accumulated filters, limit, or offset are active.</summary>
+    internal bool HasActiveFilters => _filters is { Count: > 0 } || _limit >= 0 || _offset >= 0;
+
+    /// <summary>True when a row-level access evaluator is set.</summary>
+    internal bool HasRowAccessEvaluator => _table is { RowAccessEvaluator: not null };
 
     /// <summary>Creates a table-backed JitQuery.</summary>
     internal JitQuery(SharcDatabase db, TableInfo table, int rowidAliasOrdinal)
     {
         _db = db;
-        Table = table;
-        RowidAliasOrdinal = rowidAliasOrdinal;
+        _table = new TableState(table, rowidAliasOrdinal);
     }
 
     /// <summary>Creates a layer-backed (view-backed) JitQuery.</summary>
     internal JitQuery(SharcDatabase db, ILayer source)
     {
         _db = db;
-        _sourceLayer = source;
-        RowidAliasOrdinal = -1;
+        _view = new ViewState(source);
     }
 
     // ── Filter Composition (fluent) ──────────────────────────────────
@@ -130,13 +146,39 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     public JitQuery ClearFilters()
     {
         _filters?.Clear();
-        _limit = null;
-        _offset = null;
+        _limit = NoLimit;
+        _offset = NoOffset;
         _filterVersion++;
-        _cachedFilterNode = null;
-        _cachedViewFilter = null;
+        if (_table != null)
+            _table.CachedFilterNode = null;
+        if (_view != null)
+            _view.CachedFilter = null;
         _cachedProjection = null;
         _cachedProjectionColumns = null;
+        return this;
+    }
+
+    // ── Row-Level Access ────────────────────────────────────────────
+
+    /// <summary>
+    /// Sets the row-level access evaluator for agent entitlement filtering.
+    /// When set, rows that fail the evaluator are silently skipped during scans.
+    /// </summary>
+    internal JitQuery WithRowAccess(Trust.IRowAccessEvaluator? evaluator)
+    {
+        if (_table == null) return this;
+        if (!ReferenceEquals(_table.RowAccessEvaluator, evaluator))
+        {
+            _table.RowAccessEvaluator = evaluator;
+            // Invalidate cached reader — evaluator changed
+            if (_table.CachedReader != null)
+            {
+                _table.CachedReader.DisposeForReal();
+                _table.CachedCursor?.Dispose();
+                _table.CachedReader = null;
+                _table.CachedCursor = null;
+            }
+        }
         return this;
     }
 
@@ -153,7 +195,7 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
 
-        if (_sourceLayer != null)
+        if (_view != null)
             return QueryFromView(columns);
 
         return QueryFromTable(columns);
@@ -177,7 +219,8 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
 
-        if (_cachedTableReader == null && _cachedReaderProjection == null && _cachedProjection == null)
+        var ts = _table;
+        if (ts == null || (ts.CachedReader == null && _cachedProjection == null))
             throw new InvalidOperationException(
                 "QuerySameProjection() requires a prior Query() call to establish the projection.");
 
@@ -187,28 +230,28 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
 
     /// <summary>
     /// Fast path for QuerySameProjection — skips projection resolution entirely.
-    /// Uses the cached <see cref="_cachedReaderProjection"/> (or <see cref="_cachedProjection"/>).
     /// </summary>
     private SharcDataReader QueryFromTableDirect()
     {
         var db = _db!;
+        var ts = _table!;
         IFilterNode? filterNode = CompileFilters();
 
-        // Fastest path: reuse cached cursor + reader (same as QueryFromTable fast path)
-        if (_cachedTableReader != null && !_limit.HasValue && !_offset.HasValue)
+        // Fastest path: reuse cached cursor + reader
+        if (ts.CachedReader != null && _limit < 0 && _offset < 0)
         {
-            _cachedTableReader.ResetForReuse(filterNode);
-            return _cachedTableReader;
+            ts.CachedReader.ResetForReuse(filterNode);
+            return ts.CachedReader;
         }
 
         // Fall through to full creation with cached projection
-        int[]? projection = _cachedReaderProjection ?? _cachedProjection;
-        return QueryFromTableCreate(db, filterNode, projection);
+        return QueryFromTableCreate(db, filterNode, _cachedProjection);
     }
 
     private SharcDataReader QueryFromTable(string[]? columns)
     {
         var db = _db!;
+        var ts = _table!;
 
         // Compile accumulated filters
         IFilterNode? filterNode = CompileFilters();
@@ -219,12 +262,12 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         // Fast path: reuse cached cursor + reader if projection is unchanged
         // and no LIMIT/OFFSET (which wraps the reader in post-processing).
         // Reference equality on projection works because ResolveProjection caches its result.
-        if (_cachedTableReader != null
-            && !_limit.HasValue && !_offset.HasValue
-            && ReferenceEquals(_cachedReaderProjection, projection))
+        if (ts.CachedReader != null
+            && _limit < 0 && _offset < 0
+            && ReferenceEquals(ts.ReaderProjection, projection))
         {
-            _cachedTableReader.ResetForReuse(filterNode);
-            return _cachedTableReader;
+            ts.CachedReader.ResetForReuse(filterNode);
+            return ts.CachedReader;
         }
 
         return QueryFromTableCreate(db, filterNode, projection);
@@ -233,43 +276,47 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     /// <summary>Creates cursor + reader, caches for reuse. Shared by QueryFromTable and QueryFromTableDirect.</summary>
     private SharcDataReader QueryFromTableCreate(SharcDatabase db, IFilterNode? filterNode, int[]? projection)
     {
+        var ts = _table!;
+
         // Dispose previous cached reader if projection changed
-        if (_cachedTableReader != null)
+        if (ts.CachedReader != null)
         {
-            _cachedTableReader.DisposeForReal();
-            _cachedTableCursor?.Dispose();
-            _cachedTableReader = null;
-            _cachedTableCursor = null;
+            ts.CachedReader.DisposeForReal();
+            ts.CachedCursor?.Dispose();
+            ts.CachedReader = null;
+            ts.CachedCursor = null;
         }
 
-        var cursor = db.CreateTableCursorForPrepared(Table!);
+        var cursor = db.CreateTableCursorForPrepared(ts.Info);
 
         var reader = new SharcDataReader(cursor, db.Decoder, new SharcDataReader.CursorReaderConfig
         {
-            Columns = Table!.Columns,
+            Columns = ts.Info.Columns,
             Projection = projection,
             BTreeReader = db.BTreeReaderInternal,
-            TableIndexes = Table.Indexes,
-            FilterNode = filterNode
+            TableIndexes = ts.Info.Indexes,
+            FilterNode = filterNode,
+            RowAccessEvaluator = ts.RowAccessEvaluator
         });
 
         // Apply LIMIT/OFFSET if set — can't cache (post-processor wraps the reader)
-        if (_limit.HasValue || _offset.HasValue)
+        if (_limit >= 0 || _offset >= 0)
         {
             var intent = new QueryIntent
             {
-                TableName = Table.Name,
-                Limit = _limit,
-                Offset = _offset
+                TableName = ts.Info.Name,
+                Limit = _limit >= 0 ? _limit : null,
+                Offset = _offset >= 0 ? _offset : null
             };
             return QueryPost.Apply(reader, intent);
         }
 
         // Cache for reuse on subsequent calls
         reader.MarkReusable();
-        _cachedTableCursor = cursor;
-        _cachedTableReader = reader;
-        _cachedReaderProjection = projection;
+        ts.CachedCursor = cursor;
+        ts.CachedReader = reader;
+        ts.ReaderProjection = projection;
+        _cachedProjection = projection;
 
         return reader;
     }
@@ -277,21 +324,22 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     private SharcDataReader QueryFromView(string[]? columns)
     {
         var db = _db!;
-        var cursor = _sourceLayer!.Open(db);
+        var vs = _view!;
+        var cursor = vs.Source.Open(db);
 
         // Get column metadata — cache on first call (view columns are stable)
         int fieldCount = cursor.FieldCount;
         string[] allColumnNames;
-        if (_cachedViewColumnNames != null)
+        if (vs.CachedColumnNames != null)
         {
-            allColumnNames = _cachedViewColumnNames;
+            allColumnNames = vs.CachedColumnNames;
         }
         else
         {
             allColumnNames = new string[fieldCount];
             for (int i = 0; i < fieldCount; i++)
                 allColumnNames[i] = cursor.GetColumnName(i);
-            _cachedViewColumnNames = allColumnNames;
+            vs.CachedColumnNames = allColumnNames;
         }
 
         // Resolve projection — cache if same columns as last call
@@ -316,7 +364,7 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
                     }
                     projection[i] = found >= 0
                         ? found
-                        : throw new ArgumentException($"Column '{columns[i]}' not found in view '{_sourceLayer.Name}'.");
+                        : throw new ArgumentException($"Column '{columns[i]}' not found in view '{vs.Source.Name}'.");
                 }
                 _cachedProjection = projection;
                 _cachedProjectionColumns = columns;
@@ -332,9 +380,9 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         Func<IRowAccessor, bool>? jitFilter = null;
         if (_filters is { Count: > 0 })
         {
-            if (!IsFilterStale && _cachedViewFilter != null)
+            if (!IsFilterStale && vs.CachedFilter != null)
             {
-                jitFilter = _cachedViewFilter;
+                jitFilter = vs.CachedFilter;
             }
             else
             {
@@ -342,13 +390,13 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
                     ? _filters[0]
                     : FilterStar.And(_filters.ToArray());
                 jitFilter = ViewFilterBridge.Convert(expression, allColumnNames);
-                _cachedViewFilter = jitFilter;
+                vs.CachedFilter = jitFilter;
                 _compiledFilterVersion = _filterVersion;
             }
         }
         else if (IsFilterStale)
         {
-            _cachedViewFilter = null;
+            vs.CachedFilter = null;
             _compiledFilterVersion = _filterVersion;
         }
 
@@ -357,13 +405,13 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         var reader = new SharcDataReader(rows, outputColumnNames);
 
         // Apply LIMIT/OFFSET if set
-        if (_limit.HasValue || _offset.HasValue)
+        if (_limit >= 0 || _offset >= 0)
         {
             var intent = new QueryIntent
             {
-                TableName = _sourceLayer.Name,
-                Limit = _limit,
-                Offset = _offset
+                TableName = vs.Source.Name,
+                Limit = _limit >= 0 ? _limit : null,
+                Offset = _offset >= 0 ? _offset : null
             };
             return QueryPost.Apply(reader, intent);
         }
@@ -424,15 +472,16 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
         ThrowIfViewBacked();
+        var ts = _table!;
 
-        if (_transaction != null)
-            return _transaction.Insert(Table!.Name, values);
+        if (ts.Transaction != null)
+            return ts.Transaction.Insert(ts.Info.Name, values);
 
         // Auto-commit path
         var db = _db;
         using var tx = db.BeginTransaction();
-        _rootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-        long rowId = SharcWriter.InsertCore(tx, Table!.Name, values, Table, _rootCache);
+        ts.RootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        long rowId = SharcWriter.InsertCore(tx, ts.Info.Name, values, ts.Info, ts.RootCache);
         tx.Commit();
         return rowId;
     }
@@ -449,15 +498,16 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
         ThrowIfViewBacked();
+        var ts = _table!;
 
-        if (_transaction != null)
-            return _transaction.Delete(Table!.Name, rowId);
+        if (ts.Transaction != null)
+            return ts.Transaction.Delete(ts.Info.Name, rowId);
 
         // Auto-commit path
         var db = _db;
         using var tx = db.BeginTransaction();
-        _rootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-        bool found = SharcWriter.DeleteCore(tx, Table!.Name, rowId, _rootCache);
+        ts.RootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        bool found = SharcWriter.DeleteCore(tx, ts.Info.Name, rowId, ts.RootCache);
         tx.Commit();
         return found;
     }
@@ -475,15 +525,16 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
         ThrowIfViewBacked();
+        var ts = _table!;
 
-        if (_transaction != null)
-            return _transaction.Update(Table!.Name, rowId, values);
+        if (ts.Transaction != null)
+            return ts.Transaction.Update(ts.Info.Name, rowId, values);
 
         // Auto-commit path
         var db = _db;
         using var tx = db.BeginTransaction();
-        _rootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-        bool found = SharcWriter.UpdateCore(tx, Table!.Name, rowId, values, Table, _rootCache);
+        ts.RootCache ??= new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        bool found = SharcWriter.UpdateCore(tx, ts.Info.Name, rowId, values, ts.Info, ts.RootCache);
         tx.Commit();
         return found;
     }
@@ -496,7 +547,8 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     /// </summary>
     public JitQuery WithTransaction(SharcWriteTransaction tx)
     {
-        _transaction = tx;
+        ThrowIfViewBacked();
+        _table!.Transaction = tx;
         return this;
     }
 
@@ -505,7 +557,8 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     /// </summary>
     public JitQuery DetachTransaction()
     {
-        _transaction = null;
+        if (_table != null)
+            _table.Transaction = null;
         return this;
     }
 
@@ -523,6 +576,7 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         ObjectDisposedException.ThrowIf(_db is null, this);
         ThrowIfViewBacked();
         var db = _db;
+        var ts = _table!;
 
         // Compile current filters into a static filter node
         IFilterNode? staticFilter = CompileFilters();
@@ -530,18 +584,18 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         // Resolve projection
         int[]? projection = ResolveProjection(columns);
 
-        bool needsPostProcessing = _limit.HasValue || _offset.HasValue;
+        bool needsPostProcessing = _limit >= 0 || _offset >= 0;
 
         // Build a synthetic QueryIntent from accumulated state
         var intent = new QueryIntent
         {
-            TableName = Table!.Name,
+            TableName = ts.Info.Name,
             Columns = columns is { Length: > 0 } ? columns : null,
-            Limit = _limit,
-            Offset = _offset
+            Limit = _limit >= 0 ? _limit : null,
+            Offset = _offset >= 0 ? _offset : null
         };
 
-        return new PreparedQuery(db, Table, projection, RowidAliasOrdinal,
+        return new PreparedQuery(db, ts.Info, projection, ts.RowidAliasOrdinal,
             staticFilter, intent, needsPostProcessing);
     }
 
@@ -564,10 +618,10 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         // The filter runs against the view cursor, whose ordinals are positional
         // (0, 1, 2, ...) based on the projected columns, NOT the table ordinals.
         string[] viewColumnNames;
-        if (_sourceLayer != null)
+        if (_view != null)
         {
             // View-backed: probe cursor for column names
-            using var probe = _sourceLayer.Open(_db!);
+            using var probe = _view.Source.Open(_db!);
             viewColumnNames = new string[probe.FieldCount];
             for (int i = 0; i < viewColumnNames.Length; i++)
                 viewColumnNames[i] = probe.GetColumnName(i);
@@ -580,9 +634,10 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
         else
         {
             // Table-backed, all columns: view columns match table columns
-            viewColumnNames = new string[Table!.Columns.Count];
+            var tableInfo = _table!.Info;
+            viewColumnNames = new string[tableInfo.Columns.Count];
             for (int i = 0; i < viewColumnNames.Length; i++)
-                viewColumnNames[i] = Table.Columns[i].Name;
+                viewColumnNames[i] = tableInfo.Columns[i].Name;
         }
 
         // Build filter predicate from accumulated filters
@@ -595,9 +650,9 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
             filter = ViewFilterBridge.Convert(expression, viewColumnNames);
         }
 
-        var builder = _sourceLayer is SharcView sv
+        var builder = _view?.Source is SharcView sv
             ? ViewBuilder.From(sv)
-            : ViewBuilder.From(Table!.Name);
+            : ViewBuilder.From(_table!.Info.Name);
 
         if (columns is { Length: > 0 })
             builder.Select(columns);
@@ -614,99 +669,38 @@ public sealed class JitQuery : IPreparedReader, IPreparedWriter
     public void Dispose()
     {
         // Release cached cursor + reader resources
-        if (_cachedTableReader != null)
+        if (_table != null)
         {
-            _cachedTableReader.DisposeForReal();
-            _cachedTableReader = null;
+            if (_table.CachedReader != null)
+            {
+                _table.CachedReader.DisposeForReal();
+                _table.CachedReader = null;
+            }
+            if (_table.CachedCursor != null)
+            {
+                _table.CachedCursor.Dispose();
+                _table.CachedCursor = null;
+            }
+            _table.ReaderProjection = null;
+            _table.RowAccessEvaluator = null;
+            _table.Transaction = null;
+            _table.RootCache = null;
+            _table.CachedFilterNode = null;
         }
-        if (_cachedTableCursor != null)
+
+        if (_view != null)
         {
-            _cachedTableCursor.Dispose();
-            _cachedTableCursor = null;
+            _view.CachedFilter = null;
+            _view.CachedColumnNames = null;
+            _view = null;
         }
 
         _filters?.Clear();
         _filters = null;
-        _transaction = null;
-        _rootCache = null;
-        _sourceLayer = null;
-        _cachedFilterNode = null;
-        _cachedViewFilter = null;
-        _cachedViewColumnNames = null;
         _cachedProjection = null;
         _cachedProjectionColumns = null;
-        _cachedReaderProjection = null;
         _db = null;
     }
 
-    // ── Private Helpers ──────────────────────────────────────────────
-
-    private void ThrowIfViewBacked()
-    {
-        if (_sourceLayer != null)
-            throw new NotSupportedException(
-                "JitQuery backed by a view does not support mutations. Use a table-backed JitQuery.");
-    }
-
-    private IFilterNode? CompileFilters()
-    {
-        if (_filters is null or { Count: 0 })
-        {
-            _cachedFilterNode = null;
-            _compiledFilterVersion = _filterVersion;
-            return null;
-        }
-
-        // Cache hit: filters unchanged since last compilation
-        if (!IsFilterStale && _cachedFilterNode != null)
-            return _cachedFilterNode;
-
-        IFilterStar expression = _filters.Count == 1
-            ? _filters[0]
-            : FilterStar.And(_filters.ToArray());
-
-        _cachedFilterNode = FilterTreeCompiler.CompileBaked(expression, Table!.Columns, RowidAliasOrdinal);
-        _compiledFilterVersion = _filterVersion;
-        return _cachedFilterNode;
-    }
-
-    private int[]? ResolveProjection(string[]? columns)
-    {
-        if (columns is not { Length: > 0 })
-            return null;
-
-        // Cache hit: same columns as last call
-        if (_cachedProjection != null && ProjectionColumnsMatch(columns, _cachedProjectionColumns))
-            return _cachedProjection;
-
-        var projection = new int[columns.Length];
-        for (int i = 0; i < columns.Length; i++)
-            projection[i] = ResolveColumnOrdinal(columns[i]);
-
-        _cachedProjection = projection;
-        _cachedProjectionColumns = columns;
-        return projection;
-    }
-
-    private static bool ProjectionColumnsMatch(string[]? a, string[]? b)
-    {
-        if (a is null || b is null || a.Length != b.Length)
-            return false;
-        for (int i = 0; i < a.Length; i++)
-        {
-            if (!a[i].Equals(b[i], StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-        return true;
-    }
-
-    private int ResolveColumnOrdinal(string columnName)
-    {
-        for (int i = 0; i < Table!.Columns.Count; i++)
-        {
-            if (Table.Columns[i].Name.Equals(columnName, StringComparison.OrdinalIgnoreCase))
-                return Table.Columns[i].Ordinal;
-        }
-        throw new ArgumentException($"Column '{columnName}' not found in table '{Table.Name}'.");
-    }
 }
+

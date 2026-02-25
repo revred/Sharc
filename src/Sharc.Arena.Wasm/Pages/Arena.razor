@@ -86,7 +86,13 @@ else
 <div class="arena-pages">
     @* ── Page 1: Hook ── *@
     <section id="page-hook" class="arena-page">
-        <HookPage OnNavigate="@NavigateToPage" />
+        <HookPage
+            OnNavigate="@NavigateToPage"
+            SharcWinsVsSqlite="@_sharcWinsVsSqlite"
+            ComparableSlidesVsSqlite="@_comparableSlidesVsSqlite"
+            MedianSpeedupVsSqlite="@_medianSpeedupVsSqlite"
+            BestSpeedupVsSqlite="@_bestSpeedupVsSqlite"
+            ColdStartSpeedup="@_coldStartSpeedupVsSqlite" />
     </section>
 
     @* ── Page 2: Context Problem ── *@
@@ -183,7 +189,12 @@ else
 
     @* ── Page 8: CTA ── *@
     <section id="page-cta" class="arena-page">
-        <CtaPage />
+        <CtaPage
+            SharcWinsVsSqlite="@_sharcWinsVsSqlite"
+            ComparableSlidesVsSqlite="@_comparableSlidesVsSqlite"
+            MedianSpeedupVsSqlite="@_medianSpeedupVsSqlite"
+            BestSpeedupVsSqlite="@_bestSpeedupVsSqlite"
+            ColdStartSpeedup="@_coldStartSpeedupVsSqlite" />
     </section>
 </div>
 }
@@ -212,6 +223,11 @@ else
     private Dictionary<string, IReadOnlyDictionary<string, EngineBaseResult>> _results = new();
     private Dictionary<string, string> _tileDensities = new();
     private double _elapsedMs;
+    private int _sharcWinsVsSqlite;
+    private int _comparableSlidesVsSqlite;
+    private double _medianSpeedupVsSqlite = 1.0;
+    private double _bestSpeedupVsSqlite = 1.0;
+    private double _coldStartSpeedupVsSqlite = 1.0;
     private CancellationTokenSource? _cts;
     private bool _isMobile;
     private bool _showSidebar;
@@ -224,6 +240,7 @@ else
         _categories = await DataLoader.LoadCategoriesAsync();
         _presets = await DataLoader.LoadPresetsAsync();
         _slides = await DataLoader.LoadAllSlidesAsync();
+        BuildMarketingSnapshot();
 
         // Phase 1-4: Timed cold start — generate DB, init each engine, show results
         _loadPhase = 1;
@@ -242,6 +259,8 @@ else
 
             _sqliteInitMs = coldStart.SqliteMs;
             _sqliteInitAlloc = coldStart.SqliteAlloc;
+            if (_sharcInitMs > 0.0)
+                _coldStartSpeedupVsSqlite = _sqliteInitMs / _sharcInitMs;
             _loadPhase = 4;
             StateHasChanged();
             await Task.Delay(600); // let user see the result
@@ -252,6 +271,7 @@ else
             _sqliteError = $"{ex.GetType().Name}: {ex.Message}";
             if (ex.InnerException is not null)
                 _sqliteError += $" → {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+            _coldStartSpeedupVsSqlite = 1.0;
             _loadPhase = 4;
             StateHasChanged();
             await Task.Delay(600);
@@ -271,6 +291,46 @@ else
         if (bytes < 1024) return $"{bytes} B";
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    private void BuildMarketingSnapshot()
+    {
+        var speedups = new List<double>(_slides.Count);
+        int wins = 0;
+        int comparable = 0;
+
+        foreach (var slide in _slides)
+        {
+            if (!slide.BaseResults.TryGetValue("sharc", out var sharcResult)) continue;
+            if (!slide.BaseResults.TryGetValue("sqlite", out var sqliteResult)) continue;
+            if (sharcResult.NotSupported || sqliteResult.NotSupported) continue;
+            if (!sharcResult.Value.HasValue || !sqliteResult.Value.HasValue) continue;
+
+            var sharcValue = sharcResult.Value.Value;
+            var sqliteValue = sqliteResult.Value.Value;
+            if (sharcValue <= 0 || sqliteValue <= 0) continue;
+
+            comparable++;
+            if (sharcValue < sqliteValue) wins++;
+            speedups.Add(sqliteValue / sharcValue);
+        }
+
+        _sharcWinsVsSqlite = wins;
+        _comparableSlidesVsSqlite = comparable;
+
+        if (speedups.Count == 0)
+        {
+            _medianSpeedupVsSqlite = 1.0;
+            _bestSpeedupVsSqlite = 1.0;
+            return;
+        }
+
+        speedups.Sort();
+        _bestSpeedupVsSqlite = speedups[^1];
+        var middle = speedups.Count / 2;
+        _medianSpeedupVsSqlite = speedups.Count % 2 == 0
+            ? (speedups[middle - 1] + speedups[middle]) / 2.0
+            : speedups[middle];
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <!-- Internal library — not published to NuGet -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile></PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>

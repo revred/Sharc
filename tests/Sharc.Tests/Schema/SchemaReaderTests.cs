@@ -380,5 +380,6 @@ public class SchemaReaderTests
         public double DecodeDoubleAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset) => throw new NotSupportedException();
         public string DecodeStringAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset) => throw new NotSupportedException();
         public void ComputeColumnOffsets(ReadOnlySpan<long> serialTypes, int columnCount, int bodyOffset, Span<int> offsets) => throw new NotSupportedException();
+        public bool TryDecodeIndexRecord(ReadOnlySpan<byte> payload, ColumnValue[] keys, int keyCount, out long trailingRowId) => throw new NotSupportedException();
     }
 }

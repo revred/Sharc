@@ -381,11 +381,19 @@ internal static class CompoundQueryExecutor
         {
             var (rows, columns) = ExecuteStreamingSetOp(db, plan, parameters);
 
-            if (plan.FinalOrderBy is { Count: > 0 })
-                QueryPostProcessor.ApplyOrderBy(rows, plan.FinalOrderBy, columns);
-
-            if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
-                rows = QueryPostProcessor.ApplyLimitOffset(rows, plan.FinalLimit, plan.FinalOffset);
+            if (plan.FinalOrderBy is { Count: > 0 } && plan.FinalLimit.HasValue)
+            {
+                rows = QueryPostProcessor.ApplyOrderByTopN(
+                    rows, plan.FinalOrderBy, columns,
+                    plan.FinalLimit.Value, plan.FinalOffset ?? 0);
+            }
+            else
+            {
+                if (plan.FinalOrderBy is { Count: > 0 })
+                    QueryPostProcessor.ApplyOrderBy(rows, plan.FinalOrderBy, columns);
+                if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
+                    rows = QueryPostProcessor.ApplyLimitOffset(rows, plan.FinalLimit, plan.FinalOffset);
+            }
 
             return new MaterializedResultSet(rows, columns);
         }
@@ -412,11 +420,19 @@ internal static class CompoundQueryExecutor
 
         var combined = SetOperationProcessor.Apply(plan.Operator, leftRows, rightRows, leftCount);
 
-        if (plan.FinalOrderBy is { Count: > 0 })
-            QueryPostProcessor.ApplyOrderBy(combined, plan.FinalOrderBy, leftColumns);
-
-        if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
-            combined = QueryPostProcessor.ApplyLimitOffset(combined, plan.FinalLimit, plan.FinalOffset);
+        if (plan.FinalOrderBy is { Count: > 0 } && plan.FinalLimit.HasValue)
+        {
+            combined = QueryPostProcessor.ApplyOrderByTopN(
+                combined, plan.FinalOrderBy, leftColumns,
+                plan.FinalLimit.Value, plan.FinalOffset ?? 0);
+        }
+        else
+        {
+            if (plan.FinalOrderBy is { Count: > 0 })
+                QueryPostProcessor.ApplyOrderBy(combined, plan.FinalOrderBy, leftColumns);
+            if (plan.FinalLimit.HasValue || plan.FinalOffset.HasValue)
+                combined = QueryPostProcessor.ApplyLimitOffset(combined, plan.FinalLimit, plan.FinalOffset);
+        }
 
         return new MaterializedResultSet(combined, leftColumns);
     }

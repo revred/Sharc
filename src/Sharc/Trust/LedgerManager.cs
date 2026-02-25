@@ -141,6 +141,81 @@ public sealed class LedgerManager
         }
     }
 
+    /// <summary>
+    /// Asynchronously appends a structured trust payload to the ledger.
+    /// </summary>
+    public async Task AppendAsync(TrustPayload payload, ISharcSigner signer, Transaction? transaction = null)
+    {
+        var rootPage = SystemStore.GetRootPage(_db.Schema, LedgerTableName);
+        bool ownsTransaction = transaction == null;
+        var tx = transaction ?? _db.BeginTransaction();
+        
+        byte[] payloadData = payload.ToBytes();
+
+        byte[] payloadHashBuf = ArrayPool<byte>.Shared.Rent(32);
+        byte[] dataToSignBuf = ArrayPool<byte>.Shared.Rent(32 + 32 + 8); 
+        byte[] signatureBuf = ArrayPool<byte>.Shared.Rent(signer.SignatureSize);
+        int agentIdByteCount = Encoding.UTF8.GetByteCount(signer.AgentId);
+        byte[] agentIdBuf = ArrayPool<byte>.Shared.Rent(agentIdByteCount);
+        int agentIdLen = Encoding.UTF8.GetBytes(signer.AgentId, agentIdBuf);
+        ColumnValue[] columnsBuf = ArrayPool<ColumnValue>.Shared.Rent(7);
+        
+        try
+        {
+            var lastEntry = GetLastEntry((int)rootPage);
+            long nextSequence = (lastEntry?.Sequence ?? 0) + 1;
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000; 
+
+            if (!SharcHash.TryCompute(payloadData, payloadHashBuf, out int hashLen) || hashLen != 32)
+                throw new InvalidOperationException("Hash computation failed.");
+
+            Span<byte> dataToSignSpan = dataToSignBuf.AsSpan(0, 72);
+            if (lastEntry != null)
+                lastEntry.Value.PayloadHash.AsSpan().CopyTo(dataToSignSpan.Slice(0, 32));
+            else
+                dataToSignSpan.Slice(0, 32).Clear();
+
+            payloadHashBuf.AsSpan(0, 32).CopyTo(dataToSignSpan.Slice(32, 32));
+            BinaryPrimitives.WriteInt64BigEndian(dataToSignSpan.Slice(64, 8), nextSequence);
+
+            var agentInfo = _registry.GetAgent(signer.AgentId);
+            if (agentInfo != null) ValidateAgent(agentInfo, payload, signer, timestamp);
+
+            // Await async signatures instead of mocking or blocking
+            byte[] signature = await signer.SignAsync(dataToSignBuf.AsSpan(0, 72).ToArray());
+            int sigLen = signature.Length;
+            signature.CopyTo(signatureBuf, 0);
+
+            columnsBuf[0] = ColumnValue.FromInt64(1, nextSequence);
+            columnsBuf[1] = ColumnValue.FromInt64(2, timestamp);
+            columnsBuf[2] = ColumnValue.Text(13 + 2 * agentIdLen, agentIdBuf.AsMemory(0, agentIdLen));
+            columnsBuf[3] = ColumnValue.Blob(4, payloadData);
+            columnsBuf[4] = ColumnValue.Blob(5, payloadHashBuf.AsMemory(0, 32));
+            columnsBuf[5] = ColumnValue.Blob(6, dataToSignBuf.AsMemory(0, 32));
+            columnsBuf[6] = ColumnValue.Blob(7, signatureBuf.AsMemory(0, sigLen));
+    
+            SystemStore.InsertRecord(
+                tx.GetShadowSource(), 
+                _db.Header.UsablePageSize, 
+                rootPage, 
+                nextSequence, 
+                columnsBuf.AsSpan(0, 7));
+
+            if (ownsTransaction) tx.Commit();
+            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.AppendSuccess, signer.AgentId, $"seq={nextSequence}"));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(payloadHashBuf);
+            ArrayPool<byte>.Shared.Return(dataToSignBuf);
+            ArrayPool<byte>.Shared.Return(signatureBuf);
+            ArrayPool<byte>.Shared.Return(agentIdBuf);
+            ArrayPool<ColumnValue>.Shared.Return(columnsBuf, clearArray: true);
+
+            if (ownsTransaction) tx.Dispose();
+        }
+    }
+
     private void ValidateAgent(AgentInfo agent, TrustPayload payload, ISharcSigner signer, long timestamp)
     {
         long tsSeconds = timestamp / 1000000;
@@ -171,7 +246,7 @@ public sealed class LedgerManager
             baseHash.CopyTo(signedData);
             BinaryPrimitives.WriteInt64BigEndian(signedData.Slice(32), sig.Timestamp);
 
-            if (!SharcSigner.Verify(signedData, sig.Signature, coSigner.PublicKey))
+            if (!SignatureVerifier.Verify(signedData, sig.Signature, coSigner.PublicKey, coSigner.Algorithm))
                 throw new InvalidOperationException("Invalid co-signature.");
         }
     }
@@ -199,11 +274,11 @@ public sealed class LedgerManager
             long ts = cursor.GetInt64(1);
             string agentId = cursor.GetString(2);
 
-            // Access blob columns as spans — avoid .ToArray() heap allocations
-            var payloadSpan = cursor.GetBlob(3).AsSpan();
-            var payloadHashSpan = cursor.GetBlob(4).AsSpan();
-            var prevHashSpan = cursor.GetBlob(5).AsSpan();
-            var signatureSpan = cursor.GetBlob(6).AsSpan();
+            // Zero-copy blob access — spans point directly into the page buffer
+            var payloadSpan = cursor.GetBlobSpan(3);
+            var payloadHashSpan = cursor.GetBlobSpan(4);
+            var prevHashSpan = cursor.GetBlobSpan(5);
+            var signatureSpan = cursor.GetBlobSpan(6);
 
             // 0. Verify Payload Hash
             if (!SharcHash.TryCompute(payloadSpan, computedHash, out _) ||
@@ -234,7 +309,7 @@ public sealed class LedgerManager
                        coSigHash.CopyTo(coSigData);
                        BinaryPrimitives.WriteInt64BigEndian(coSigData.Slice(32), sig.Timestamp);
 
-                       if (!SharcSigner.Verify(coSigData, sig.Signature, coSigner.PublicKey))
+                       if (!SignatureVerifier.Verify(coSigData, sig.Signature, coSigner.PublicKey, coSigner.Algorithm))
                        {
                            SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, sig.SignerId, $"Invalid co-signature at seq {seq}"));
                            return false;
@@ -266,9 +341,13 @@ public sealed class LedgerManager
             payloadHashSpan.CopyTo(dataToVerify.Slice(32, 32));
             BinaryPrimitives.WriteInt64BigEndian(dataToVerify.Slice(64, 8), seq);
 
+            // Resolve algorithm: look up agent record to determine signature algorithm
+            var agentRecord = _registry.GetAgent(agentId);
+            var sigAlgorithm = agentRecord?.Algorithm ?? SignatureAlgorithm.HmacSha256;
+
             if (activeSigners != null && activeSigners.TryGetValue(agentId, out var publicKey))
             {
-                if (!SharcSigner.Verify(dataToVerify, signatureSpan, publicKey))
+                if (!SignatureVerifier.Verify(dataToVerify, signatureSpan, publicKey, sigAlgorithm))
                 {
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Invalid signature at seq {seq}"));
                     return false;
@@ -276,7 +355,6 @@ public sealed class LedgerManager
             }
             else
             {
-                var agentRecord = _registry.GetAgent(agentId);
                 if (agentRecord == null)
                 {
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Unknown agent at seq {seq}"));
@@ -290,7 +368,7 @@ public sealed class LedgerManager
                     return false;
                 }
 
-                if (!SharcSigner.Verify(dataToVerify, signatureSpan, agentRecord.PublicKey))
+                if (!SignatureVerifier.Verify(dataToVerify, signatureSpan, agentRecord.PublicKey, sigAlgorithm))
                 {
                     SecurityAudit?.Invoke(this, new SecurityEventArgs(SecurityEventType.IntegrityViolation, agentId, $"Invalid signature at seq {seq}"));
                     return false;
@@ -323,10 +401,10 @@ public sealed class LedgerManager
                     ColumnValue.FromInt64(1, reader.GetInt64(0)),
                     ColumnValue.FromInt64(2, reader.GetInt64(1)),
                     ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes(reader.GetString(2))),
-                    ColumnValue.Blob(1, reader.GetBlob(3).ToArray()), // Payload
-                    ColumnValue.Blob(1, reader.GetBlob(4).ToArray()), // Hash
-                    ColumnValue.Blob(1, reader.GetBlob(5).ToArray()), // Prev
-                    ColumnValue.Blob(1, reader.GetBlob(6).ToArray())  // Sig
+                    ColumnValue.Blob(1, reader.GetBlob(3)), // Payload
+                    ColumnValue.Blob(1, reader.GetBlob(4)), // Hash
+                    ColumnValue.Blob(1, reader.GetBlob(5)), // Prev
+                    ColumnValue.Blob(1, reader.GetBlob(6))  // Sig
                 };
                 
                 int size = RecordEncoder.ComputeEncodedSize(columns);

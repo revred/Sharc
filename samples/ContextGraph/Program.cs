@@ -52,8 +52,11 @@ Console.WriteLine($"Node 1: {node?.JsonData}");
 
 // Get outgoing edges
 Console.WriteLine("\nOutgoing edges from Node 1:");
-foreach (var edge in graph.GetEdges(new NodeKey(1)))
-    Console.WriteLine($"  -> target={edge.TargetKey}, kind={edge.Kind}");
+using (var edgeCursor = graph.GetEdgeCursor(new NodeKey(1)))
+{
+    while (edgeCursor.MoveNext())
+        Console.WriteLine($"  -> target={edgeCursor.TargetKey}, kind={edgeCursor.Kind}, weight={edgeCursor.Weight:F1}");
+}
 
 // 2-hop BFS traversal
 Console.WriteLine("\n2-Hop BFS from Node 1:");

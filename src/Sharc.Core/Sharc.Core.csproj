@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Internal library — not published to NuGet -->
   <PropertyGroup>
     <RootNamespace>Sharc.Core</RootNamespace>
     <AssemblyName>Sharc.Core</AssemblyName>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile></PackageReadmeFile>
     <!-- Only this project contains unsafe code (UnsafeBuffer, SafeM2MPageSource) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

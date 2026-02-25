@@ -1,29 +1,64 @@
-@* Page 1: Hero hook — "Read SQLite at Memory Speed" *@
+@* Page 1: Hero hook - benchmark-first positioning vs veteran engines *@
 
 <div class="hook-page">
-    <div class="hook-badge">PURE MANAGED C#</div>
-    <h1 class="hook-title">Read SQLite at<br /><span class="hook-accent">Memory Speed</span></h1>
+    <div class="hook-badge">SHARC VS VETERAN ENGINES</div>
+    <h1 class="hook-title">Performance Without<br /><span class="hook-accent">Native Baggage</span></h1>
     <p class="hook-subtitle">
-        Zero native dependencies. 50 KB footprint. 7x faster seeks.
-        The engine AI agents deserve.
+        Measured head-to-head against SQLite and IndexedDB in the Arena.
+        Built for AI workloads where latency, trust, and footprint all matter.
     </p>
 
+    <div class="hook-proof-strip">
+        <div class="hook-proof-item">
+            <span class="hook-proof-label">Arena wins vs SQLite</span>
+            <span class="hook-proof-value">@SharcWinsVsSqlite/@ComparableSlidesVsSqlite</span>
+        </div>
+        <div class="hook-proof-item">
+            <span class="hook-proof-label">Median speedup</span>
+            <span class="hook-proof-value">@FormatRatio(MedianSpeedupVsSqlite)x</span>
+        </div>
+        <div class="hook-proof-item">
+            <span class="hook-proof-label">Best speedup</span>
+            <span class="hook-proof-value">@FormatRatio(BestSpeedupVsSqlite)x</span>
+        </div>
+        <div class="hook-proof-item">
+            <span class="hook-proof-label">Cold start advantage</span>
+            <span class="hook-proof-value">@FormatRatio(ColdStartSpeedup)x</span>
+        </div>
+    </div>
+
     <div class="hook-pillars">
-        <ValuePillar Icon="&#x26A1;" Stat="7.1x" Label="Faster B-tree seeks" />
-        <ValuePillar Icon="📦" Stat="50 KB" Label="Total engine size" />
-        <ValuePillar Icon="🌍" Stat="12.5x" Label="Faster graph traversal" />
+        <ValuePillar Icon="&#x26A1;" Stat="@($"{FormatRatio(MedianSpeedupVsSqlite)}x")" Label="Median speedup vs SQLite" />
+        <ValuePillar Icon="&#x1F4E6;" Stat="~50 KB" Label="Managed engine footprint" />
+        <ValuePillar Icon="&#x1F6E1;" Stat="Built-in" Label="Trust + cryptographic ledger" />
     </div>
 
     <div class="hook-cta">
         <a href="#page-benchmarks" class="btn-primary hook-btn" @onclick:preventDefault @onclick="@(() => OnNavigate.InvokeAsync("page-benchmarks"))">
-            See the Benchmarks
+            Run the Arena
+        </a>
+        <a href="#page-honest" class="btn-secondary hook-btn" @onclick:preventDefault @onclick="@(() => OnNavigate.InvokeAsync("page-honest"))">
+            See Veteran Comparison
         </a>
         <a href="https://github.com/revred/Sharc" target="_blank" rel="noopener noreferrer" class="btn-secondary hook-btn">
-            &#x2605; Star on GitHub
+            &#x2605; GitHub
         </a>
     </div>
 </div>
 
 @code {
     [Parameter] public EventCallback<string> OnNavigate { get; set; }
+    [Parameter] public int SharcWinsVsSqlite { get; set; }
+    [Parameter] public int ComparableSlidesVsSqlite { get; set; }
+    [Parameter] public double MedianSpeedupVsSqlite { get; set; } = 1.0;
+    [Parameter] public double BestSpeedupVsSqlite { get; set; } = 1.0;
+    [Parameter] public double ColdStartSpeedup { get; set; } = 1.0;
+
+    private static string FormatRatio(double value)
+    {
+        if (value < 1.0) return "1.0";
+        if (value >= 100) return value.ToString("F0");
+        if (value >= 10) return value.ToString("F1");
+        return value.ToString("F2");
+    }
 }

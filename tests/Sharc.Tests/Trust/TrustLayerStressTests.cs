@@ -88,6 +88,30 @@ public sealed class TrustLayerStressTests : IDisposable
     }
 
     [Fact]
+    public void Ledger_200Entries_SurvivesSplit_ChainValid()
+    {
+        using var db = OpenWritable();
+        var ledger = new LedgerManager(db);
+        var registry = new AgentRegistry(db);
+        using var signer = new SharcSigner("split-agent");
+        registry.RegisterAgent(TrustTestFixtures.CreateValidAgent(signer));
+
+        // 200 entries forces multiple B-tree leaf page splits
+        // (4096-byte page with ~80-byte ledger records ≈ 40-50 per leaf)
+        for (int i = 0; i < 200; i++)
+            ledger.Append($"Overflow entry {i}: padding data to increase record size beyond minimum", signer);
+
+        var keys = new Dictionary<string, byte[]> { [signer.AgentId] = signer.GetPublicKey() };
+        Assert.True(ledger.VerifyIntegrity(keys));
+
+        // Verify exact count via reader scan
+        using var reader = db.CreateReader("_sharc_ledger");
+        int count = 0;
+        while (reader.Read()) count++;
+        Assert.Equal(200, count);
+    }
+
+    [Fact]
     public void Ledger_MultipleAgents_InterleavedAppends_ChainValid()
     {
         using var db = OpenWritable();

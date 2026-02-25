@@ -4,6 +4,110 @@ Architecture Decision Records (ADRs) documenting key choices. Newest first.
 
 ---
 
+## ADR-025: Zero.Hash — Tiered Zero-Allocation FULL OUTER JOIN
+
+**Date**: 2026-02-24
+**Status**: Complete
+**Branch**: `Zero.Hash`
+
+**Context**: ADR-024 (TD-6) implemented FULL OUTER JOIN using `Dictionary.Remove()` for matched-row tracking. This worked but had scalability limits: `Dictionary<QueryValue, List<int>>` allocates heap objects per build-side key, and `System.Collections.BitArray` allocates for the matched tracker. For large build sides (>8,192 rows), cache pressure from Dictionary bucket chaining degrades performance.
+
+**Decision**: Implement a tiered FULL OUTER JOIN executor with three strategies based on build-side cardinality:
+
+| Tier | Build Count | Matched Tracker | Hash Table | Cache Target |
+|:---|:---|:---|:---|:---|
+| I (StackAlloc) | ≤256 | PooledBitArray (32 B) | Dictionary | L1 |
+| II (Pooled) | 257–8,192 | PooledBitArray (≤1 KB) | Dictionary | L2 |
+| III (OpenAddress) | >8,192 | PooledBitArray (scales) | OpenAddressHashTable | L2/L3 |
+
+**Key components:**
+- `JoinTier` — Enum + static `Select(int buildCount)` with thresholds 256/8,192
+- `MergeDescriptor` — Readonly struct for correct-by-construction column ordering across 3 emission paths (matched, probe-unmatched, build-unmatched), handles build/probe side swapping
+- `PooledBitArray` — Bit-packed (Col\<bit\>, 1 bit per row) matched tracker backed by ArrayPool\<byte\>. Replaces System.Collections.BitArray
+- `OpenAddressHashTable<TKey>` — ArrayPool-backed parallel-array open-addressing with backward-shift deletion. Accepts IEqualityComparer\<TKey\> for QueryValue support
+- `TieredHashJoin` — Static executor that dispatches to tier-appropriate strategy
+
+**Integration**: JoinExecutor.HashJoin delegates to TieredHashJoin.Execute for FULL joins via `yield return` forwarding. INNER/LEFT/RIGHT/CROSS paths unchanged.
+
+**Backward-shift deletion fix**: Initial ShouldShift condition `dHome < dEntry` was incorrect for circular wrap-around. Corrected to `dHome == 0 || dHome > dEntry` (shift if home is at gap or further from gap than entry).
+
+**Tier III design evolution**: Original destructive-probe design (drain matches, then RemoveAll from hash table) failed for duplicate probe keys — the second probe row with the same key found nothing after the first removed all entries. Revised to use PooledBitArray for matched tracking at all tiers, with the OpenAddressHashTable providing cache-efficient build-side lookup for Tier III.
+
+**Zero-alloc emission path**: Added `reuseBuffer` parameter to `TieredHashJoin.Execute`. When `reuseBuffer=true` (active when downstream will project), a single scratch `QueryValue[]` is yielded on every iteration — no per-row `CopyRow` allocation. `ProjectRows` reads the buffer before advancing, so the buffer is safely overwritten. This matches the existing pattern in `JoinExecutor.HashJoin` for INNER/LEFT/RIGHT joins.
+
+**Final benchmark results** (with reuseBuffer):
+
+| Benchmark | Users | Time | Allocated | vs LEFT JOIN |
+|:---|:---|:---|:---|:---|
+| FULL OUTER (Tier I) | 1,000 | 749 μs | 630 KB | 0.99x time, 0.99x alloc |
+| FULL OUTER (Tier II) | 5,000 | 4,063 μs | 2,403 KB | 0.80x time, 0.75x alloc |
+| LEFT JOIN baseline | 1,000 | 758 μs | 634 KB | — |
+| LEFT JOIN baseline | 5,000 | 5,056 μs | 3,188 KB | — |
+
+FULL OUTER JOIN is **faster and allocates less** than LEFT JOIN at 5,000 rows — the tiered open-address hash table + bit-packed matched tracker outperforms Dictionary + null-row emission.
+
+**Test coverage**: 91 new tests — 49 primitive tests, 12 TieredHashJoin scenario tests, 30 correctness matrix tests (10 scenarios × 3 tiers). Zero regressions across 2,831 existing tests.
+
+---
+
+## ADR-024: Gaps.F24 — Review-Driven Gap Closure (6 Items)
+
+**Date**: 2026-02-24
+**Status**: Complete
+**Branch**: `Gaps.F24`
+
+**Context**: An independent 360-degree code review identified 17 technical debt items. 2 were non-issues (TD-3: intentional materialization; TD-17: query split already done). 6 were addressed in this branch. 7 are deferred to dedicated feature branches.
+
+**Decisions & outcomes:**
+
+| TD | Item | Decision | Outcome |
+| :--- | :--- | :--- | :--- |
+| TD-1 | Ledger >50 entries | Added 200-entry stress test proving B-tree page split | Test passes — `BTreeMutator.InsertCellAndSplit` works for system tables |
+| TD-2 | Entitlement encryption docs | Rewrote XML docs: page-level encryption, entitlement tag filtering | `SharcEntitlementContext.cs` docs now accurate |
+| TD-6 | FULL OUTER JOIN | Implemented via hash join with `Remove`-based matched tracking | Zero extra allocation — matched keys removed from hash table during probe, unmatched keys remain for post-probe scan |
+| TD-7 | CASE expression execution | Post-materialization evaluator over `CaseStar` AST | 8 integration tests. Pipeline order: Sort → Limit → CASE → Distinct |
+| TD-10 | Reputation scoring | Bayesian Beta distribution (Alpha/Beta), exponential time decay (30-day half-life), persistence via `SystemStore` | 9 tests covering observation, persistence, legacy API, weighted observations |
+| TD-13 | Utf8SetContains dead code | Removed allocating `Utf8SetContains` and `BuildUtf8In` — zero-alloc variants already wired | 23 lines removed, no callers remained |
+| TD-16 | SecurityModel.md stale claim | Updated write-integrity claim — write engine has full CRUD + ACID | 1 line changed |
+
+**FULL JOIN zero-alloc design**: During probe, `hashTable.Remove(key)` marks the bucket as matched. The local `matches` variable still holds the `RowSet` reference for iteration. Post-probe, only unmatched buckets remain in the dictionary. Safe because probe iterates `probeRows`, not `hashTable`. No parallel dictionary, no bitmap, no wrapper class — zero extra bytes.
+
+**CASE pipeline ordering**: ORDER BY must run on physical columns before CASE projection strips them. CASE projection is post-sort/limit because computed columns may reference columns not in the final SELECT. Order: Aggregate → Sort → Limit → CASE → Distinct.
+
+**Deferred items** (dedicated feature branches): TD-4 (ArcFileManager extraction), TD-8 (append-only fast path), TD-9 (fuzz testing), TD-11 (IndexedDB page source), TD-12 (BTreeMutator refactor), TD-14 (subquery execution), TD-15 (window functions).
+
+**Files added**: `CaseExpressionIntent.cs`, `CaseExpressionEvaluator.cs`, `CaseProjection.cs`, `CaseExpressionTests.cs`, `ReputationScoringTests.cs`
+**Files modified**: `JoinExecutor.cs`, `IntentCompiler.cs`, `QueryIntent.cs`, `QueryPostProcessor.cs`, `SharcDatabase.cs`, `SharqParser.cs`, `JoinClause.cs`, `JoinIntent.cs`, `ReputationManager.cs`, `ReputationScore.cs`, `SharcDatabaseFactory.cs`, `SharcEntitlementContext.cs`, `SecurityModel.md`, `FilterStarCompiler.cs`, `JitPredicateBuilder.cs`, `TrustLayerStressTests.cs`, `TrustTestFixtures.cs`, `JoinTests.cs`, `DataGenerator.cs`
+
+---
+
+## ADR-023: Allocation Technical Debt Audit — 4 of 6 Items Resolved
+
+**Date**: 2026-02-23
+**Status**: Resolved (4/6); 2 remaining gaps documented
+
+**Context**: A full audit of reported allocation gaps between Sharc and native SQLite identified 6 concerns: WHERE predicate overhead, GraphEdge per-row allocation, eager schema parsing, ColumnValue[] pooling, string materialization on scans, and append-only write mode.
+
+**Findings:**
+
+| Item | Status | Evidence |
+| :--- | :--- | :--- |
+| WHERE predicate 1,513x alloc gap | **FIXED** | `FilterStar`/`CompileBaked` achieves 0 B per-row (prepared). Cold path: 680 B. Original 1,089 KB to 0 B. Legacy `SharcFilter` path superseded. |
+| GraphEdge 2,000x alloc spike | **FIXED** | Modern `IEdgeCursor` API uses `ArrayPool` rentals, cursor reuse via `Reset()`. Old `GetEdges()`/`GetIncomingEdges()` marked `[Obsolete]`. |
+| OpenMemory() eager schema parse | **FIXED** | `_schema ??=` lazy init — 0 B at open. Schema deferred until first `.Schema`/`CreateReader()`/`Query()` access. Verified by `AllocationFixTests.cs`. |
+| ColumnValue[] not pooled | **FIXED** | `ArrayPool<ColumnValue>.Shared.Rent()` for row buffers, `ArrayPool<long>` for serial types, `ArrayPool<int>` for offsets. 2-slot `[ThreadStatic]` reader pool. Lazy column decode. |
+| String materialization on scans | **Mostly fixed** | `RawByteComparer` does zero-alloc UTF-8 span comparisons. `GetUtf8Span()` public API avoids string allocation. Remaining: `GetString()` allocates by contract; `Utf8SetContains()` IN/NotIn allocates one string per row. |
+| Append-only write mode | **Not implemented** | No dedicated append-only path exists. Write engine is full B-tree mutator. This remains a gap for logging/Context Space capture. |
+
+**Remaining gaps:**
+
+1. `Utf8SetContains()` per-row string allocation — fixable with `Dictionary<ReadOnlyMemory<byte>>` using a UTF-8 span comparer
+2. Append-only write mode — requires design work for fast-path sequential inserts that skip B-tree splitting
+
+**Files updated**: `FilterActionPlan.md` (status → DONE), `BenchmarkProtocol.md` (backlog items marked done), `PerformanceBaseline.md` (known costs updated)
+
+---
+
 ## ADR-022: B-Tree Leaf Range Cache + Random Lookup 109x (Achieved)
 
 **Date**: 2026-02-23

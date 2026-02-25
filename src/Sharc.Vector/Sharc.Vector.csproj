@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Sharc.Vector</RootNamespace>
+    <AssemblyName>Sharc.Vector</AssemblyName>
+    <Description>SIMD-accelerated vector similarity search for Sharc. Zero-copy BLOB decode, cosine/euclidean/dot product distance via TensorPrimitives, top-K nearest neighbor with metadata pre-filtering.</Description>
+    <PackageTags>sqlite;vector-search;similarity-search;embeddings;simd;cosine-distance;ai;rag;dotnet;csharp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sharc.Vector.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sharc\Sharc.csproj" />
+    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" />
+  </ItemGroup>
+
+</Project>

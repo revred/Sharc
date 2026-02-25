@@ -62,9 +62,10 @@ public static class IntentCompiler
             throw new NotSupportedException(
                 "Common Table Expressions (WITH) are not yet supported.");
 
-        // Columns + aggregates: detect aggregate functions in SELECT list
+        // Columns + aggregates + CASE: detect special expressions in SELECT list
         IReadOnlyList<string>? columns = null;
         List<AggregateIntent>? aggregates = null;
+        List<CaseExpressionIntent>? caseExprs = null;
 
         if (statement.Columns.Count > 0 && statement.Columns[0].Expression is not WildcardStar)
         {
@@ -80,6 +81,20 @@ public static class IntentCompiler
                     var agg = CompileAggregate(func, alias, i);
                     aggregates.Add(agg);
                     names[i] = agg.Alias;
+                }
+                else if (expr is CaseStar caseStar)
+                {
+                    caseExprs ??= [];
+                    var caseAlias = alias ?? $"_case_{i}";
+                    var sourceColumns = CollectColumnRefs(caseStar);
+                    caseExprs.Add(new CaseExpressionIntent
+                    {
+                        Expression = caseStar,
+                        Alias = caseAlias,
+                        OutputOrdinal = i,
+                        SourceColumns = sourceColumns,
+                    });
+                    names[i] = caseAlias;
                 }
                 else
                 {
@@ -146,6 +161,7 @@ public static class IntentCompiler
             Aggregates = aggregates,
             GroupBy = groupBy,
             HavingFilter = havingFilter,
+            CaseExpressions = caseExprs,
             Hint = statement.Hint,
         };
     }
@@ -414,6 +430,60 @@ public static class IntentCompiler
         _ => throw new NotSupportedException($"Expected column reference in aggregate, got {expr.GetType().Name}"),
     };
 
+    // ─── CASE helpers ────────────────────────────────────────────
+
+    /// <summary>
+    /// Recursively collects all column references from a CASE expression AST.
+    /// These are the physical columns the evaluator needs at runtime.
+    /// </summary>
+    private static string[] CollectColumnRefs(CaseStar caseStar)
+    {
+        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var when in caseStar.Whens)
+        {
+            CollectColumnRefsFrom(when.Condition, refs);
+            CollectColumnRefsFrom(when.Result, refs);
+        }
+        if (caseStar.ElseExpr != null)
+            CollectColumnRefsFrom(caseStar.ElseExpr, refs);
+        return refs.Count > 0 ? refs.ToArray() : [];
+    }
+
+    private static void CollectColumnRefsFrom(SharqStar expr, HashSet<string> refs)
+    {
+        switch (expr)
+        {
+            case ColumnRefStar col:
+                refs.Add(FormatColumnRef(col));
+                break;
+            case BinaryStar bin:
+                CollectColumnRefsFrom(bin.Left, refs);
+                CollectColumnRefsFrom(bin.Right, refs);
+                break;
+            case UnaryStar un:
+                CollectColumnRefsFrom(un.Operand, refs);
+                break;
+            case IsNullStar isNull:
+                CollectColumnRefsFrom(isNull.Operand, refs);
+                break;
+            case BetweenStar bet:
+                CollectColumnRefsFrom(bet.Operand, refs);
+                CollectColumnRefsFrom(bet.Low, refs);
+                CollectColumnRefsFrom(bet.High, refs);
+                break;
+            case CaseStar nested:
+                foreach (var w in nested.Whens)
+                {
+                    CollectColumnRefsFrom(w.Condition, refs);
+                    CollectColumnRefsFrom(w.Result, refs);
+                }
+                if (nested.ElseExpr != null)
+                    CollectColumnRefsFrom(nested.ElseExpr, refs);
+                break;
+            // LiteralStar, other terminals — no column refs
+        }
+    }
+
     private static long? ExtractLongOrNull(SharqStar? expr) => expr switch
     {
         null => null,
@@ -440,9 +510,10 @@ public static class IntentCompiler
     /// </summary>
     private static QueryIntent CompileSimple(SelectStatement statement)
     {
-        // Columns + aggregates
+        // Columns + aggregates + CASE
         IReadOnlyList<string>? columns = null;
         List<AggregateIntent>? aggregates = null;
+        List<CaseExpressionIntent>? caseExprs = null;
 
         if (statement.Columns.Count > 0 && statement.Columns[0].Expression is not WildcardStar)
         {
@@ -458,6 +529,20 @@ public static class IntentCompiler
                     var agg = CompileAggregate(func, alias, i);
                     aggregates.Add(agg);
                     names[i] = agg.Alias;
+                }
+                else if (expr is CaseStar caseStar)
+                {
+                    caseExprs ??= [];
+                    var caseAlias = alias ?? $"_case_{i}";
+                    var sourceColumns = CollectColumnRefs(caseStar);
+                    caseExprs.Add(new CaseExpressionIntent
+                    {
+                        Expression = caseStar,
+                        Alias = caseAlias,
+                        OutputOrdinal = i,
+                        SourceColumns = sourceColumns,
+                    });
+                    names[i] = caseAlias;
                 }
                 else
                 {
@@ -506,6 +591,7 @@ public static class IntentCompiler
             Aggregates = aggregates,
             GroupBy = groupBy,
             HavingFilter = havingFilter,
+            CaseExpressions = caseExprs,
             Hint = statement.Hint,
         };
     }
@@ -582,6 +668,7 @@ public static class IntentCompiler
         JoinKind.Left => JoinType.Left,
         JoinKind.Right => JoinType.Right,
         JoinKind.Cross => JoinType.Cross,
+        JoinKind.Full => JoinType.Full,
         _ => throw new NotSupportedException($"Unsupported join kind: {kind}")
     };
 
