@@ -8,9 +8,18 @@ namespace Sharc.Query;
 
 /// <summary>
 /// Thread-safe cache for compiled query plans. Parse once, evaluate forever.
+/// Eviction: when the cache exceeds <see cref="MaxCapacity"/>, it is cleared
+/// entirely. Plans are cheap to recompile; this avoids unbounded memory growth
+/// in long-running processes with dynamic query generation.
 /// </summary>
 internal sealed class QueryPlanCache
 {
+    /// <summary>
+    /// Maximum number of cached plans before eviction.
+    /// 1024 plans ≈ 200–400 KB (plan objects are small reference trees).
+    /// </summary>
+    internal const int MaxCapacity = 1024;
+
     private readonly ConcurrentDictionary<string, QueryPlan> _cache = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -19,6 +28,9 @@ internal sealed class QueryPlanCache
     /// </summary>
     internal QueryPlan GetOrCompilePlan(string query)
     {
+        if (_cache.Count >= MaxCapacity)
+            _cache.Clear();
+
         return _cache.GetOrAdd(query, static q => IntentCompiler.CompilePlan(q));
     }
 
