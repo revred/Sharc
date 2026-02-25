@@ -85,5 +85,134 @@ jobs:
       - name: Pack Sharc.Arc
         run: dotnet pack src/Sharc.Arc/Sharc.Arc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
-      - name: Push to NuGet
-        run: dotnet nuget push "dist/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: Verify package artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          packages=(
+            "Sharc.Core"
+            "Sharc.Query"
+            "Sharc.Crypto"
+            "Sharc"
+            "Sharc.Graph.Surface"
+            "Sharc.Graph"
+            "Sharc.Vector"
+            "Sharc.Arc"
+          )
+          for package in "${packages[@]}"; do
+            artifact="dist/${package}.${VERSION}.nupkg"
+            if [[ ! -f "$artifact" ]]; then
+              echo "::error::Missing package artifact: $artifact"
+              exit 1
+            fi
+          done
+
+      - name: Push foundational packages to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
+            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+      - name: Wait for foundational packages on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          wait_for_package_version() {
+            local package="$1"
+            local package_path
+            package_path="$(echo "$package" | tr '[:upper:]' '[:lower:]')"
+            local url="https://api.nuget.org/v3-flatcontainer/${package_path}/index.json"
+            for attempt in $(seq 1 30); do
+              local index_json=""
+              if index_json="$(curl -fsSL "$url" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+                echo "${package} ${VERSION} is available on nuget.org"
+                return 0
+              fi
+              echo "Waiting for ${package} ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+              sleep 10
+            done
+            echo "::error::${package} ${VERSION} did not appear on nuget.org within 5 minutes"
+            return 1
+          }
+
+          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
+            wait_for_package_version "$package"
+          done
+
+      - name: Push Sharc to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push "dist/Sharc.${VERSION}.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Wait for Sharc on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            index_json=""
+            if index_json="$(curl -fsSL "https://api.nuget.org/v3-flatcontainer/sharc/index.json" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+              echo "Sharc ${VERSION} is available on nuget.org"
+              exit 0
+            fi
+            echo "Waiting for Sharc ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "::error::Sharc ${VERSION} did not appear on nuget.org within 5 minutes"
+          exit 1
+
+      - name: Push Sharc.Graph.Surface to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push "dist/Sharc.Graph.Surface.${VERSION}.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Wait for Sharc.Graph.Surface on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            index_json=""
+            if index_json="$(curl -fsSL "https://api.nuget.org/v3-flatcontainer/sharc.graph.surface/index.json" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+              echo "Sharc.Graph.Surface ${VERSION} is available on nuget.org"
+              exit 0
+            fi
+            echo "Waiting for Sharc.Graph.Surface ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "::error::Sharc.Graph.Surface ${VERSION} did not appear on nuget.org within 5 minutes"
+          exit 1
+
+      - name: Push extension packages to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for package in "Sharc.Graph" "Sharc.Vector" "Sharc.Arc"; do
+            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
