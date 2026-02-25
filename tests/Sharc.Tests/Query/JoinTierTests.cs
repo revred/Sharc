@@ -8,7 +8,7 @@ namespace Sharc.Tests.Query;
 
 /// <summary>
 /// Tests for <see cref="JoinTier"/> tier selection logic.
-/// Thresholds: ≤256 → StackAlloc, 257–8192 → Pooled, >8192 → DestructiveProbe.
+/// Thresholds: ≤256 → StackAlloc, 257–8192 → Pooled, >8192 → OpenAddress.
 /// </summary>
 public sealed class JoinTierTests
 {
@@ -36,9 +36,9 @@ public sealed class JoinTierTests
     [InlineData(8193)]
     [InlineData(10000)]
     [InlineData(100000)]
-    public void Select_AbovePooledThreshold_ReturnsDestructiveProbe(int count)
+    public void Select_AbovePooledThreshold_ReturnsOpenAddress(int count)
     {
-        Assert.Equal(JoinTier.DestructiveProbe, JoinTier.Select(count));
+        Assert.Equal(JoinTier.OpenAddress, JoinTier.Select(count));
     }
 
     [Fact]

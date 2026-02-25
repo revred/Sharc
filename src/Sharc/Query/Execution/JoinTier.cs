@@ -8,7 +8,7 @@ namespace Sharc.Query.Execution;
 /// <list type="bullet">
 /// <item><description><see cref="StackAlloc"/>: ≤256 build rows, stackalloc bit array, L1 cache resident.</description></item>
 /// <item><description><see cref="Pooled"/>: 257–8,192 build rows, ArrayPool-backed bit-packed tracker, L2 cache resident.</description></item>
-/// <item><description><see cref="DestructiveProbe"/>: &gt;8,192 build rows, open-address hash table with backward-shift deletion.</description></item>
+/// <item><description><see cref="OpenAddress"/>: &gt;8,192 build rows, open-address hash table with read-only probe + PooledBitArray tracking.</description></item>
 /// </list>
 /// </summary>
 internal enum JoinTierKind : byte
@@ -19,8 +19,8 @@ internal enum JoinTierKind : byte
     /// <summary>Build side 257–8,192 rows. Matched bits tracked via ArrayPool bit-packed array.</summary>
     Pooled = 1,
 
-    /// <summary>Build side &gt;8,192 rows. Destructive probe removes matched entries from hash table.</summary>
-    DestructiveProbe = 2,
+    /// <summary>Build side &gt;8,192 rows. Read-only probe with open-address hash table + PooledBitArray match tracking.</summary>
+    OpenAddress = 2,
 }
 
 /// <summary>
@@ -40,8 +40,8 @@ internal static class JoinTier
     /// <summary>Alias for <see cref="JoinTierKind.Pooled"/>.</summary>
     public const JoinTierKind Pooled = JoinTierKind.Pooled;
 
-    /// <summary>Alias for <see cref="JoinTierKind.DestructiveProbe"/>.</summary>
-    public const JoinTierKind DestructiveProbe = JoinTierKind.DestructiveProbe;
+    /// <summary>Alias for <see cref="JoinTierKind.OpenAddress"/>.</summary>
+    public const JoinTierKind OpenAddress = JoinTierKind.OpenAddress;
 
     /// <summary>
     /// Selects the appropriate join tier based on build-side cardinality.
@@ -50,6 +50,6 @@ internal static class JoinTier
     {
         if (buildCount <= StackAllocThreshold) return JoinTierKind.StackAlloc;
         if (buildCount <= PooledThreshold) return JoinTierKind.Pooled;
-        return JoinTierKind.DestructiveProbe;
+        return JoinTierKind.OpenAddress;
     }
 }
