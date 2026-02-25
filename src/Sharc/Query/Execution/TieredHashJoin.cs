@@ -10,7 +10,7 @@ namespace Sharc.Query.Execution;
 /// <list type="bullet">
 /// <item><description>Tier I (≤256 build rows): stackalloc bit array, L1 cache resident.</description></item>
 /// <item><description>Tier II (257–8,192 build rows): ArrayPool bit-packed tracker (Col&lt;bit&gt;).</description></item>
-/// <item><description>Tier III (&gt;8,192 build rows): destructive probe with drain-then-remove.</description></item>
+/// <item><description>Tier III (&gt;8,192 build rows): open-address hash table with read-only probe + PooledBitArray tracking.</description></item>
 /// </list>
 /// </summary>
 internal static class TieredHashJoin
@@ -46,7 +46,7 @@ internal static class TieredHashJoin
         {
             JoinTierKind.StackAlloc => ExecuteTierI(buildRows, buildKeyIndex, probeRows, probeKeyIndex, desc, reuseBuffer),
             JoinTierKind.Pooled => ExecuteTierII(buildRows, buildKeyIndex, probeRows, probeKeyIndex, desc, reuseBuffer),
-            JoinTierKind.DestructiveProbe => ExecuteTierIII(buildRows, buildKeyIndex, probeRows, probeKeyIndex, desc, reuseBuffer),
+            JoinTierKind.OpenAddress => ExecuteTierIII(buildRows, buildKeyIndex, probeRows, probeKeyIndex, desc, reuseBuffer),
             _ => ExecuteTierI(buildRows, buildKeyIndex, probeRows, probeKeyIndex, desc, reuseBuffer),
         };
     }
@@ -90,6 +90,7 @@ internal static class TieredHashJoin
         try
         {
             var output = new QueryValue[desc.MergedWidth];
+            int matchedCount = 0;
 
             // Probe phase
             foreach (var probeRow in probeRows)
@@ -99,7 +100,8 @@ internal static class TieredHashJoin
                 {
                     foreach (var idx in matchIndices)
                     {
-                        matched.Set(idx);
+                        if (matched.TrySet(idx))
+                            matchedCount++;
                         desc.MergeMatched(probeRow, buildRows[idx], output);
                         yield return reuseBuffer ? output : CopyRow(output);
                     }
@@ -112,13 +114,19 @@ internal static class TieredHashJoin
                 }
             }
 
-            // Build-unmatched phase: scan bit array
+            // Build-unmatched phase: skip scan entirely when all build rows matched.
+            int unmatchedRemaining = buildRows.Count - matchedCount;
+            if (unmatchedRemaining == 0)
+                yield break;
+
             for (int i = 0; i < buildRows.Count; i++)
             {
                 if (!matched.Get(i))
                 {
                     desc.EmitBuildUnmatched(buildRows[i], output);
                     yield return reuseBuffer ? output : CopyRow(output);
+                    if (--unmatchedRemaining == 0)
+                        break;
                 }
             }
         }
@@ -155,6 +163,7 @@ internal static class TieredHashJoin
         {
             var output = new QueryValue[desc.MergedWidth];
             var lookupBuffer = new List<int>(16);
+            int matchedCount = 0;
 
             // Probe phase: read-only lookup, mark matches via bit array
             foreach (var probeRow in probeRows)
@@ -169,7 +178,8 @@ internal static class TieredHashJoin
                     {
                         foreach (var idx in lookupBuffer)
                         {
-                            matched.Set(idx);
+                            if (matched.TrySet(idx))
+                                matchedCount++;
                             desc.MergeMatched(probeRow, buildRows[idx], output);
                             yield return reuseBuffer ? output : CopyRow(output);
                         }
@@ -187,13 +197,19 @@ internal static class TieredHashJoin
                 }
             }
 
-            // Build-unmatched phase: scan bit array for unmatched rows
+            // Build-unmatched phase: skip scan entirely when all build rows matched.
+            int unmatchedRemaining = buildRows.Count - matchedCount;
+            if (unmatchedRemaining == 0)
+                yield break;
+
             for (int i = 0; i < buildRows.Count; i++)
             {
                 if (!matched.Get(i))
                 {
                     desc.EmitBuildUnmatched(buildRows[i], output);
                     yield return reuseBuffer ? output : CopyRow(output);
+                    if (--unmatchedRemaining == 0)
+                        break;
                 }
             }
         }

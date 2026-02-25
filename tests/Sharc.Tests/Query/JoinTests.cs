@@ -384,6 +384,56 @@ public class JoinTests : IDisposable
         Assert.False(reader.Read());
     }
 
+    // --- SEC-003: Residual filter unqualified column resolution ---
+
+    [Fact]
+    public void Join_ResidualFilter_UnqualifiedColumn_ResolvesCorrectly()
+    {
+        // 'amount' exists only in orders — unqualified reference should resolve
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id WHERE amount > 150 ORDER BY o.amount");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+        Assert.Equal(200.0, reader.GetDouble(1));
+
+        Assert.True(reader.Read());
+        Assert.Equal("Bob", reader.GetString(0));
+        Assert.Equal(300.0, reader.GetDouble(1));
+
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void Join_ResidualFilter_AmbiguousColumn_ResolvesToMergedSchema()
+    {
+        // 'id' exists in both users and orders.  Today the executor resolves
+        // unqualified columns against the merged schema which only contains
+        // columns that were explicitly materialized.  Because the ON clause
+        // requests u.id (not o.id), the merged schema has a single '*.id'
+        // entry and the filter resolves to u.id — producing the matching row.
+        // Compiler-level ambiguity detection is tracked as a future enhancement.
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE id = 1");
+
+        Assert.True(reader.Read());
+        Assert.Equal("Alice", reader.GetString(0));
+    }
+
+    [Fact]
+    public void Join_ResidualFilter_NonExistentColumn_ReturnsNoMatch()
+    {
+        // 'no_such_col' doesn't exist — resolves to -1, colVal stays NULL, comparison fails
+        using var db = SharcDatabase.Open(_dbPath);
+        using var reader = db.Query(
+            "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE no_such_col = 1");
+
+        // No rows match because the column resolves to NULL
+        Assert.False(reader.Read());
+    }
+
     // --- Helpers ---
 
     private void AddOrphanOrder()
