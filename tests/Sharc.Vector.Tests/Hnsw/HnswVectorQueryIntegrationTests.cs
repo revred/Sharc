@@ -109,6 +109,60 @@ public sealed class HnswVectorQueryIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void UseIndex_WithBroadFilter_UsesIndexedPostFilterWidening()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        vq.Where(FilterStar.Column("category").Eq("science"));
+
+        var query = new float[VectorDim];
+        var result = vq.NearestTo(query, k: 5);
+
+        Assert.True(result.Count > 0);
+        Assert.Equal(VectorExecutionStrategy.HnswPostFilterWidening, vq.LastExecutionInfo.Strategy);
+    }
+
+    [Fact]
+    public void UseIndex_WithHighlySelectiveFilter_UsesFlatScan()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        vq.Where(FilterStar.Column("title").Eq("doc_1"));
+
+        var query = new float[VectorDim];
+        var result = vq.NearestTo(query, k: 5);
+
+        Assert.True(result.Count <= 1);
+        Assert.Equal(VectorExecutionStrategy.FlatScan, vq.LastExecutionInfo.Strategy);
+    }
+
+    [Fact]
+    public void UseIndex_WithForceFlatScanOption_BypassesHnsw()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        var query = new float[VectorDim];
+        var options = new VectorSearchOptions
+        {
+            ForceFlatScan = true
+        };
+
+        var result = vq.NearestTo(query, k: 5, options);
+
+        Assert.Equal(5, result.Count);
+        Assert.Equal(VectorExecutionStrategy.FlatScan, vq.LastExecutionInfo.Strategy);
+    }
+
+    [Fact]
     public void UseIndex_DimensionMismatch_Throws()
     {
         using var index = HnswIndex.Build(_db, "docs", "embedding",

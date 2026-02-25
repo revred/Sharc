@@ -9,11 +9,15 @@ namespace Sharc.Vector.Hnsw;
 /// </summary>
 public sealed class HnswIndex : IDisposable
 {
-    private readonly HnswGraph _graph;
-    private readonly IVectorResolver _resolver;
+    private HnswGraph _graph;
+    private IVectorResolver _resolver;
     private readonly VectorDistanceFunction _distanceFn;
     private readonly DistanceMetric _metric;
     private readonly HnswConfig _config;
+    private readonly ReaderWriterLockSlim _stateLock = new();
+    private readonly Dictionary<long, float[]> _deltaVectors = new();
+    private readonly HashSet<long> _tombstones = new();
+    private long _version = 1;
     private bool _disposed;
 
     internal HnswIndex(HnswGraph graph, IVectorResolver resolver,
@@ -27,10 +31,40 @@ public sealed class HnswIndex : IDisposable
     }
 
     /// <summary>Number of vectors in the index.</summary>
-    public int Count => _graph.NodeCount;
+    public int Count
+    {
+        get
+        {
+            _stateLock.EnterReadLock();
+            try
+            {
+                ThrowIfDisposed();
+                return GetActiveCountNoLock();
+            }
+            finally
+            {
+                _stateLock.ExitReadLock();
+            }
+        }
+    }
 
     /// <summary>Dimensions per vector.</summary>
-    public int Dimensions => _resolver.Dimensions;
+    public int Dimensions
+    {
+        get
+        {
+            _stateLock.EnterReadLock();
+            try
+            {
+                ThrowIfDisposed();
+                return _resolver.Dimensions;
+            }
+            finally
+            {
+                _stateLock.ExitReadLock();
+            }
+        }
+    }
 
     /// <summary>Distance metric used by the index.</summary>
     public DistanceMetric Metric => _metric;
@@ -40,6 +74,69 @@ public sealed class HnswIndex : IDisposable
 
     /// <summary>The internal graph (for persistence).</summary>
     internal HnswGraph Graph => _graph;
+
+    /// <summary>True when upserts/deletes are pending merge into the base graph.</summary>
+    public bool HasPendingMutations
+    {
+        get
+        {
+            _stateLock.EnterReadLock();
+            try
+            {
+                ThrowIfDisposed();
+                return _deltaVectors.Count > 0 || _tombstones.Count > 0;
+            }
+            finally
+            {
+                _stateLock.ExitReadLock();
+            }
+        }
+    }
+
+    /// <summary>Monotonic version incremented on each mutation and merge.</summary>
+    public long Version
+    {
+        get
+        {
+            _stateLock.EnterReadLock();
+            try
+            {
+                ThrowIfDisposed();
+                return _version;
+            }
+            finally
+            {
+                _stateLock.ExitReadLock();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a point-in-time snapshot of mutable index state, including
+    /// pending-mutation counters and a deterministic checksum.
+    /// </summary>
+    public HnswIndexSnapshot GetSnapshot()
+    {
+        _stateLock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
+            return new HnswIndexSnapshot
+            {
+                Version = _version,
+                BaseNodeCount = _graph.NodeCount,
+                ActiveNodeCount = GetActiveCountNoLock(),
+                PendingUpsertCount = _deltaVectors.Count,
+                PendingDeleteCount = _tombstones.Count,
+                HasPendingMutations = _deltaVectors.Count > 0 || _tombstones.Count > 0,
+                Checksum = ComputeChecksumNoLock()
+            };
+        }
+        finally
+        {
+            _stateLock.ExitReadLock();
+        }
+    }
 
     /// <summary>
     /// Builds an HNSW index from vectors stored in a Sharc database table.
@@ -201,6 +298,130 @@ public sealed class HnswIndex : IDisposable
     }
 
     /// <summary>
+    /// Adds or updates a vector in the mutable delta layer.
+    /// Changes are visible to search immediately and can be compacted via
+    /// <see cref="MergePendingMutations"/>.
+    /// </summary>
+    public void Upsert(long rowId, ReadOnlySpan<float> vector)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (vector.Length != Dimensions)
+            throw new ArgumentException(
+                $"Vector has {vector.Length} dimensions but index has {Dimensions}.",
+                nameof(vector));
+
+        var vectorCopy = vector.ToArray();
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            ThrowIfDisposed();
+            _deltaVectors[rowId] = vectorCopy;
+            _tombstones.Remove(rowId);
+            _version++;
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Marks the given row as deleted from search results.
+    /// Returns false if the row does not exist in the current mutable view.
+    /// </summary>
+    public bool Delete(long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            ThrowIfDisposed();
+
+            bool changed = false;
+            bool isBaseRow = _graph.TryGetNodeIndex(rowId, out _);
+
+            if (_deltaVectors.Remove(rowId))
+                changed = true;
+
+            if (isBaseRow && _tombstones.Add(rowId))
+                changed = true;
+
+            if (changed)
+                _version++;
+
+            return changed;
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the base HNSW graph by compacting all pending upserts/deletes.
+    /// This clears the mutable delta/tombstone layers.
+    /// </summary>
+    public void MergePendingMutations()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            ThrowIfDisposed();
+            if (_deltaVectors.Count == 0 && _tombstones.Count == 0)
+                return;
+
+            var vectors = new List<float[]>(_graph.NodeCount + _deltaVectors.Count);
+            var rowIds = new List<long>(_graph.NodeCount + _deltaVectors.Count);
+
+            for (int i = 0; i < _graph.NodeCount; i++)
+            {
+                long rowId = _graph.GetRowId(i);
+                if (_tombstones.Contains(rowId))
+                    continue;
+
+                if (_deltaVectors.TryGetValue(rowId, out var updated))
+                    vectors.Add(updated);
+                else
+                    vectors.Add(_resolver.GetVector(i).ToArray());
+
+                rowIds.Add(rowId);
+            }
+
+            foreach (var pair in _deltaVectors)
+            {
+                if (_tombstones.Contains(pair.Key))
+                    continue;
+                if (_graph.TryGetNodeIndex(pair.Key, out _))
+                    continue; // already included as update
+
+                rowIds.Add(pair.Key);
+                vectors.Add(pair.Value);
+            }
+
+            if (vectors.Count == 0)
+                throw new InvalidOperationException(
+                    "Cannot merge mutations because it would produce an empty index.");
+
+            var resolver = new MemoryVectorResolver(vectors.ToArray());
+            var graph = HnswGraphBuilder.Build(resolver, rowIds.ToArray(), _metric, _config);
+
+            _resolver = resolver;
+            _graph = graph;
+            _deltaVectors.Clear();
+            _tombstones.Clear();
+            _version++;
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     /// Searches for the k nearest neighbors to the query vector.
     /// </summary>
     /// <param name="queryVector">The query vector (must match index dimensions).</param>
@@ -211,24 +432,220 @@ public sealed class HnswIndex : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (queryVector.Length != Dimensions)
-            throw new ArgumentException(
-                $"Query vector has {queryVector.Length} dimensions but index has {Dimensions}.",
-                nameof(queryVector));
+        _stateLock.EnterReadLock();
+        try
+        {
+            ThrowIfDisposed();
 
-        if (k <= 0)
-            throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+            if (queryVector.Length != _resolver.Dimensions)
+                throw new ArgumentException(
+                    $"Query vector has {queryVector.Length} dimensions but index has {_resolver.Dimensions}.",
+                    nameof(queryVector));
 
-        int effectiveEf = ef ?? _config.EfSearch;
-        effectiveEf = Math.Max(effectiveEf, k);
+            if (k <= 0)
+                throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
 
-        return HnswGraphSearcher.Search(_graph, queryVector, k, effectiveEf,
-            _resolver, _distanceFn, _metric);
+            int effectiveEf = ef ?? _config.EfSearch;
+            effectiveEf = Math.Max(effectiveEf, k);
+
+            if (_deltaVectors.Count == 0 && _tombstones.Count == 0)
+            {
+                return HnswGraphSearcher.Search(_graph, queryVector, k, effectiveEf,
+                    _resolver, _distanceFn, _metric);
+            }
+
+            return SearchWithMutableOverlayNoLock(queryVector, k, effectiveEf);
+        }
+        finally
+        {
+            _stateLock.ExitReadLock();
+        }
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        _disposed = true;
+        if (_disposed) return;
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _deltaVectors.Clear();
+            _tombstones.Clear();
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    private VectorSearchResult SearchWithMutableOverlayNoLock(
+        ReadOnlySpan<float> queryVector, int k, int effectiveEf)
+    {
+        int activeCount = GetActiveCountNoLock();
+        if (activeCount == 0)
+            return new VectorSearchResult(new List<VectorMatch>());
+
+        int targetK = Math.Min(k, activeCount);
+        var heap = new VectorTopKHeap(targetK, isMinHeap: _metric != DistanceMetric.DotProduct);
+        var seen = new HashSet<long>();
+
+        // Fast path: get a broad ANN candidate set from the stable base graph.
+        if (_graph.NodeCount > 0)
+        {
+            int searchK = Math.Min(_graph.NodeCount, Math.Max(targetK * 4, effectiveEf));
+            var baseCandidates = HnswGraphSearcher.Search(
+                _graph, queryVector, searchK, effectiveEf, _resolver, _distanceFn, _metric);
+
+            for (int i = 0; i < baseCandidates.Count; i++)
+            {
+                var match = baseCandidates[i];
+                if (_tombstones.Contains(match.RowId))
+                    continue;
+
+                if (_deltaVectors.TryGetValue(match.RowId, out var updated))
+                {
+                    heap.TryInsert(match.RowId, _distanceFn(queryVector, updated));
+                }
+                else
+                {
+                    heap.TryInsert(match.RowId, match.Distance);
+                }
+
+                seen.Add(match.RowId);
+            }
+        }
+
+        // Include pending inserts/updates from delta that may not be in ANN candidates.
+        foreach (var pair in _deltaVectors)
+        {
+            if (_tombstones.Contains(pair.Key) || seen.Contains(pair.Key))
+                continue;
+
+            heap.TryInsert(pair.Key, _distanceFn(queryVector, pair.Value));
+            seen.Add(pair.Key);
+        }
+
+        // Correctness fallback: if ANN+delta did not produce enough rows, scan remaining base rows.
+        if (heap.Count < targetK)
+        {
+            for (int i = 0; i < _graph.NodeCount; i++)
+            {
+                long rowId = _graph.GetRowId(i);
+                if (seen.Contains(rowId) || _tombstones.Contains(rowId))
+                    continue;
+
+                float distance = _deltaVectors.TryGetValue(rowId, out var updated)
+                    ? _distanceFn(queryVector, updated)
+                    : _distanceFn(queryVector, _resolver.GetVector(i));
+
+                heap.TryInsert(rowId, distance);
+                seen.Add(rowId);
+            }
+        }
+
+        return heap.ToResult();
+    }
+
+    private int GetActiveCountNoLock()
+    {
+        int count = 0;
+        for (int i = 0; i < _graph.NodeCount; i++)
+        {
+            long rowId = _graph.GetRowId(i);
+            if (_tombstones.Contains(rowId))
+                continue;
+            count++;
+        }
+
+        foreach (var pair in _deltaVectors)
+        {
+            if (_tombstones.Contains(pair.Key))
+                continue;
+            if (_graph.TryGetNodeIndex(pair.Key, out _))
+                continue;
+            count++;
+        }
+
+        return count;
+    }
+
+    private uint ComputeChecksumNoLock()
+    {
+        const uint offset = 2166136261;
+        uint hash = offset;
+
+        // Base graph topology and immutable config/metric.
+        byte[] serialized = HnswSerializer.Serialize(_graph, _config, _resolver.Dimensions, _metric);
+        for (int i = 0; i < serialized.Length; i++)
+            hash = AddByte(hash, serialized[i]);
+
+        // Pending tombstones in deterministic order.
+        if (_tombstones.Count > 0)
+        {
+            var deleted = _tombstones.ToArray();
+            Array.Sort(deleted);
+            for (int i = 0; i < deleted.Length; i++)
+                hash = AddInt64(hash, deleted[i]);
+        }
+
+        // Pending upserts in deterministic order.
+        if (_deltaVectors.Count > 0)
+        {
+            var rowIds = _deltaVectors.Keys.ToArray();
+            Array.Sort(rowIds);
+            for (int i = 0; i < rowIds.Length; i++)
+            {
+                long rowId = rowIds[i];
+                hash = AddInt64(hash, rowId);
+                var vector = _deltaVectors[rowId];
+                hash = AddInt32(hash, vector.Length);
+                for (int d = 0; d < vector.Length; d++)
+                    hash = AddInt32(hash, BitConverter.SingleToInt32Bits(vector[d]));
+            }
+        }
+
+        return hash;
+    }
+
+    private static uint AddByte(uint hash, byte value)
+    {
+        const uint prime = 16777619;
+        return (hash ^ value) * prime;
+    }
+
+    private static uint AddInt32(uint hash, int value)
+    {
+        unchecked
+        {
+            hash = AddByte(hash, (byte)value);
+            hash = AddByte(hash, (byte)(value >> 8));
+            hash = AddByte(hash, (byte)(value >> 16));
+            hash = AddByte(hash, (byte)(value >> 24));
+            return hash;
+        }
+    }
+
+    private static uint AddInt64(uint hash, long value)
+    {
+        unchecked
+        {
+            hash = AddByte(hash, (byte)value);
+            hash = AddByte(hash, (byte)(value >> 8));
+            hash = AddByte(hash, (byte)(value >> 16));
+            hash = AddByte(hash, (byte)(value >> 24));
+            hash = AddByte(hash, (byte)(value >> 32));
+            hash = AddByte(hash, (byte)(value >> 40));
+            hash = AddByte(hash, (byte)(value >> 48));
+            hash = AddByte(hash, (byte)(value >> 56));
+            return hash;
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
