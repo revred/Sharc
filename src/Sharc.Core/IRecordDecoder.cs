@@ -134,6 +134,19 @@ public interface IRecordDecoder
     void ComputeColumnOffsets(ReadOnlySpan<long> serialTypes, int columnCount, int bodyOffset, Span<int> offsets);
 
     /// <summary>
+    /// Decodes only the first <paramref name="keyCount"/> columns of an index record
+    /// and extracts the trailing rowid (last column). Avoids allocating a full ColumnValue[]
+    /// for the entire record.
+    /// </summary>
+    /// <param name="payload">The raw index record bytes (header + body).</param>
+    /// <param name="keys">Pre-allocated buffer to receive key column values.</param>
+    /// <param name="keyCount">Number of leading key columns to decode.</param>
+    /// <param name="trailingRowId">Receives the integer value of the last column (the table rowid).</param>
+    /// <returns>True if the record has at least keyCount + 1 columns; false otherwise.</returns>
+    bool TryDecodeIndexRecord(ReadOnlySpan<byte> payload, ColumnValue[] keys,
+        int keyCount, out long trailingRowId);
+
+    /// <summary>
     /// Evaluates filters directly against the raw payload without decoding the full row.
     /// </summary>
     /// <param name="payload">The raw record bytes.</param>

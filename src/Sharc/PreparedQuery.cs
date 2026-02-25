@@ -168,12 +168,9 @@ public sealed class PreparedQuery : IPreparedReader
         });
 
         // Cache for reuse — mark reader as owned so Dispose() resets instead of destroying
-        if (!_hasIndexSeek)
-        {
-            reader.MarkReusable();
-            slot.Cursor = cursor;
-            slot.Reader = reader;
-        }
+        reader.MarkReusable();
+        slot.Cursor = cursor;
+        slot.Reader = reader;
 
         if (NeedsPostProcessing)
             return QueryPostProcessor.Apply(reader, Intent);
@@ -195,16 +192,5 @@ public sealed class PreparedQuery : IPreparedReader
     }
 
     private static long ComputeParamCacheKey(IReadOnlyDictionary<string, object>? parameters)
-    {
-        if (parameters is null or { Count: 0 })
-            return 0;
-
-        var hc = new HashCode();
-        foreach (var kvp in parameters)
-        {
-            hc.Add(kvp.Key);
-            hc.Add(kvp.Value);
-        }
-        return hc.ToHashCode();
-    }
+        => ParameterKeyHasher.Compute(parameters);
 }

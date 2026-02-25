@@ -258,18 +258,7 @@ internal sealed class ExecutionRouter : IDisposable
     }
 
     private static long ComputeParamKey(IReadOnlyDictionary<string, object>? parameters)
-    {
-        if (parameters is null or { Count: 0 })
-            return 0;
-
-        var hc = new HashCode();
-        foreach (var kvp in parameters)
-        {
-            hc.Add(kvp.Key);
-            hc.Add(kvp.Value);
-        }
-        return hc.ToHashCode();
-    }
+        => ParameterKeyHasher.Compute(parameters);
 
     /// <inheritdoc/>
     public void Dispose()

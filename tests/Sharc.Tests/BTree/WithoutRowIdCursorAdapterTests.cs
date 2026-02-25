@@ -180,5 +180,6 @@ public sealed class WithoutRowIdCursorAdapterTests
         public double DecodeDoubleAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset) => 0;
         public string DecodeStringAt(ReadOnlySpan<byte> payload, long serialType, int columnOffset) => string.Empty;
         public void ComputeColumnOffsets(ReadOnlySpan<long> serialTypes, int columnCount, int bodyOffset, Span<int> offsets) { }
+        public bool TryDecodeIndexRecord(ReadOnlySpan<byte> payload, ColumnValue[] keys, int keyCount, out long trailingRowId) { trailingRowId = 0; return false; }
     }
 }

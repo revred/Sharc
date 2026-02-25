@@ -274,11 +274,11 @@ public sealed class LedgerManager
             long ts = cursor.GetInt64(1);
             string agentId = cursor.GetString(2);
 
-            // Access blob columns as spans — avoid .ToArray() heap allocations
-            var payloadSpan = cursor.GetBlob(3).AsSpan();
-            var payloadHashSpan = cursor.GetBlob(4).AsSpan();
-            var prevHashSpan = cursor.GetBlob(5).AsSpan();
-            var signatureSpan = cursor.GetBlob(6).AsSpan();
+            // Zero-copy blob access — spans point directly into the page buffer
+            var payloadSpan = cursor.GetBlobSpan(3);
+            var payloadHashSpan = cursor.GetBlobSpan(4);
+            var prevHashSpan = cursor.GetBlobSpan(5);
+            var signatureSpan = cursor.GetBlobSpan(6);
 
             // 0. Verify Payload Hash
             if (!SharcHash.TryCompute(payloadSpan, computedHash, out _) ||
@@ -401,10 +401,10 @@ public sealed class LedgerManager
                     ColumnValue.FromInt64(1, reader.GetInt64(0)),
                     ColumnValue.FromInt64(2, reader.GetInt64(1)),
                     ColumnValue.Text(1, System.Text.Encoding.UTF8.GetBytes(reader.GetString(2))),
-                    ColumnValue.Blob(1, reader.GetBlob(3).ToArray()), // Payload
-                    ColumnValue.Blob(1, reader.GetBlob(4).ToArray()), // Hash
-                    ColumnValue.Blob(1, reader.GetBlob(5).ToArray()), // Prev
-                    ColumnValue.Blob(1, reader.GetBlob(6).ToArray())  // Sig
+                    ColumnValue.Blob(1, reader.GetBlob(3)), // Payload
+                    ColumnValue.Blob(1, reader.GetBlob(4)), // Hash
+                    ColumnValue.Blob(1, reader.GetBlob(5)), // Prev
+                    ColumnValue.Blob(1, reader.GetBlob(6))  // Sig
                 };
                 
                 int size = RecordEncoder.ComputeEncodedSize(columns);

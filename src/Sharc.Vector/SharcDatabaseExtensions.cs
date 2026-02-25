@@ -1,6 +1,8 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc.Vector.Hnsw;
+
 namespace Sharc.Vector;
 
 /// <summary>
@@ -64,6 +66,37 @@ public static class SharcDatabaseExtensions
             jit.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Builds an HNSW approximate nearest neighbor index for the specified table and vector column.
+    /// Optionally persists the index to a shadow table for fast reload.
+    /// </summary>
+    public static HnswIndex BuildHnswIndex(this SharcDatabase db, string tableName,
+        string vectorColumn, DistanceMetric metric = DistanceMetric.Cosine,
+        HnswConfig? config = null, bool persist = true)
+    {
+        return HnswIndex.Build(db, tableName, vectorColumn, metric, config, persist);
+    }
+
+    /// <summary>
+    /// Loads a previously persisted HNSW index from its shadow table.
+    /// Returns null if no persisted index exists.
+    /// </summary>
+    public static HnswIndex? LoadHnswIndex(this SharcDatabase db, string tableName,
+        string vectorColumn)
+    {
+        return HnswIndex.Load(db, tableName, vectorColumn);
+    }
+
+    /// <summary>
+    /// Loads a persisted HNSW index if available, otherwise builds and persists it.
+    /// </summary>
+    public static HnswIndex LoadOrBuildHnswIndex(this SharcDatabase db, string tableName,
+        string vectorColumn, DistanceMetric metric = DistanceMetric.Cosine,
+        HnswConfig? config = null)
+    {
+        return HnswIndex.LoadOrBuild(db, tableName, vectorColumn, metric, config);
     }
 
     /// <summary>

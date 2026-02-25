@@ -12,6 +12,56 @@ namespace Sharc.Query.Execution;
 internal static class CaseExpressionEvaluator
 {
     /// <summary>
+    /// Pre-resolves all ColumnRefStar nodes in a CASE expression tree to their ordinals.
+    /// Call once before the row loop, then pass the result to the cached Evaluate overload.
+    /// </summary>
+    internal static Dictionary<ColumnRefStar, int> PreResolveColumnRefs(
+        CaseStar caseExpr, string[] columnNames)
+    {
+        var cache = new Dictionary<ColumnRefStar, int>(ReferenceEqualityComparer.Instance);
+        WalkAndResolve(caseExpr, columnNames, cache);
+        return cache;
+    }
+
+    private static void WalkAndResolve(
+        SharqStar node, string[] columnNames, Dictionary<ColumnRefStar, int> cache)
+    {
+        switch (node)
+        {
+            case ColumnRefStar col:
+                if (!cache.ContainsKey(col))
+                {
+                    string name = col.TableAlias != null
+                        ? $"{col.TableAlias}.{col.Name}" : col.Name;
+                    int ordinal = QueryValueOps.TryResolveOrdinal(columnNames, name);
+                    if (ordinal < 0 && col.TableAlias != null)
+                        ordinal = QueryValueOps.TryResolveOrdinal(columnNames, col.Name);
+                    cache[col] = ordinal;
+                }
+                break;
+            case BinaryStar bin:
+                WalkAndResolve(bin.Left, columnNames, cache);
+                WalkAndResolve(bin.Right, columnNames, cache);
+                break;
+            case UnaryStar un:
+                WalkAndResolve(un.Operand, columnNames, cache);
+                break;
+            case IsNullStar isNull:
+                WalkAndResolve(isNull.Operand, columnNames, cache);
+                break;
+            case CaseStar nested:
+                foreach (var w in nested.Whens)
+                {
+                    WalkAndResolve(w.Condition, columnNames, cache);
+                    WalkAndResolve(w.Result, columnNames, cache);
+                }
+                if (nested.ElseExpr != null)
+                    WalkAndResolve(nested.ElseExpr, columnNames, cache);
+                break;
+        }
+    }
+
+    /// <summary>
     /// Evaluates a CASE expression against the given row using the column name map.
     /// </summary>
     internal static QueryValue Evaluate(CaseStar caseExpr, QueryValue[] row, string[] columnNames)
@@ -26,6 +76,98 @@ internal static class CaseExpressionEvaluator
         return caseExpr.ElseExpr != null
             ? EvalExpr(caseExpr.ElseExpr, row, columnNames)
             : QueryValue.Null;
+    }
+
+    /// <summary>
+    /// Evaluates with pre-resolved ordinal cache (zero per-row string allocation).
+    /// </summary>
+    internal static QueryValue Evaluate(
+        CaseStar caseExpr, QueryValue[] row,
+        Dictionary<ColumnRefStar, int> ordinalCache)
+    {
+        foreach (var when in caseExpr.Whens)
+        {
+            var condResult = EvalExprCached(when.Condition, row, ordinalCache);
+            if (IsTruthy(condResult))
+                return EvalExprCached(when.Result, row, ordinalCache);
+        }
+
+        return caseExpr.ElseExpr != null
+            ? EvalExprCached(caseExpr.ElseExpr, row, ordinalCache)
+            : QueryValue.Null;
+    }
+
+    private static QueryValue EvalExprCached(
+        SharqStar expr, QueryValue[] row, Dictionary<ColumnRefStar, int> ordinalCache)
+    {
+        switch (expr)
+        {
+            case LiteralStar lit:
+                return EvalLiteral(lit);
+            case ColumnRefStar col:
+                return ordinalCache.TryGetValue(col, out int ord) && ord >= 0
+                    ? row[ord] : QueryValue.Null;
+            case BinaryStar bin:
+                return EvalBinaryCached(bin, row, ordinalCache);
+            case UnaryStar un:
+                var val = EvalExprCached(un.Operand, row, ordinalCache);
+                if (val.IsNull) return QueryValue.Null;
+                return un.Op switch
+                {
+                    UnaryOp.Not => QueryValue.FromInt64(IsTruthy(val) ? 0 : 1),
+                    UnaryOp.Negate when val.Type == QueryValueType.Int64 => QueryValue.FromInt64(-val.AsInt64()),
+                    UnaryOp.Negate when val.Type == QueryValueType.Double => QueryValue.FromDouble(-val.AsDouble()),
+                    _ => QueryValue.Null,
+                };
+            case IsNullStar isNull:
+                var isNullVal = EvalExprCached(isNull.Operand, row, ordinalCache);
+                bool result = isNull.Negated ? !isNullVal.IsNull : isNullVal.IsNull;
+                return QueryValue.FromInt64(result ? 1 : 0);
+            case CaseStar nested:
+                return Evaluate(nested, row, ordinalCache);
+            default:
+                return QueryValue.Null;
+        }
+    }
+
+    private static QueryValue EvalBinaryCached(
+        BinaryStar bin, QueryValue[] row, Dictionary<ColumnRefStar, int> ordinalCache)
+    {
+        var left = EvalExprCached(bin.Left, row, ordinalCache);
+        var right = EvalExprCached(bin.Right, row, ordinalCache);
+
+        if (left.IsNull || right.IsNull)
+        {
+            if (bin.Op == BinaryOp.And)
+            {
+                if (!left.IsNull && !IsTruthy(left)) return QueryValue.FromInt64(0);
+                if (!right.IsNull && !IsTruthy(right)) return QueryValue.FromInt64(0);
+            }
+            if (bin.Op == BinaryOp.Or)
+            {
+                if (!left.IsNull && IsTruthy(left)) return QueryValue.FromInt64(1);
+                if (!right.IsNull && IsTruthy(right)) return QueryValue.FromInt64(1);
+            }
+            return QueryValue.Null;
+        }
+
+        return bin.Op switch
+        {
+            BinaryOp.Equal => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) == 0 ? 1 : 0),
+            BinaryOp.NotEqual => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) != 0 ? 1 : 0),
+            BinaryOp.LessThan => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) < 0 ? 1 : 0),
+            BinaryOp.GreaterThan => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) > 0 ? 1 : 0),
+            BinaryOp.LessOrEqual => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) <= 0 ? 1 : 0),
+            BinaryOp.GreaterOrEqual => QueryValue.FromInt64(QueryValueOps.CompareValues(left, right) >= 0 ? 1 : 0),
+            BinaryOp.And => QueryValue.FromInt64(IsTruthy(left) && IsTruthy(right) ? 1 : 0),
+            BinaryOp.Or => QueryValue.FromInt64(IsTruthy(left) || IsTruthy(right) ? 1 : 0),
+            BinaryOp.Add => EvalArithmetic(left, right, static (a, b) => a + b, static (a, b) => a + b),
+            BinaryOp.Subtract => EvalArithmetic(left, right, static (a, b) => a - b, static (a, b) => a - b),
+            BinaryOp.Multiply => EvalArithmetic(left, right, static (a, b) => a * b, static (a, b) => a * b),
+            BinaryOp.Divide => EvalArithmetic(left, right, static (a, b) => b != 0 ? a / b : 0, static (a, b) => b != 0.0 ? a / b : 0.0),
+            BinaryOp.Modulo => EvalArithmetic(left, right, static (a, b) => b != 0 ? a % b : 0, static (a, b) => b != 0.0 ? a % b : 0.0),
+            _ => QueryValue.Null,
+        };
     }
 
     private static QueryValue EvalExpr(SharqStar expr, QueryValue[] row, string[] columnNames)

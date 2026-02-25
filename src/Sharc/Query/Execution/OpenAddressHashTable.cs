@@ -14,15 +14,18 @@ namespace Sharc.Query.Execution;
 /// <remarks>
 /// Uses linear probing with backward-shift deletion to maintain probe chains
 /// without tombstones. The table is sized to ~1.5× capacity for acceptable load factor.
+/// Occupancy is tracked via a bit-packed int[] (1 bit per slot) for 8× memory
+/// reduction compared to a bool[] approach.
 /// </remarks>
 /// <typeparam name="TKey">The key type. Must implement <see cref="IEquatable{TKey}"/>.</typeparam>
 internal sealed class OpenAddressHashTable<TKey> : IDisposable
 {
-    // Slot layout: parallel arrays for keys, values, and occupancy.
+    // Slot layout: parallel arrays for keys and values; bit-packed occupancy.
     private TKey[]? _keys;
     private int[]? _values;
-    private bool[]? _occupied;
+    private int[]? _occupiedBits;  // bit-packed: 1 bit per slot, rented from ArrayPool<int>
     private readonly int _capacity;
+    private readonly int _wordCount; // number of ints in _occupiedBits
     private int _count;
     private readonly IEqualityComparer<TKey>? _comparer;
 
@@ -38,11 +41,21 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         _comparer = comparer;
         // Size to ~1.5× for ~67% max load factor
         _capacity = Math.Max(NextPowerOfTwo((int)(expectedCount * 1.5)), 16);
+        _wordCount = (_capacity + 31) >> 5;
         _keys = ArrayPool<TKey>.Shared.Rent(_capacity);
         _values = ArrayPool<int>.Shared.Rent(_capacity);
-        _occupied = ArrayPool<bool>.Shared.Rent(_capacity);
-        Array.Clear(_occupied, 0, _capacity);
+        _occupiedBits = ArrayPool<int>.Shared.Rent(_wordCount);
+        Array.Clear(_occupiedBits, 0, _wordCount);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsOccupied(int idx) => (_occupiedBits![idx >> 5] & (1 << (idx & 31))) != 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SetOccupied(int idx) => _occupiedBits![idx >> 5] |= (1 << (idx & 31));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ClearOccupied(int idx) => _occupiedBits![idx >> 5] &= ~(1 << (idx & 31));
 
     /// <summary>
     /// Adds a key-value pair to the table.
@@ -54,7 +67,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         int slot = FindSlot(key, findEmpty: true);
         _keys![slot] = key;
         _values![slot] = value;
-        _occupied![slot] = true;
+        SetOccupied(slot);
         _count++;
     }
 
@@ -81,7 +94,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         for (int i = 0; i < _capacity; i++)
         {
             int idx = (slot + i) & mask;
-            if (!_occupied![idx])
+            if (!IsOccupied(idx))
             {
                 value = default;
                 return false;
@@ -108,7 +121,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         for (int i = 0; i < _capacity; i++)
         {
             int idx = (slot + i) & mask;
-            if (!_occupied![idx])
+            if (!IsOccupied(idx))
                 return;
             if (KeyEquals(_keys![idx], key))
                 results.Add(_values![idx]);
@@ -127,7 +140,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         for (int i = 0; i < _capacity; i++)
         {
             int idx = (slot + i) & mask;
-            if (!_occupied![idx])
+            if (!IsOccupied(idx))
                 return false;
             if (KeyEquals(_keys![idx], key))
             {
@@ -154,7 +167,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         for (int i = 0; i < _capacity; i++)
         {
             int idx = (slot + i) & mask;
-            if (!_occupied![idx])
+            if (!IsOccupied(idx))
                 break;
             if (KeyEquals(_keys![idx], key))
             {
@@ -177,12 +190,12 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     private void BackwardShiftDelete(int emptySlot)
     {
         int mask = _capacity - 1;
-        _occupied![emptySlot] = false;
+        ClearOccupied(emptySlot);
 
         int gap = emptySlot;
         int next = (gap + 1) & mask;
 
-        while (_occupied[next])
+        while (IsOccupied(next))
         {
             int home = GetHash(_keys![next]) & mask;
 
@@ -193,8 +206,8 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
             {
                 _keys[gap] = _keys[next];
                 _values![gap] = _values[next];
-                _occupied[gap] = true;
-                _occupied[next] = false;
+                SetOccupied(gap);
+                ClearOccupied(next);
                 gap = next;
             }
 
@@ -226,16 +239,13 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     }
 
     /// <summary>
-    /// Finds a slot for insertion (findEmpty=true) or lookup (findEmpty=false).
-    /// </summary>
-    /// <summary>
     /// Enumerates all values remaining in the table (residual set after destructive probe).
     /// </summary>
     public IEnumerable<int> EnumerateValues()
     {
         for (int i = 0; i < _capacity; i++)
         {
-            if (_occupied![i])
+            if (IsOccupied(i))
                 yield return _values![i];
         }
     }
@@ -249,7 +259,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         for (int i = 0; i < _capacity; i++)
         {
             int idx = (slot + i) & mask;
-            if (!_occupied![idx])
+            if (!IsOccupied(idx))
                 return idx;
             if (!findEmpty && KeyEquals(_keys![idx], key))
                 return idx;
@@ -283,10 +293,10 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
             ArrayPool<int>.Shared.Return(_values);
             _values = null;
         }
-        if (_occupied != null)
+        if (_occupiedBits != null)
         {
-            ArrayPool<bool>.Shared.Return(_occupied, clearArray: true);
-            _occupied = null;
+            ArrayPool<int>.Shared.Return(_occupiedBits, clearArray: true);
+            _occupiedBits = null;
         }
     }
 }

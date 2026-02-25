@@ -106,21 +106,27 @@ public sealed class AuditManager
 
     private static byte[] ComputeHash(long id, long ts, int type, byte[] agent, byte[] details, byte[] prev)
     {
-        using var sha = SHA256.Create();
-        // Naive hashing: update simple types then buffers
-        // Ideally serialize tightly.
-        var buf = new byte[8 + 8 + 4];
-        
-        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(buf.AsSpan(0), id);
-        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(buf.AsSpan(8), ts);
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buf.AsSpan(16), type);
-        
-        sha.TransformBlock(buf, 0, buf.Length, null, 0);
-        sha.TransformBlock(agent, 0, agent.Length, null, 0);
-        sha.TransformBlock(details, 0, details.Length, null, 0);
-        sha.TransformFinalBlock(prev, 0, prev.Length);
-        
-        return sha.Hash!;
+        return ComputeHashSpan(id, ts, type, agent, details, prev);
+    }
+
+    private static byte[] ComputeHashSpan(
+        long id, long ts, int type,
+        ReadOnlySpan<byte> agent, ReadOnlySpan<byte> details, ReadOnlySpan<byte> prev)
+    {
+        Span<byte> buf = stackalloc byte[20]; // 8 + 8 + 4
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(buf, id);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(buf[8..], ts);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buf[16..], type);
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(buf);
+        hash.AppendData(agent);
+        hash.AppendData(details);
+        hash.AppendData(prev);
+
+        byte[] result = new byte[32];
+        hash.TryGetHashAndReset(result, out _);
+        return result;
     }
 
     /// <summary>
@@ -181,28 +187,28 @@ public sealed class AuditManager
                 // But I included ID in `ComputeHash`.
                 
                 // Let's assume for now we can read it. If not, I'll fix `SharcDataReader` or `ComputeHash`.
-                long id = reader.GetInt64(0); 
+                long id = reader.GetInt64(0);
                 long ts = reader.GetInt64(1);
                 int type = reader.GetInt32(2);
-                string agent = reader.GetString(3);
-                string details = reader.GetString(4);
-                byte[] storedPrev = reader.GetBlob(5);
-                byte[] storedHash = reader.GetBlob(6);
-                
+                ReadOnlySpan<byte> agentBytes = reader.GetBlobSpan(3);
+                ReadOnlySpan<byte> detailsBytes = reader.GetBlobSpan(4);
+                ReadOnlySpan<byte> storedPrev = reader.GetBlobSpan(5);
+                ReadOnlySpan<byte> storedHash = reader.GetBlobSpan(6);
+
                 if (!lastCalculatedHash.AsSpan().SequenceEqual(storedPrev))
                 {
                     // Chain broken
                     return false;
                 }
-                
-                var calculated = ComputeHash(id, ts, type, Encoding.UTF8.GetBytes(agent), Encoding.UTF8.GetBytes(details), storedPrev);
-                
+
+                var calculated = ComputeHashSpan(id, ts, type, agentBytes, detailsBytes, storedPrev);
+
                 if (!calculated.AsSpan().SequenceEqual(storedHash))
                 {
                     // Tampered
                     return false;
                 }
-                
+
                 lastCalculatedHash = calculated;
             }
             return true;

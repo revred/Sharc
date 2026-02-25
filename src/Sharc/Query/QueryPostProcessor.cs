@@ -4,6 +4,7 @@
 using System.Runtime.InteropServices;
 using Sharc.Query.Execution;
 using Sharc.Query.Intent;
+using Sharc.Query.Sharq.Ast;
 
 namespace Sharc.Query;
 
@@ -124,6 +125,12 @@ internal static class QueryPostProcessor
             }
         }
 
+        // Pre-resolve ordinal caches for each CASE expression (once, before row loop)
+        var ordinalCaches = new Dictionary<int, Dictionary<ColumnRefStar, int>>();
+        foreach (var kvp in caseByOrdinal)
+            ordinalCaches[kvp.Key] = CaseExpressionEvaluator.PreResolveColumnRefs(
+                kvp.Value.Expression, physicalColumnNames);
+
         // Rebuild each row
         for (int r = 0; r < rows.Count; r++)
         {
@@ -135,7 +142,7 @@ internal static class QueryPostProcessor
                 if (caseByOrdinal.TryGetValue(c, out var ce))
                 {
                     outputRow[c] = CaseExpressionEvaluator.Evaluate(
-                        ce.Expression, physicalRow, physicalColumnNames);
+                        ce.Expression, physicalRow, ordinalCaches[c]);
                 }
                 else
                 {
@@ -217,6 +224,49 @@ internal static class QueryPostProcessor
         // eliminating delegate allocation and enabling inlining.
         var comparer = new QueryValueOps.RowComparer(ordinals, descending);
         CollectionsMarshal.AsSpan(rows).Sort(comparer);
+    }
+
+    /// <summary>
+    /// Combined ORDER BY + LIMIT using a bounded heap. O(N log K) instead of O(N log N).
+    /// Only call when both ORDER BY and LIMIT are present.
+    /// </summary>
+    internal static RowSet ApplyOrderByTopN(
+        RowSet rows,
+        IReadOnlyList<OrderIntent> orderBy,
+        string[] columnNames,
+        long limit,
+        long offset)
+    {
+        int heapSize = (int)Math.Min(limit + offset, int.MaxValue);
+        if (heapSize >= rows.Count)
+        {
+            ApplyOrderBy(rows, orderBy, columnNames);
+            return ApplyLimitOffset(rows, limit, offset);
+        }
+
+        var ordinals = new int[orderBy.Count];
+        var descending = new bool[orderBy.Count];
+        for (int i = 0; i < orderBy.Count; i++)
+        {
+            ordinals[i] = QueryValueOps.ResolveOrdinal(columnNames, orderBy[i].ColumnName);
+            descending[i] = orderBy[i].Descending;
+        }
+
+        var comparer = new StreamingTopNProcessor.WorstFirstComparer(ordinals, descending);
+        var heap = new TopNHeap<StreamingTopNProcessor.WorstFirstComparer>(heapSize, comparer);
+
+        for (int i = 0; i < rows.Count; i++)
+            heap.TryInsert(rows[i]);
+
+        var sorted = heap.ExtractSorted();
+
+        int skip = (int)Math.Min(offset, sorted.Length);
+        int take = (int)Math.Min(limit, sorted.Length - skip);
+        var result = new RowSet(take);
+        for (int i = skip; i < skip + take; i++)
+            result.Add(sorted[i]);
+
+        return result;
     }
 
     // RowComparer moved to QueryValueOps.RowComparer — use that directly.

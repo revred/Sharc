@@ -888,14 +888,7 @@ public sealed class SharcDatabase : IDisposable
     {
         var hc = new HashCode();
         hc.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(intent));
-        if (parameters != null)
-        {
-            foreach (var kvp in parameters)
-            {
-                hc.Add(kvp.Key);
-                hc.Add(kvp.Value);
-            }
-        }
+        hc.Add(ParameterKeyHasher.Compute(parameters));
         return hc.ToHashCode();
     }
 
@@ -915,10 +908,10 @@ public sealed class SharcDatabase : IDisposable
             projection = new int[columns.Length];
             for (int i = 0; i < columns.Length; i++)
             {
-                var col = table.Columns.FirstOrDefault(c =>
-                    c.Name.Equals(columns[i], StringComparison.OrdinalIgnoreCase));
-                projection[i] = col?.Ordinal
-                    ?? throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
+                int ordinal = table.GetColumnOrdinal(columns[i]);
+                projection[i] = ordinal >= 0
+                    ? ordinal
+                    : throw new ArgumentException($"Column '{columns[i]}' not found in table '{tableName}'.");
             }
         }
 
