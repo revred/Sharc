@@ -89,7 +89,7 @@ internal static class StreamingTopNProcessor
     /// Struct comparer for the TopN heap — enables JIT specialization (no delegate/closure alloc).
     /// Orders rows so the "worst" compares as positive (max-heap root = worst retained row).
     /// </summary>
-    private readonly struct WorstFirstComparer : IComparer<QueryValue[]>
+    internal readonly struct WorstFirstComparer : IComparer<QueryValue[]>
     {
         private readonly int[] _ordinals;
         private readonly bool[] _descending;

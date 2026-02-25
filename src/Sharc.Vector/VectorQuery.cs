@@ -3,6 +3,7 @@
 
 using Sharc.Core.Trust;
 using Sharc.Trust;
+using Sharc.Vector.Hnsw;
 
 namespace Sharc.Vector;
 
@@ -71,6 +72,34 @@ public sealed class VectorQuery : IDisposable
 
     private AgentInfo? _agent;
 
+    // ── HNSW Index ────────────────────────────────────────────────
+
+    private HnswIndex? _hnswIndex;
+
+    /// <summary>
+    /// Attaches an HNSW index for approximate nearest neighbor search.
+    /// When set, <see cref="NearestTo"/> dispatches to the index when no active
+    /// filters are present. Falls back to flat scan transparently when filters
+    /// are active (HNSW doesn't support pre-filtering).
+    /// </summary>
+    /// <param name="index">The HNSW index to use, or null to detach.</param>
+    public VectorQuery UseIndex(HnswIndex? index)
+    {
+        if (index != null)
+        {
+            if (index.Dimensions != _dimensions)
+                throw new ArgumentException(
+                    $"Index has {index.Dimensions} dimensions but VectorQuery expects {_dimensions}.",
+                    nameof(index));
+            if (index.Metric != _metric)
+                throw new ArgumentException(
+                    $"Index uses {index.Metric} but VectorQuery expects {_metric}.",
+                    nameof(index));
+        }
+        _hnswIndex = index;
+        return this;
+    }
+
     // ── Metadata Filtering (pre-search) ─────────────────────────
 
     /// <summary>
@@ -107,6 +136,28 @@ public sealed class VectorQuery : IDisposable
         ValidateDimensions(queryVector);
         EnforceAgentAccess(columnNames);
 
+        // HNSW fast path: when index is attached AND no filters/row evaluator/metadata requested
+        bool canUseHnsw = _hnswIndex != null && !_innerJit.HasActiveFilters && !_innerJit.HasRowAccessEvaluator;
+
+        if (canUseHnsw && columnNames.Length == 0)
+        {
+            return _hnswIndex!.Search(queryVector, k);
+        }
+
+        // HNSW with metadata enrichment: search HNSW then enrich results from table
+        if (canUseHnsw && columnNames.Length > 0)
+        {
+            var hnswResult = _hnswIndex!.Search(queryVector, k);
+            return EnrichWithMetadata(hnswResult, columnNames);
+        }
+
+        // Flat scan path (filters active, no HNSW index, or radius query)
+        return FlatScanNearestTo(queryVector, k, columnNames);
+    }
+
+    /// <summary>Flat brute-force scan for NearestTo.</summary>
+    private VectorSearchResult FlatScanNearestTo(ReadOnlySpan<float> queryVector, int k, string[] columnNames)
+    {
         // Project the vector column plus any requested metadata columns
         string[] projection = new string[1 + columnNames.Length];
         projection[0] = _vectorColumnName;
@@ -138,6 +189,40 @@ public sealed class VectorQuery : IDisposable
         }
 
         return heap.ToResult();
+    }
+
+    /// <summary>Enriches HNSW results with metadata columns from the source table.</summary>
+    private VectorSearchResult EnrichWithMetadata(VectorSearchResult hnswResult, string[] columnNames)
+    {
+        var enriched = new List<VectorMatch>(hnswResult.Count);
+        var db = _db!;
+        var table = _innerJit.Table!;
+
+        // Seek each result row and extract metadata
+        using var reader = db.CreateReader(table.Name, columnNames);
+        for (int i = 0; i < hnswResult.Count; i++)
+        {
+            var match = hnswResult[i];
+            if (reader.Seek(match.RowId))
+            {
+                var metadata = ExtractMetadataFromSeek(reader, columnNames);
+                enriched.Add(new VectorMatch(match.RowId, match.Distance, metadata));
+            }
+            else
+            {
+                enriched.Add(match); // row may have been deleted; keep result without metadata
+            }
+        }
+
+        return new VectorSearchResult(enriched);
+    }
+
+    private static Dictionary<string, object?> ExtractMetadataFromSeek(SharcDataReader reader, string[] columnNames)
+    {
+        var dict = new Dictionary<string, object?>(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columnNames.Length; i++)
+            dict[columnNames[i]] = reader.GetValue(i);
+        return dict;
     }
 
     /// <summary>

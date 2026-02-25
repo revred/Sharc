@@ -46,6 +46,13 @@ internal sealed class PageArena : IDisposable
         => _buffer.AsSpan(slotIndex * _pageSize, _pageSize);
 
     /// <summary>
+    /// Returns a <see cref="ReadOnlyMemory{T}"/> view of an existing slot.
+    /// Valid until the next <see cref="Dispose"/> or buffer growth via <see cref="Allocate"/>.
+    /// </summary>
+    public ReadOnlyMemory<byte> GetSlotMemory(int slotIndex)
+        => _buffer.AsMemory(slotIndex * _pageSize, _pageSize);
+
+    /// <summary>
     /// Resets the bump pointer to 0. The backing buffer is retained for reuse.
     /// </summary>
     public void Reset()

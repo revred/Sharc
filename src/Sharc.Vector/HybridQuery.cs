@@ -172,7 +172,9 @@ public sealed class HybridQuery : IDisposable
             textProjection[0] = _textColumnName;
             columnNames.CopyTo(textProjection, 1);
 
-            var scored = new List<(long RowId, float TfScore, IReadOnlyDictionary<string, object?>? Metadata)>();
+            // Bounded heap: keep top poolSize text results without full-list materialization.
+            // Min-heap by TF score: root = worst retained score, evict when new score is better.
+            var heap = new TextTopKHeap(poolSize);
 
             using var reader = _textJit.Query(textProjection);
             while (reader.Read())
@@ -180,24 +182,22 @@ public sealed class HybridQuery : IDisposable
                 ReadOnlySpan<byte> textBytes = reader.GetUtf8Span(0);
                 float tfScore = TextScorer.Score(textBytes, queryTermsUtf8);
 
-                if (tfScore > 0)
+                if (tfScore > 0 && heap.ShouldInsert(tfScore))
                 {
                     IReadOnlyDictionary<string, object?>? metadata = null;
                     if (columnNames.Length > 0 && !metadataByRowId.ContainsKey(reader.RowId))
                         metadata = ExtractMetadata(reader, columnNames);
-                    scored.Add((reader.RowId, tfScore, metadata));
+                    heap.ForceInsert(reader.RowId, tfScore, metadata);
                 }
             }
 
-            // Sort by TF score descending, take top poolSize
-            scored.Sort((a, b) => b.TfScore.CompareTo(a.TfScore));
-            int textCount = Math.Min(scored.Count, poolSize);
-            for (int i = 0; i < textCount; i++)
+            // Drain heap sorted by TF score descending (highest first)
+            var topText = heap.ToSortedDescending();
+            for (int i = 0; i < topText.Count; i++)
             {
-                textRanks[scored[i].RowId] = i + 1; // 1-based rank
-                // Store metadata for text-only rows
-                if (!metadataByRowId.ContainsKey(scored[i].RowId))
-                    metadataByRowId[scored[i].RowId] = scored[i].Metadata;
+                textRanks[topText[i].RowId] = i + 1; // 1-based rank
+                if (!metadataByRowId.ContainsKey(topText[i].RowId))
+                    metadataByRowId[topText[i].RowId] = topText[i].Metadata;
             }
         }
 
@@ -260,5 +260,74 @@ public sealed class HybridQuery : IDisposable
             dict[columnNames[i]] = reader.GetValue(i + 1);
         }
         return dict;
+    }
+
+    /// <summary>
+    /// Fixed-capacity min-heap for top-K text scoring. Root = lowest (worst) retained
+    /// TF score. New candidates replace root when their score exceeds it.
+    /// </summary>
+    private sealed class TextTopKHeap
+    {
+        private readonly (long RowId, float TfScore, IReadOnlyDictionary<string, object?>? Metadata)[] _heap;
+        private readonly int _capacity;
+        private int _count;
+
+        internal TextTopKHeap(int k)
+        {
+            _capacity = k;
+            _heap = new (long, float, IReadOnlyDictionary<string, object?>?)[k];
+        }
+
+        internal bool ShouldInsert(float tfScore)
+        {
+            if (_count < _capacity) return true;
+            return tfScore > _heap[0].TfScore;
+        }
+
+        internal void ForceInsert(long rowId, float tfScore, IReadOnlyDictionary<string, object?>? metadata)
+        {
+            if (_count < _capacity)
+            {
+                _heap[_count] = (rowId, tfScore, metadata);
+                _count++;
+                if (_count == _capacity) BuildHeap();
+            }
+            else
+            {
+                _heap[0] = (rowId, tfScore, metadata);
+                SiftDown(0);
+            }
+        }
+
+        internal List<(long RowId, float TfScore, IReadOnlyDictionary<string, object?>? Metadata)> ToSortedDescending()
+        {
+            var list = new List<(long RowId, float TfScore, IReadOnlyDictionary<string, object?>? Metadata)>(_count);
+            for (int i = 0; i < _count; i++)
+                list.Add(_heap[i]);
+            list.Sort((a, b) => b.TfScore.CompareTo(a.TfScore));
+            return list;
+        }
+
+        private void BuildHeap()
+        {
+            for (int i = _count / 2 - 1; i >= 0; i--)
+                SiftDown(i);
+        }
+
+        private void SiftDown(int i)
+        {
+            while (true)
+            {
+                int smallest = i;
+                int left = 2 * i + 1;
+                int right = 2 * i + 2;
+                // Min-heap: root = smallest TF score (worst match to evict)
+                if (left < _count && _heap[left].TfScore < _heap[smallest].TfScore) smallest = left;
+                if (right < _count && _heap[right].TfScore < _heap[smallest].TfScore) smallest = right;
+                if (smallest == i) break;
+                (_heap[i], _heap[smallest]) = (_heap[smallest], _heap[i]);
+                i = smallest;
+            }
+        }
     }
 }

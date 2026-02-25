@@ -20,6 +20,11 @@ internal sealed class StreamingAggregator
     private readonly string[] _outputColumns;
     private readonly string[] _sourceColumnNames;
 
+    // Precomputed output column mapping: for each output ordinal, either:
+    //   groupKeyIndex >= 0: copy from groupKeyValues[groupKeyIndex]
+    //   groupKeyIndex == -1: this is an aggregate column (filled separately)
+    private readonly int[] _outputGroupKeyMap;
+
     // Per-group accumulators keyed by extracted group-key values (not full rows).
     // GroupKey stores its own copy of key values, enabling row buffer reuse.
     private readonly Dictionary<GroupKey, GroupAccumulator> _groups;
@@ -63,6 +68,30 @@ internal sealed class StreamingAggregator
         }
 
         _groups = new Dictionary<GroupKey, GroupAccumulator>(GroupKeyComparer.Instance);
+
+        // Precompute output column → group key index map
+        _outputGroupKeyMap = new int[_outputColumns.Length];
+        for (int i = 0; i < _outputColumns.Length; i++)
+        {
+            _outputGroupKeyMap[i] = -1; // default: aggregate column
+            if (_groupOrdinals == null) continue;
+
+            bool isAgg = false;
+            foreach (var agg in aggregates)
+                if (agg.OutputOrdinal == i) { isAgg = true; break; }
+
+            if (!isAgg)
+            {
+                int srcOrd = TryResolveOrdinal(sourceColumnNames, _outputColumns[i]);
+                if (srcOrd >= 0)
+                {
+                    for (int g = 0; g < _groupOrdinals.Length; g++)
+                    {
+                        if (_groupOrdinals[g] == srcOrd) { _outputGroupKeyMap[i] = g; break; }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -265,27 +294,13 @@ internal sealed class StreamingAggregator
     {
         var row = new QueryValue[_outputColumns.Length];
 
-        // Fill group key columns
-        if (groupKeyValues != null && _groupOrdinals != null)
+        // Fill group key columns via precomputed map
+        if (groupKeyValues != null)
         {
-            for (int i = 0; i < _outputColumns.Length; i++)
+            for (int i = 0; i < _outputGroupKeyMap.Length; i++)
             {
-                if (!IsAggregateColumn(i))
-                {
-                    int srcOrdinal = TryResolveOrdinal(_sourceColumnNames, _outputColumns[i]);
-                    if (srcOrdinal >= 0)
-                    {
-                        // Find which group ordinal matches
-                        for (int g = 0; g < _groupOrdinals.Length; g++)
-                        {
-                            if (_groupOrdinals[g] == srcOrdinal)
-                            {
-                                row[i] = groupKeyValues[g];
-                                break;
-                            }
-                        }
-                    }
-                }
+                if (_outputGroupKeyMap[i] >= 0)
+                    row[i] = groupKeyValues[_outputGroupKeyMap[i]];
             }
         }
 
@@ -315,16 +330,6 @@ internal sealed class StreamingAggregator
         return row;
     }
 
-    private bool IsAggregateColumn(int outputOrdinal)
-    {
-        foreach (var agg in _aggregates)
-        {
-            if (agg.OutputOrdinal == outputOrdinal)
-                return true;
-        }
-        return false;
-    }
-
     // ─── Accumulator types ──────────────────────────────────────
 
     private struct GroupAccumulator
@@ -339,10 +344,10 @@ internal sealed class StreamingAggregator
         public long CountStarOrNonNull;
         public long SumInt;
         public double SumDouble;
-        public bool HasDouble;
         public long NumericCount;
         public QueryValue Min;
         public QueryValue Max;
+        public bool HasDouble;
         public bool HasMinMax;
     }
 

@@ -51,37 +51,44 @@ internal sealed class RelationStore
         _tableRootPage = table.RootPage;
         _columnCount = table.Columns.Count;
 
-        _colId = GetOrdinal(table, _schema.EdgeIdColumn);
-        _colOrigin = GetOrdinal(table, _schema.EdgeOriginColumn);
-        _colTarget = GetOrdinal(table, _schema.EdgeTargetColumn);
-        _colKind = GetOrdinal(table, _schema.EdgeKindColumn);
-        _colData = GetOrdinal(table, _schema.EdgeDataColumn);
+        _colId = table.GetColumnOrdinal(_schema.EdgeIdColumn);
+        _colOrigin = table.GetColumnOrdinal(_schema.EdgeOriginColumn);
+        _colTarget = table.GetColumnOrdinal(_schema.EdgeTargetColumn);
+        _colKind = table.GetColumnOrdinal(_schema.EdgeKindColumn);
+        _colData = table.GetColumnOrdinal(_schema.EdgeDataColumn);
 
-        _colCvn = _schema.EdgeCvnColumn != null ? GetOrdinal(table, _schema.EdgeCvnColumn) : -1;
-        _colLvn = _schema.EdgeLvnColumn != null ? GetOrdinal(table, _schema.EdgeLvnColumn) : -1;
-        _colSync = _schema.EdgeSyncColumn != null ? GetOrdinal(table, _schema.EdgeSyncColumn) : -1;
-        _colWeight = _schema.EdgeWeightColumn != null ? GetOrdinal(table, _schema.EdgeWeightColumn) : -1;
+        _colCvn = _schema.EdgeCvnColumn != null ? table.GetColumnOrdinal(_schema.EdgeCvnColumn) : -1;
+        _colLvn = _schema.EdgeLvnColumn != null ? table.GetColumnOrdinal(_schema.EdgeLvnColumn) : -1;
+        _colSync = _schema.EdgeSyncColumn != null ? table.GetColumnOrdinal(_schema.EdgeSyncColumn) : -1;
+        _colWeight = _schema.EdgeWeightColumn != null ? table.GetColumnOrdinal(_schema.EdgeWeightColumn) : -1;
 
         // Origin Index
-        var originIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
-            idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
-            idx.Columns.Count > 0 &&
-            idx.Columns[0].Name.Equals(_schema.EdgeOriginColumn, StringComparison.OrdinalIgnoreCase));
-        _originIndexRootPage = originIndex?.RootPage ?? -1;
+        int originRoot = -1;
+        foreach (var idx in schemaInfo.Indexes)
+        {
+            if (idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
+                idx.Columns.Count > 0 &&
+                idx.Columns[0].Name.Equals(_schema.EdgeOriginColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                originRoot = idx.RootPage;
+                break;
+            }
+        }
+        _originIndexRootPage = originRoot;
 
         // Target Index
-        var targetIndex = schemaInfo.Indexes.FirstOrDefault(idx =>
-            idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
-            idx.Columns.Count > 0 &&
-            idx.Columns[0].Name.Equals(_schema.EdgeTargetColumn, StringComparison.OrdinalIgnoreCase));
-        _targetIndexRootPage = targetIndex?.RootPage ?? -1;
-    }
-
-    private static int GetOrdinal(TableInfo table, string colName)
-    {
-        var col = table.Columns.FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
-        if (col == null) return -1;
-        return col.Ordinal;
+        int targetRoot = -1;
+        foreach (var idx in schemaInfo.Indexes)
+        {
+            if (idx.TableName.Equals(_tableName, StringComparison.OrdinalIgnoreCase) &&
+                idx.Columns.Count > 0 &&
+                idx.Columns[0].Name.Equals(_schema.EdgeTargetColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                targetRoot = idx.RootPage;
+                break;
+            }
+        }
+        _targetIndexRootPage = targetRoot;
     }
 
     public IEdgeCursor CreateEdgeCursor(NodeKey origin, RelationKind? kind = null)

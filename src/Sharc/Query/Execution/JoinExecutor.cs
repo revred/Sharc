@@ -136,11 +136,18 @@ internal static class JoinExecutor
         if (intent.OrderBy is { Count: > 0 })
         {
              var finalRows = probeStream.ToList();
-             QueryPostProcessor.ApplyOrderBy(finalRows, intent.OrderBy, columns);
-             
-             if (intent.Limit.HasValue || intent.Offset.HasValue)
+
+             if (intent.Limit.HasValue)
              {
-                 finalRows = QueryPostProcessor.ApplyLimitOffset(finalRows, intent.Limit, intent.Offset);
+                 finalRows = QueryPostProcessor.ApplyOrderByTopN(
+                     finalRows, intent.OrderBy, columns,
+                     intent.Limit.Value, intent.Offset ?? 0);
+             }
+             else
+             {
+                 QueryPostProcessor.ApplyOrderBy(finalRows, intent.OrderBy, columns);
+                 if (intent.Offset.HasValue)
+                     finalRows = QueryPostProcessor.ApplyLimitOffset(finalRows, intent.Limit, intent.Offset);
              }
 
              if (intent.Columns != null)

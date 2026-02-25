@@ -49,11 +49,17 @@ internal static class CborDecoder
         if (major != MajorMap)
             throw new InvalidOperationException("CBOR root is not a map.");
 
+        // Pre-encode field name to UTF-8 once
+        int maxBytes = Encoding.UTF8.GetMaxByteCount(fieldName.Length);
+        Span<byte> fieldNameUtf8 = maxBytes <= 256
+            ? stackalloc byte[maxBytes]
+            : new byte[maxBytes];
+        int actualBytes = Encoding.UTF8.GetBytes(fieldName.AsSpan(), fieldNameUtf8);
+        fieldNameUtf8 = fieldNameUtf8[..actualBytes];
+
         for (int i = 0; i < (int)count; i++)
         {
-            // Read key (must be text string)
-            string key = ReadTextString(cbor, ref pos);
-            if (key == fieldName)
+            if (MatchTextString(cbor, ref pos, fieldNameUtf8))
                 return ReadValue(cbor, ref pos);
 
             // Skip value — the key-optimization
@@ -222,6 +228,23 @@ internal static class CborDecoder
     }
 
     // ── Primitives ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Checks if the next CBOR text string equals the expected UTF-8 bytes without allocating a string.
+    /// Advances pos past the text string regardless of match result.
+    /// </summary>
+    private static bool MatchTextString(ReadOnlySpan<byte> cbor, ref int pos, ReadOnlySpan<byte> expectedUtf8)
+    {
+        var (major, len) = ReadHeader(cbor, ref pos);
+        if (major != MajorTextString)
+            throw new InvalidOperationException($"Expected text string, got major type {major >> 5}.");
+
+        int length = (int)len;
+        bool match = length == expectedUtf8.Length
+            && cbor.Slice(pos, length).SequenceEqual(expectedUtf8);
+        pos += length;
+        return match;
+    }
 
     private static string ReadTextString(ReadOnlySpan<byte> cbor, ref int pos)
     {

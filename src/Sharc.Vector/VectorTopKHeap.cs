@@ -108,6 +108,22 @@ internal sealed class VectorTopKHeap
         return new VectorSearchResult(results);
     }
 
+    /// <summary>
+    /// Extracts all results, negates distances, and sorts descending (highest first).
+    /// Used for DotProduct where internally negated distances are stored in the heap
+    /// but output should show original positive similarities in descending order.
+    /// </summary>
+    internal VectorSearchResult ToResultNegatedDescending()
+    {
+        var results = new List<VectorMatch>(_count);
+        for (int i = 0; i < _count; i++)
+            results.Add(new VectorMatch(_heap[i].RowId, -_heap[i].Distance, _heap[i].Metadata));
+
+        results.Sort((a, b) => b.Distance.CompareTo(a.Distance));
+
+        return new VectorSearchResult(results);
+    }
+
     private void BuildHeap()
     {
         for (int i = _count / 2 - 1; i >= 0; i--)

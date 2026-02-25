@@ -23,7 +23,7 @@ internal enum QueryValueType : byte
 /// (no heap allocation), while <c>string</c> and <c>byte[]</c> use a managed reference.
 /// Replaces <c>object?</c> in the materialization pipeline to eliminate boxing.
 /// </summary>
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Auto)]
 internal struct QueryValue
 {
     private long _numericValue;

@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 using Sharc.Core;
 using Sharc.Core.BTree;
@@ -222,6 +223,7 @@ public sealed partial class SharcDataReader : IDisposable
     // Index seek support
     private readonly IBTreeReader? _bTreeReader;
     private readonly IReadOnlyList<IndexInfo>? _tableIndexes;
+    private ColumnValue[]? _indexKeyBuffer; // reusable buffer for TryDecodeIndexRecord
 
     // Mode-projected composition (null in cursor mode → 0 B overhead on PointLookup)
     private readonly CompositeState? _composite;
@@ -236,6 +238,9 @@ public sealed partial class SharcDataReader : IDisposable
 
     // Cached column names — built once on first call to GetColumnNames()
     private string[]? _cachedColumnNames;
+
+    // Cached ordinal map — built once on first call to GetOrdinal()
+    private Dictionary<string, int>? _ordinalCache;
 
     // ── Value-type fields ───────────────────────────────────────────────
     //
@@ -683,26 +688,73 @@ public sealed partial class SharcDataReader : IDisposable
         using var indexCursor = _bTreeReader.CreateIndexCursor((uint)indexInfo.RootPage);
 
         // Determine sort direction for the first key column to enable early exit.
-        // Index entries are stored in sorted order, so once we've passed the target
-        // value we can stop scanning instead of reading the entire index.
         bool firstColumnDescending = indexInfo.Columns.Count > 0 && indexInfo.Columns[0].IsDescending;
 
-        while (indexCursor.MoveNext())
+        // Use SeekFirst for O(log N) positioning on the first key column
+        bool seeked = false;
+        switch (keyValues[0])
         {
-            var indexRecord = _recordDecoder!.DecodeRecord(indexCursor.Payload);
-            if (indexRecord.Length < 2) continue; // Need at least one key column + rowid
+            case long l:
+                seeked = indexCursor.SeekFirst(l);
+                break;
+            case int i:
+                seeked = indexCursor.SeekFirst((long)i);
+                break;
+            case string s:
+                int maxUtf8 = Encoding.UTF8.GetMaxByteCount(s.Length);
+                Span<byte> utf8Buf = maxUtf8 <= 256 ? stackalloc byte[256] : new byte[maxUtf8];
+                int written = Encoding.UTF8.GetBytes(s, utf8Buf);
+                seeked = indexCursor.SeekFirst(utf8Buf[..written]);
+                break;
+            default:
+                // double or unsupported type — fall back to full scan from start
+                break;
+        }
 
-            // Compare key values against the first N columns of the index record
-            bool match = true;
-            for (int i = 0; i < keyValues.Length && i < indexRecord.Length - 1; i++)
+        // If SeekFirst found no match and we had a seekable type, no match exists
+        if (!seeked && keyValues[0] is long or int or string)
+        {
+            _currentRow = null;
+            IsLazy = false;
+            return false;
+        }
+
+        // If we seeked successfully, cursor is positioned at first match — scan from here.
+        // If we didn't seek (unsupported type), scan from the beginning via MoveNext.
+        bool useCurrentPosition = seeked;
+
+        while (true)
+        {
+            if (useCurrentPosition)
             {
-                if (!IndexKeyMatches(indexRecord[i], keyValues[i]))
+                // First iteration after SeekFirst: cursor already points to the entry
+                useCurrentPosition = false;
+            }
+            else
+            {
+                if (!indexCursor.MoveNext())
+                    break;
+            }
+
+            // Decode only key columns + trailing rowid (avoids full ColumnValue[] allocation)
+            var indexKeys = _indexKeyBuffer ??= new ColumnValue[Math.Max(keyValues.Length, 4)];
+            if (indexKeys.Length < keyValues.Length)
+                _indexKeyBuffer = indexKeys = new ColumnValue[keyValues.Length];
+
+            if (!_recordDecoder!.TryDecodeIndexRecord(indexCursor.Payload, indexKeys, keyValues.Length, out long rowId))
+                continue;
+
+            // Compare key values against the decoded index key columns
+            bool match = true;
+            for (int i = 0; i < keyValues.Length; i++)
+            {
+                if (!IndexKeyMatches(indexKeys[i], keyValues[i]))
                 {
                     match = false;
 
                     // Early exit: if the first key column is past the target value,
                     // no subsequent entries can match (B-tree sorted order).
-                    if (i == 0 && IndexKeyIsPastTarget(indexRecord[0], keyValues[0], firstColumnDescending))
+                    if (i == 0 && IndexKeyIsPastTarget(indexKeys[0], keyValues[0], firstColumnDescending))
                     {
                         _currentRow = null;
                         IsLazy = false;
@@ -715,8 +767,6 @@ public sealed partial class SharcDataReader : IDisposable
 
             if (!match) continue;
 
-            // Last column in the index record is the table rowid
-            long rowId = indexRecord[^1].AsInt64();
             return Seek(rowId);
         }
 
@@ -1128,12 +1178,16 @@ public sealed partial class SharcDataReader : IDisposable
     /// <exception cref="ArgumentException">No column with the specified name exists.</exception>
     public int GetOrdinal(string columnName)
     {
-        for (int i = 0; i < FieldCount; i++)
+        var cache = _ordinalCache;
+        if (cache == null)
         {
-            if (string.Equals(GetColumnName(i), columnName, StringComparison.OrdinalIgnoreCase))
-                return i;
+            cache = new Dictionary<string, int>(FieldCount, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < FieldCount; i++)
+                cache[GetColumnName(i)] = i;
+            _ordinalCache = cache;
         }
-
+        if (cache.TryGetValue(columnName, out int ordinal))
+            return ordinal;
         throw new ArgumentException($"Column '{columnName}' not found.");
     }
 
@@ -1287,6 +1341,7 @@ public sealed partial class SharcDataReader : IDisposable
         _currentRow = null;
         _decodedGeneration++;
         _cachedColumnNames = null;
+        _ordinalCache = null;
 
         // Recompute scan mode — preserve lifecycle flags (Reusable, Pooled), replace dispatch bits
         ScanFlags = (ScanFlags & (ScanMode.Reusable | ScanMode.Pooled)) | ResolveScanMode();

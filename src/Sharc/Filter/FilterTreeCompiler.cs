@@ -1,7 +1,6 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-
 using Sharc.Core.Schema;
 
 namespace Sharc;
@@ -18,86 +17,73 @@ internal static class FilterTreeCompiler
     /// Compiles a filter expression into an evaluation node tree.
     /// </summary>
     /// <param name="expression">The uncompiled filter expression.</param>
-    /// <param name="columns">Table column definitions for name â†’ ordinal resolution.</param>
+    /// <param name="columns">Table column definitions for name -> ordinal resolution.</param>
     /// <param name="rowidAliasOrdinal">Ordinal of the INTEGER PRIMARY KEY alias column, or -1.</param>
     /// <returns>A compiled filter node tree ready for per-row evaluation.</returns>
-    internal static IFilterNode Compile(IFilterStar expression, IReadOnlyList<ColumnInfo> columns,
-                                        int rowidAliasOrdinal = -1)
+    internal static IFilterNode Compile(
+        IFilterStar expression,
+        IReadOnlyList<ColumnInfo> columns,
+        int rowidAliasOrdinal = -1)
     {
-        return CompileNode(expression, columns, rowidAliasOrdinal, 0);
+        var columnMap = BuildColumnMap(columns);
+        return CompileNode(expression, columns, columnMap, rowidAliasOrdinal, 0);
     }
 
     /// <summary>
     /// Compiles a filter expression into a closure-composed "Baked" evaluation node (Tier 2).
     /// Uses direct delegate composition — AOT-safe, no expression trees or dynamic code generation.
     /// </summary>
-    internal static IFilterNode CompileBaked(IFilterStar expression, IReadOnlyList<ColumnInfo> columns,
-                                             int rowidAliasOrdinal = -1)
+    internal static IFilterNode CompileBaked(
+        IFilterStar expression,
+        IReadOnlyList<ColumnInfo> columns,
+        int rowidAliasOrdinal = -1)
     {
-        var ordinals = GetReferencedColumns(expression, columns);
-        var compiled = FilterStarCompiler.Compile(expression, columns, rowidAliasOrdinal);
+        var columnMap = BuildColumnMap(columns);
+        var ordinals = GetReferencedColumns(expression, columns, columnMap);
+        var compiled = FilterStarCompiler.Compile(expression, columns, columnMap, rowidAliasOrdinal);
         return new FilterNode(compiled, ordinals);
     }
 
-    private static IFilterNode CompileNode(IFilterStar expr, IReadOnlyList<ColumnInfo> columns,
-                                            int rowidAliasOrdinal, int depth)
+    private static IFilterNode CompileNode(
+        IFilterStar expr,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap,
+        int rowidAliasOrdinal,
+        int depth)
     {
         if (depth > MaxDepth)
             throw new ArgumentException($"Filter expression tree exceeds maximum depth of {MaxDepth}.");
 
         return expr switch
         {
-            AndExpression and => new AndNode(CompileChildren(and.Children, columns, rowidAliasOrdinal, depth)),
-            OrExpression or => new OrNode(CompileChildren(or.Children, columns, rowidAliasOrdinal, depth)),
-            NotExpression not => new NotNode(CompileNode(not.Inner, columns, rowidAliasOrdinal, depth + 1)),
-            PredicateExpression pred => CompilePredicate(pred, columns, rowidAliasOrdinal),
+            AndExpression and => new AndNode(CompileChildren(and.Children, columns, columnMap, rowidAliasOrdinal, depth)),
+            OrExpression or => new OrNode(CompileChildren(or.Children, columns, columnMap, rowidAliasOrdinal, depth)),
+            NotExpression not => new NotNode(CompileNode(not.Inner, columns, columnMap, rowidAliasOrdinal, depth + 1)),
+            PredicateExpression pred => CompilePredicate(pred, columns, columnMap, rowidAliasOrdinal),
             _ => throw new ArgumentException($"Unknown filter expression type: {expr.GetType().Name}")
         };
     }
 
-    private static IFilterNode[] CompileChildren(IFilterStar[] children, IReadOnlyList<ColumnInfo> columns,
-                                                  int rowidAliasOrdinal, int depth)
+    private static IFilterNode[] CompileChildren(
+        IFilterStar[] children,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap,
+        int rowidAliasOrdinal,
+        int depth)
     {
         var nodes = new IFilterNode[children.Length];
         for (int i = 0; i < children.Length; i++)
-            nodes[i] = CompileNode(children[i], columns, rowidAliasOrdinal, depth + 1);
+            nodes[i] = CompileNode(children[i], columns, columnMap, rowidAliasOrdinal, depth + 1);
         return nodes;
     }
 
-    private static int ResolveOrdinal(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns)
+    private static IFilterNode CompilePredicate(
+        PredicateExpression pred,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap,
+        int rowidAliasOrdinal)
     {
-        if (pred.ColumnOrdinal.HasValue)
-        {
-            int ordinal = pred.ColumnOrdinal.Value;
-            if (ordinal < 0 || ordinal >= columns.Count)
-                throw new ArgumentOutOfRangeException(nameof(pred), $"Column ordinal {ordinal} is out of range (0..{columns.Count - 1}).");
-            
-            return columns[ordinal].MergedPhysicalOrdinals?[0] ?? columns[ordinal].Ordinal;
-        }
-
-        if (pred.ColumnName != null)
-        {
-            for (int i = 0; i < columns.Count; i++)
-            {
-                if (columns[i].Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return columns[i].MergedPhysicalOrdinals?[0] ?? columns[i].Ordinal;
-                }
-            }
-            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found in table.");
-        }
-
-        throw new ArgumentException("Filter predicate must specify either column name or ordinal.");
-    }
-
-    private static IFilterNode CompilePredicate(PredicateExpression pred, IReadOnlyList<ColumnInfo> columns, int rowidAliasOrdinal)
-    {
-        ColumnInfo? col = pred.ColumnOrdinal.HasValue
-            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
-            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
-
-        if (col == null)
-            throw new ArgumentException($"Filter column '{pred.ColumnName}' not found.");
+        ColumnInfo col = ResolveColumn(pred, columns, columnMap);
 
         // GUID expansion for merged columns
         if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
@@ -113,36 +99,104 @@ internal static class FilterTreeCompiler
 
     internal static HashSet<int> GetReferencedColumns(IFilterStar expression, IReadOnlyList<ColumnInfo> columns)
     {
+        var columnMap = BuildColumnMap(columns);
+        return GetReferencedColumns(expression, columns, columnMap);
+    }
+
+    private static HashSet<int> GetReferencedColumns(
+        IFilterStar expression,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap)
+    {
         var ordinals = new HashSet<int>();
-        CollectOrdinals(expression, columns, ordinals);
+        CollectOrdinals(expression, columns, columnMap, ordinals);
         return ordinals;
     }
 
-    private static void CollectOrdinals(IFilterStar expr, IReadOnlyList<ColumnInfo> columns, HashSet<int> ordinals)
+    private static void CollectOrdinals(
+        IFilterStar expr,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap,
+        HashSet<int> ordinals)
     {
         switch (expr)
         {
             case AndExpression and:
-                foreach (var child in and.Children) CollectOrdinals(child, columns, ordinals);
+                foreach (var child in and.Children) CollectOrdinals(child, columns, columnMap, ordinals);
                 break;
             case OrExpression or:
-                foreach (var child in or.Children) CollectOrdinals(child, columns, ordinals);
+                foreach (var child in or.Children) CollectOrdinals(child, columns, columnMap, ordinals);
                 break;
             case NotExpression not:
-                CollectOrdinals(not.Inner, columns, ordinals);
+                CollectOrdinals(not.Inner, columns, columnMap, ordinals);
                 break;
             case PredicateExpression pred:
-                var col = pred.ColumnOrdinal.HasValue
-                    ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
-                    : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
-                if (col != null)
+                if (!TryResolveColumn(pred, columns, columnMap, out var col))
+                    return;
+
+                if (col.MergedPhysicalOrdinals != null)
                 {
-                    if (col.MergedPhysicalOrdinals != null)
-                        foreach (var o in col.MergedPhysicalOrdinals) ordinals.Add(o);
-                    else
-                        ordinals.Add(col.Ordinal);
+                    foreach (var o in col.MergedPhysicalOrdinals)
+                        ordinals.Add(o);
+                }
+                else
+                {
+                    ordinals.Add(col.Ordinal);
                 }
                 break;
         }
     }
+
+    private static ColumnInfo ResolveColumn(
+        PredicateExpression pred,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap)
+    {
+        if (TryResolveColumn(pred, columns, columnMap, out var col))
+            return col;
+
+        if (pred.ColumnOrdinal is int ordinal)
+            throw new ArgumentException($"Filter column ordinal {ordinal} is out of range.");
+
+        throw new ArgumentException($"Filter column '{pred.ColumnName}' not found.");
+    }
+
+    private static bool TryResolveColumn(
+        PredicateExpression pred,
+        IReadOnlyList<ColumnInfo> columns,
+        Dictionary<string, ColumnInfo> columnMap,
+        out ColumnInfo col)
+    {
+        if (pred.ColumnOrdinal is int ordinal)
+        {
+            if ((uint)ordinal < (uint)columns.Count)
+            {
+                col = columns[ordinal];
+                return true;
+            }
+
+            col = default!;
+            return false;
+        }
+
+        if (pred.ColumnName != null
+            && columnMap.TryGetValue(pred.ColumnName, out var resolved)
+            && resolved != null)
+        {
+            col = resolved;
+            return true;
+        }
+
+        col = default!;
+        return false;
+    }
+
+    private static Dictionary<string, ColumnInfo> BuildColumnMap(IReadOnlyList<ColumnInfo> columns)
+    {
+        var map = new Dictionary<string, ColumnInfo>(columns.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columns.Count; i++)
+            map[columns[i].Name] = columns[i];
+        return map;
+    }
 }
+

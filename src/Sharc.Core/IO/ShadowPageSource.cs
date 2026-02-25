@@ -56,8 +56,8 @@ public sealed class ShadowPageSource : IWritablePageSource
     public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_dirtySlots.TryGetValue(pageNumber, out int _))
-            return GetPage(pageNumber).ToArray();
+        if (_dirtySlots.TryGetValue(pageNumber, out int slot))
+            return _arena!.GetSlotMemory(slot)[..PageSize];
         return _baseSource.GetPageMemory(pageNumber);
     }
 

@@ -111,7 +111,7 @@ public sealed class AgentRegistry
             var info = new AgentInfo(
                 reader.GetString(0), // AgentId
                 (AgentClass)reader.GetInt64(1), // Class
-                reader.GetBlob(2).ToArray(), // PublicKey
+                reader.GetBlob(2), // PublicKey
                 (ulong)reader.GetInt64(3), // AuthorityCeiling
                 reader.GetString(4), // WriteScope
                 reader.GetString(5), // ReadScope
@@ -119,7 +119,7 @@ public sealed class AgentRegistry
                 reader.GetInt64(7), // ValidityEnd
                 reader.GetString(8), // ParentAgent
                 reader.GetInt64(9) != 0, // CoSignRequired
-                reader.GetBlob(10).ToArray(), // Signature
+                reader.GetBlob(10), // Signature
                 algorithm
             );
             _cache[info.AgentId] = info;

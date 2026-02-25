@@ -528,9 +528,8 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
                             continue;
 
                         var nextKey = new NodeKey(forwardCursor.TargetKey);
-                        if (!forwardVisited.ContainsKey(nextKey))
+                        if (forwardVisited.TryAdd(nextKey, fKey))
                         {
-                            forwardVisited[nextKey] = fKey;
                             forwardQueue.Enqueue((nextKey, fDepth + 1));
 
                             // Check if backward frontier already visited this node
@@ -558,9 +557,8 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
 
                         // Incoming cursor: OriginKey is the neighbor (the node pointing toward bKey)
                         var nextKey = new NodeKey(backwardCursor.OriginKey);
-                        if (!backwardVisited.ContainsKey(nextKey))
+                        if (backwardVisited.TryAdd(nextKey, bKey))
                         {
-                            backwardVisited[nextKey] = bKey;
                             backwardQueue.Enqueue((nextKey, bDepth + 1));
 
                             // Check if forward frontier already visited this node

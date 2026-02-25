@@ -9,6 +9,7 @@ namespace Sharc.Vector;
 public sealed class HybridSearchResult
 {
     private readonly List<HybridMatch> _matches;
+    private long[]? _rowIdCache;
 
     internal HybridSearchResult(List<HybridMatch> matches) => _matches = matches;
 
@@ -22,5 +23,17 @@ public sealed class HybridSearchResult
     public IReadOnlyList<HybridMatch> Matches => _matches;
 
     /// <summary>The row IDs of matched rows.</summary>
-    public IEnumerable<long> RowIds => _matches.Select(m => m.RowId);
+    public IEnumerable<long> RowIds
+    {
+        get
+        {
+            if (_rowIdCache == null)
+            {
+                _rowIdCache = new long[_matches.Count];
+                for (int i = 0; i < _matches.Count; i++)
+                    _rowIdCache[i] = _matches[i].RowId;
+            }
+            return _rowIdCache;
+        }
+    }
 }

@@ -1,7 +1,6 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
@@ -13,17 +12,11 @@ namespace Sharc;
 /// </summary>
 internal static class JitPredicateBuilder
 {
-    public static BakedDelegate Build(PredicateExpression pred,
-                                     IReadOnlyList<ColumnInfo> columns,
-                                     int rowidAliasOrdinal)
+    public static BakedDelegate Build(
+        PredicateExpression pred,
+        ColumnInfo col,
+        int rowidAliasOrdinal)
     {
-        ColumnInfo? col = pred.ColumnOrdinal.HasValue 
-            ? (pred.ColumnOrdinal < columns.Count ? columns[pred.ColumnOrdinal.Value] : null)
-            : columns.FirstOrDefault(c => c.Name.Equals(pred.ColumnName, StringComparison.OrdinalIgnoreCase));
-
-        if (col == null)
-            throw new ArgumentOutOfRangeException(nameof(pred), $"Column '{pred.ColumnName}' (ordinal {pred.ColumnOrdinal}) not found.");
-
         int ordinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal;
 
         // NULL handling (SQLite semantics: NULL is never equal, but matches IS NULL)
