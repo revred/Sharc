@@ -359,7 +359,7 @@ public sealed class TieredHashJoinTests
         Assert.Equal(9100, results.Count);
 
         var matched = results.Where(r => !r[0].IsNull && !r[2].IsNull).ToList();
-        Assert.Equal(0, matched.Count);
+        Assert.Empty(matched);
     }
 
     // ───── Self-join ─────
