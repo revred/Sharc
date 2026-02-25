@@ -1,6 +1,9 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc.Core.Trust;
+using Sharc.Trust;
+
 namespace Sharc.Vector;
 
 /// <summary>
@@ -45,6 +48,35 @@ public sealed class HybridQuery : IDisposable
         _distanceFn = VectorDistanceFunctions.Resolve(metric);
     }
 
+    // ── Agent Entitlements ─────────────────────────────────────
+
+    /// <summary>
+    /// Sets the agent whose entitlements are enforced on every search.
+    /// Table and column access is validated at search time; throws
+    /// <see cref="UnauthorizedAccessException"/> if the agent lacks permission.
+    /// </summary>
+    /// <param name="agent">The agent to enforce, or null to clear.</param>
+    public HybridQuery WithAgent(AgentInfo? agent)
+    {
+        _agent = agent;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets a row-level access evaluator for multi-tenant isolation.
+    /// Rows that fail the evaluator are silently skipped during both
+    /// vector and text scans.
+    /// </summary>
+    /// <param name="evaluator">The evaluator, or null to clear.</param>
+    public HybridQuery WithRowEvaluator(IRowAccessEvaluator? evaluator)
+    {
+        _vectorJit.WithRowAccess(evaluator);
+        _textJit.WithRowAccess(evaluator);
+        return this;
+    }
+
+    private AgentInfo? _agent;
+
     // ── Metadata Filtering (pre-search) ─────────────────────────
 
     /// <summary>
@@ -88,6 +120,7 @@ public sealed class HybridQuery : IDisposable
         ValidateDimensions(queryVector);
         ArgumentException.ThrowIfNullOrEmpty(queryText);
         ArgumentOutOfRangeException.ThrowIfLessThan(k, 1);
+        EnforceAgentAccess(columnNames);
 
         byte[][] queryTermsUtf8 = TextScorer.TokenizeQuery(queryText);
         int poolSize = k * 3;
@@ -205,6 +238,17 @@ public sealed class HybridQuery : IDisposable
         if (queryVector.Length != _dimensions)
             throw new ArgumentException(
                 $"Query vector has {queryVector.Length} dimensions but the index expects {_dimensions}.");
+    }
+
+    private void EnforceAgentAccess(string[] columnNames)
+    {
+        if (_agent == null) return;
+        // Enforce access to vector column, text column, and all requested metadata columns
+        var allColumns = new string[2 + columnNames.Length];
+        allColumns[0] = _vectorColumnName;
+        allColumns[1] = _textColumnName;
+        columnNames.CopyTo(allColumns, 2);
+        EntitlementEnforcer.Enforce(_agent, _vectorJit.Table!.Name, allColumns);
     }
 
     private static Dictionary<string, object?> ExtractMetadata(SharcDataReader reader, string[] columnNames)

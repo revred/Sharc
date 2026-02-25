@@ -1,6 +1,9 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using Sharc.Core.Trust;
+using Sharc.Trust;
+
 namespace Sharc.Vector;
 
 /// <summary>
@@ -40,6 +43,34 @@ public sealed class VectorQuery : IDisposable
         _distanceFn = VectorDistanceFunctions.Resolve(metric);
     }
 
+    // ── Agent Entitlements ─────────────────────────────────────
+
+    /// <summary>
+    /// Sets the agent whose entitlements are enforced on every search.
+    /// Table and column access is validated at search time; throws
+    /// <see cref="UnauthorizedAccessException"/> if the agent lacks permission.
+    /// </summary>
+    /// <param name="agent">The agent to enforce, or null to clear.</param>
+    public VectorQuery WithAgent(AgentInfo? agent)
+    {
+        _agent = agent;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets a row-level access evaluator for multi-tenant isolation.
+    /// Rows that fail the evaluator are silently skipped during scans —
+    /// they are never distance-computed or returned in results.
+    /// </summary>
+    /// <param name="evaluator">The evaluator, or null to clear.</param>
+    public VectorQuery WithRowEvaluator(IRowAccessEvaluator? evaluator)
+    {
+        _innerJit.WithRowAccess(evaluator);
+        return this;
+    }
+
+    private AgentInfo? _agent;
+
     // ── Metadata Filtering (pre-search) ─────────────────────────
 
     /// <summary>
@@ -74,6 +105,7 @@ public sealed class VectorQuery : IDisposable
     {
         ThrowIfDisposed();
         ValidateDimensions(queryVector);
+        EnforceAgentAccess(columnNames);
 
         // Project the vector column plus any requested metadata columns
         string[] projection = new string[1 + columnNames.Length];
@@ -120,6 +152,7 @@ public sealed class VectorQuery : IDisposable
     {
         ThrowIfDisposed();
         ValidateDimensions(queryVector);
+        EnforceAgentAccess(columnNames);
 
         string[] projection = new string[1 + columnNames.Length];
         projection[0] = _vectorColumnName;
@@ -175,6 +208,16 @@ public sealed class VectorQuery : IDisposable
         if (queryVector.Length != _dimensions)
             throw new ArgumentException(
                 $"Query vector has {queryVector.Length} dimensions but the index expects {_dimensions}.");
+    }
+
+    private void EnforceAgentAccess(string[] columnNames)
+    {
+        if (_agent == null) return;
+        // Build full column list: vector column + requested metadata columns
+        var allColumns = new string[1 + columnNames.Length];
+        allColumns[0] = _vectorColumnName;
+        columnNames.CopyTo(allColumns, 1);
+        EntitlementEnforcer.Enforce(_agent, _innerJit.Table!.Name, allColumns);
     }
 
     private static Dictionary<string, object?> ExtractMetadata(SharcDataReader reader, string[] columnNames)
