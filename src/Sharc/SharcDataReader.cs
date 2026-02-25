@@ -11,6 +11,7 @@ using Sharc.Core.IO;
 using Sharc.Core.Schema;
 using Sharc.Core.Query;
 using Sharc.Query;
+using Sharc.Views;
 
 namespace Sharc;
 
@@ -29,7 +30,7 @@ namespace Sharc;
 /// }
 /// </code>
 /// </remarks>
-public sealed partial class SharcDataReader : IDisposable
+public sealed partial class SharcDataReader : IRowAccessor, IDisposable
 {
     // ══════════════════════════════════════════════════════════════════════
     // FIELD LAYOUT & FILE ORGANIZATION
