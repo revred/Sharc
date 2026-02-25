@@ -8,8 +8,8 @@ namespace Sharc.Query.Execution;
 
 /// <summary>
 /// ArrayPool-backed open-addressing hash table with backward-shift deletion.
-/// Designed for Tier III destructive probe: after probing, matched entries are
-/// removed and the residual set represents unmatched build rows.
+/// Designed for Tier III read-only probe: lookup is non-destructive, with
+/// PooledBitArray tracking matched build rows for residual emission.
 /// </summary>
 /// <remarks>
 /// Uses linear probing with backward-shift deletion to maintain probe chains
@@ -242,7 +242,7 @@ internal sealed class OpenAddressHashTable<TJoinKey> : IDisposable
     }
 
     /// <summary>
-    /// Enumerates all values remaining in the table (residual set after destructive probe).
+    /// Enumerates all values remaining in the table.
     /// </summary>
     public IEnumerable<int> EnumerateValues()
     {
