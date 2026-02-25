@@ -32,8 +32,8 @@ public static class SharcCbor
     /// Extract a single typed field from a CBOR BLOB without decoding the entire payload.
     /// Returns default(T) if the key is not found.
     /// </summary>
-    public static T? ReadField<T>(ReadOnlySpan<byte> cbor, string fieldName)
-        => CborDecoder.ReadField<T>(cbor, fieldName);
+    public static TFieldValue? ReadField<TFieldValue>(ReadOnlySpan<byte> cbor, string fieldName)
+        => CborDecoder.ReadField<TFieldValue>(cbor, fieldName);
 
     /// <summary>
     /// Create a <see cref="ColumnValue"/> BLOB from a map, ready for <c>SharcWriter.Insert()</c>.

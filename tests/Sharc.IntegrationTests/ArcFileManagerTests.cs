@@ -18,17 +18,17 @@ public sealed class ArcFileManagerTests
     /// </summary>
     private sealed class NoOpJsRuntime : IJSRuntime
     {
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        public ValueTask<TResult> InvokeAsync<TResult>(string identifier, object?[]? args)
         {
             // opfsBridge.isSupported → false (no OPFS)
             if (identifier == "opfsBridge.isSupported")
-                return new ValueTask<TValue>((TValue)(object)false);
+                return new ValueTask<TResult>((TResult)(object)false);
             return default;
         }
 
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        public ValueTask<TResult> InvokeAsync<TResult>(string identifier, CancellationToken cancellationToken, object?[]? args)
         {
-            return InvokeAsync<TValue>(identifier, args);
+            return InvokeAsync<TResult>(identifier, args);
         }
     }
 
@@ -176,3 +176,4 @@ public sealed class ArcFileManagerTests
         await manager.ClearAllOpfsDataAsync();
     }
 }
+

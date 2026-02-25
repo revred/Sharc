@@ -54,12 +54,15 @@ public static class SystemStore
     }
 
     /// <summary>
-    /// Decodes a system record into a typed LedgerEntry or similar DTO.
+    /// Decodes a system-table payload and projects the decoded columns into a caller-defined model.
     /// </summary>
-    public static T Decode<T>(ReadOnlySpan<byte> payload, IRecordDecoder decoder, Func<ColumnValue[], T> mapper)
+    public static TModel Decode<TModel>(
+        ReadOnlySpan<byte> payload,
+        IRecordDecoder decoder,
+        Func<ColumnValue[], TModel> mapColumnsToModel)
     {
         var values = decoder.DecodeRecord(payload);
-        return mapper(values);
+        return mapColumnsToModel(values);
     }
 
     /// <summary>

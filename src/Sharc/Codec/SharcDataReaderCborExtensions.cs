@@ -24,9 +24,9 @@ public static class SharcDataReaderCborExtensions
     /// Extract a single typed field from a CBOR BLOB column without decoding the entire payload.
     /// Returns default(T) if the key is not found.
     /// </summary>
-    public static T? GetCborField<T>(this SharcDataReader reader, int ordinal, string fieldName)
+    public static TFieldValue? GetCborField<TFieldValue>(this SharcDataReader reader, int ordinal, string fieldName)
     {
         ReadOnlySpan<byte> span = reader.GetBlobSpan(ordinal);
-        return CborDecoder.ReadField<T>(span, fieldName);
+        return CborDecoder.ReadField<TFieldValue>(span, fieldName);
     }
 }

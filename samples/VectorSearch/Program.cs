@@ -59,6 +59,7 @@ using (var conn = new SqliteConnection($"Data Source={dbPath}"))
     tx.Commit();
 }
 
+SqliteConnection.ClearAllPools();
 Console.WriteLine($"Created {rowCount} documents × {dimensions} dimensions.\n");
 
 // --- Open with Sharc ---

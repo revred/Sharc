@@ -17,17 +17,17 @@ namespace Sharc.Query.Execution;
 /// Occupancy is tracked via a bit-packed int[] (1 bit per slot) for 8× memory
 /// reduction compared to a bool[] approach.
 /// </remarks>
-/// <typeparam name="TKey">The key type. Must implement <see cref="IEquatable{TKey}"/>.</typeparam>
-internal sealed class OpenAddressHashTable<TKey> : IDisposable
+/// <typeparam name="TJoinKey">The key type. Must implement <see cref="IEquatable{TJoinKey}"/>.</typeparam>
+internal sealed class OpenAddressHashTable<TJoinKey> : IDisposable
 {
     // Slot layout: parallel arrays for keys and values; bit-packed occupancy.
-    private TKey[]? _keys;
+    private TJoinKey[]? _keys;
     private int[]? _values;
     private int[]? _occupiedBits;  // bit-packed: 1 bit per slot, rented from ArrayPool<int>
     private readonly int _capacity;
     private readonly int _wordCount; // number of ints in _occupiedBits
     private int _count;
-    private readonly IEqualityComparer<TKey>? _comparer;
+    private readonly IEqualityComparer<TJoinKey>? _comparer;
 
     /// <summary>Number of entries currently in the table.</summary>
     public int Count => _count;
@@ -36,13 +36,13 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     /// Creates a new open-address hash table with capacity for at least
     /// <paramref name="expectedCount"/> entries.
     /// </summary>
-    public OpenAddressHashTable(int expectedCount, IEqualityComparer<TKey>? comparer = null)
+    public OpenAddressHashTable(int expectedCount, IEqualityComparer<TJoinKey>? comparer = null)
     {
         _comparer = comparer;
         // Size to ~1.5× for ~67% max load factor
         _capacity = Math.Max(NextPowerOfTwo((int)(expectedCount * 1.5)), 16);
         _wordCount = (_capacity + 31) >> 5;
-        _keys = ArrayPool<TKey>.Shared.Rent(_capacity);
+        _keys = ArrayPool<TJoinKey>.Shared.Rent(_capacity);
         _values = ArrayPool<int>.Shared.Rent(_capacity);
         _occupiedBits = ArrayPool<int>.Shared.Rent(_wordCount);
         Array.Clear(_occupiedBits, 0, _wordCount);
@@ -62,7 +62,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     /// Supports duplicate keys (multiple entries with the same key).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Add(TKey key, int value)
+    public void Add(TJoinKey key, int value)
     {
         int slot = FindSlot(key, findEmpty: true);
         _keys![slot] = key;
@@ -72,21 +72,24 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     }
 
     /// <summary>
-    /// Tries to get the first value associated with <paramref name="key"/>.
+    /// Computes the hash code for a key using the configured comparer when present.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetHash(TKey key) => _comparer != null ? _comparer.GetHashCode(key!) : key!.GetHashCode();
+    private int GetHash(TJoinKey key) => _comparer != null ? _comparer.GetHashCode(key!) : key!.GetHashCode();
 
+    /// <summary>
+    /// Compares two keys using the configured comparer when present.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool KeyEquals(TKey a, TKey b) => _comparer != null
+    private bool KeyEquals(TJoinKey a, TJoinKey b) => _comparer != null
         ? _comparer.Equals(a, b)
-        : EqualityComparer<TKey>.Default.Equals(a, b);
+        : EqualityComparer<TJoinKey>.Default.Equals(a, b);
 
     /// <summary>
     /// Tries to get the first value associated with <paramref name="key"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetFirst(TKey key, out int value)
+    public bool TryGetFirst(TJoinKey key, out int value)
     {
         int mask = _capacity - 1;
         int slot = GetHash(key) & mask;
@@ -113,7 +116,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     /// <summary>
     /// Collects all values associated with <paramref name="key"/> into <paramref name="results"/>.
     /// </summary>
-    public void GetAll(TKey key, List<int> results)
+    public void GetAll(TJoinKey key, List<int> results)
     {
         int mask = _capacity - 1;
         int slot = GetHash(key) & mask;
@@ -132,7 +135,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     /// Removes the first entry matching <paramref name="key"/>.
     /// Uses backward-shift deletion to maintain probe chains.
     /// </summary>
-    public bool Remove(TKey key)
+    public bool Remove(TJoinKey key)
     {
         int mask = _capacity - 1;
         int slot = GetHash(key) & mask;
@@ -158,7 +161,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     /// More efficient than chaining individual <see cref="Remove"/> calls for
     /// keys with many duplicates — avoids restarting the probe chain each time.
     /// </summary>
-    public int RemoveAll(TKey key)
+    public int RemoveAll(TJoinKey key)
     {
         int mask = _capacity - 1;
         int slot = GetHash(key) & mask;
@@ -251,7 +254,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int FindSlot(TKey key, bool findEmpty)
+    private int FindSlot(TJoinKey key, bool findEmpty)
     {
         int mask = _capacity - 1;
         int slot = GetHash(key) & mask;
@@ -285,7 +288,7 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
     {
         if (_keys != null)
         {
-            ArrayPool<TKey>.Shared.Return(_keys, clearArray: true);
+            ArrayPool<TJoinKey>.Shared.Return(_keys, clearArray: true);
             _keys = null;
         }
         if (_values != null)
@@ -300,3 +303,4 @@ internal sealed class OpenAddressHashTable<TKey> : IDisposable
         }
     }
 }
+

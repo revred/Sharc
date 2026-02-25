@@ -23,6 +23,17 @@ public sealed class AutoPilotAgent
     // Dynamic reputation scores
     private readonly Dictionary<string, int> _reputationScores = new();
 
+    // Inference telemetry surfaced in the simulator UI.
+    public int BufferedReadingsCount { get; private set; }
+    public int ConsensusRounds { get; private set; }
+    public int OutlierRejections { get; private set; }
+    public int WarningRejections { get; private set; }
+    public int AuthorityRejections { get; private set; }
+    public int UnknownAgentRejections { get; private set; }
+    public int ParseErrors { get; private set; }
+    public int FallbackInferences { get; private set; }
+    public string LastInferenceSummary { get; private set; } = "No consensus rounds yet.";
+
     /// <summary>Callback when a sensor's reputation changes.</summary>
     public Action<string, int>? OnReputationChanged { get; set; }
 
@@ -73,35 +84,52 @@ public sealed class AutoPilotAgent
     }
 
     /// <summary>
-    /// Processes a new payload. Returns acceptance status and reason.
+    /// Processes a new payload and returns whether it was accepted.
     /// For measurement types, buffers readings until quorum is reached, then applies consensus.
     /// </summary>
-    public (bool Accepted, string Reason) ProcessReading(TrustPayload payload, string signerId)
+    public bool TryProcessReading(TrustPayload payload, string signerId, out string reason)
     {
         var agentInfo = _registry.GetAgent(signerId);
 
         if (agentInfo == null)
-            return (false, "Unknown Agent");
+        {
+            UnknownAgentRejections++;
+            reason = "Unknown Agent";
+            return false;
+        }
 
         if (payload.EconomicValue > agentInfo.AuthorityCeiling)
-            return (false, "Authority Exceeded");
+        {
+            AuthorityRejections++;
+            reason = "Authority Exceeded";
+            return false;
+        }
 
         try
         {
             var reading = JsonSerializer.Deserialize<SensorReading>(
                 payload.Content, FlightSimulatorTelemetryContext.Default.SensorReading);
-            if (reading == null) return (false, "Invalid payload");
+            if (reading == null)
+            {
+                reason = "Invalid payload";
+                return false;
+            }
 
             // Warnings bypass consensus but require minimum reputation
             if (reading.Type == SensorType.Warning)
             {
                 var rep = GetReputation(signerId);
                 if (rep < 50)
-                    return (false, "Low Reputation (Warning Rejected)");
+                {
+                    WarningRejections++;
+                    reason = "Low Reputation (Warning Rejected)";
+                    return false;
+                }
 
                 if (!ActiveWarnings.Contains(reading.Message))
                     ActiveWarnings.Add(reading.Message);
-                return (true, "Warning Accepted");
+                reason = "Warning Accepted";
+                return true;
             }
 
             // Buffer the measurement reading
@@ -115,76 +143,117 @@ public sealed class AutoPilotAgent
             // Check if quorum reached
             if (agentReadings.Count >= QuorumThreshold)
             {
-                var (consensusValue, outliers) = ComputeConsensus(agentReadings);
+                var consensus = ComputeConsensus(agentReadings, reading.Type);
 
                 // Adjust reputations
                 foreach (var kvp in agentReadings)
                 {
-                    if (outliers.Contains(kvp.Key))
-                        AdjustReputation(kvp.Key, -5);
+                    if (consensus.Outliers.Contains(kvp.Key))
+                        AdjustReputation(kvp.Key, -6);
                     else
                         AdjustReputation(kvp.Key, +1);
                 }
 
                 // Apply consensus value to True State
-                ApplyToTrueState(reading.Type, consensusValue);
+                ApplyToTrueState(reading.Type, consensus.Value);
+
+                ConsensusRounds++;
+                OutlierRejections += consensus.Outliers.Count;
+                if (consensus.UsedFallback)
+                    FallbackInferences++;
+                LastInferenceSummary = consensus.Summary;
 
                 // Clear buffer for next round
                 agentReadings.Clear();
 
-                if (outliers.Contains(signerId))
-                    return (false, "Outlier (Consensus Rejected)");
+                if (consensus.Outliers.Contains(signerId))
+                {
+                    reason = "Outlier (Consensus Rejected)";
+                    return false;
+                }
 
-                return (true, "Consensus Accepted");
+                if (consensus.UsedFallback)
+                {
+                    reason = "Consensus Accepted (stabilized inference)";
+                    return true;
+                }
+
+                reason = $"Consensus Accepted ({consensus.AcceptedCount}/{consensus.TotalCount} inliers)";
+                return true;
             }
 
-            return (true, "Buffered");
+            BufferedReadingsCount++;
+            reason = "Buffered";
+            return true;
         }
         catch (JsonException)
         {
-            return (false, "Parse Error");
+            ParseErrors++;
+            reason = "Parse Error";
+            return false;
         }
     }
 
-    /// <summary>
-    /// Computes consensus from buffered readings using median-based outlier detection.
-    /// </summary>
-    private (double ConsensusValue, HashSet<string> Outliers) ComputeConsensus(
-        Dictionary<string, SensorReading> readings)
+    [Obsolete("Use TryProcessReading(..., out reason) for clearer intent.")]
+    public (bool Accepted, string Reason) ProcessReading(TrustPayload payload, string signerId)
     {
-        var sorted = readings.OrderBy(r => r.Value.Value).ToList();
+        var accepted = TryProcessReading(payload, signerId, out var reason);
+        return (accepted, reason);
+    }
+
+    /// <summary>
+    /// Computes consensus from buffered readings using median outlier detection,
+    /// reputation-weighted inlier fusion, and temporal stabilization.
+    /// </summary>
+    private ConsensusResult ComputeConsensus(Dictionary<string, SensorReading> readings, SensorType sensorType)
+    {
+        var sorted = readings.OrderBy(r => r.Value.Value).ToArray();
         var outliers = new HashSet<string>();
 
         // Compute median
+        int count = sorted.Length;
         double median;
-        int count = sorted.Count;
         if (count % 2 == 0)
             median = (sorted[count / 2 - 1].Value.Value + sorted[count / 2].Value.Value) / 2.0;
         else
             median = sorted[count / 2].Value.Value;
 
-        // Threshold: at least 10 units absolute, or 10% of median magnitude
-        double threshold = Math.Max(Math.Abs(median) * OutlierThreshold, 10.0);
+        // Threshold is relative and type-specific so heavy-noise scenarios are stress-tested
+        // without collapsing consensus on normal jitter.
+        double threshold = Math.Max(Math.Abs(median) * OutlierThreshold, GetNoiseFloor(sensorType));
 
-        double sum = 0;
+        double weightedSum = 0;
+        double weightTotal = 0;
         int accepted = 0;
 
         foreach (var kvp in sorted)
         {
             double deviation = Math.Abs(kvp.Value.Value - median);
-            if (deviation > threshold)
+            int reputation = GetReputation(kvp.Key);
+            double toleranceScale = GetToleranceScale(reputation);
+
+            if (deviation > threshold * toleranceScale)
             {
                 outliers.Add(kvp.Key);
             }
             else
             {
-                sum += kvp.Value.Value;
+                double weight = 1.0 + (reputation / 100.0);
+                weightedSum += kvp.Value.Value * weight;
+                weightTotal += weight;
                 accepted++;
             }
         }
 
-        double consensusValue = accepted > 0 ? sum / accepted : median;
-        return (consensusValue, outliers);
+        double inferred = accepted > 0
+            ? weightedSum / Math.Max(weightTotal, double.Epsilon)
+            : median;
+
+        bool usedFallback = accepted == 0;
+        double stabilized = StabilizeInference(sensorType, inferred, ref usedFallback);
+
+        var summary = $"{sensorType}: inliers={accepted}/{count}, outliers={outliers.Count}, value={stabilized:F1}";
+        return new ConsensusResult(stabilized, outliers, accepted, count, usedFallback, summary);
     }
 
     /// <summary>
@@ -198,6 +267,19 @@ public sealed class AutoPilotAgent
         int newScore = Math.Clamp(current + delta, 0, 100);
         _reputationScores[agentId] = newScore;
         OnReputationChanged?.Invoke(agentId, newScore);
+    }
+
+    public void ResetInferenceTelemetry()
+    {
+        BufferedReadingsCount = 0;
+        ConsensusRounds = 0;
+        OutlierRejections = 0;
+        WarningRejections = 0;
+        AuthorityRejections = 0;
+        UnknownAgentRejections = 0;
+        ParseErrors = 0;
+        FallbackInferences = 0;
+        LastInferenceSummary = "No consensus rounds yet.";
     }
 
     private void ApplyToTrueState(SensorType type, double value)
@@ -254,4 +336,95 @@ public sealed class AutoPilotAgent
     public void ClearReadingBuffer() => _readingBuffer.Clear();
 
     public void ClearWarnings() => ActiveWarnings.Clear();
+
+    private static double GetNoiseFloor(SensorType type)
+    {
+        return type switch
+        {
+            SensorType.Altimeter => 35.0,
+            SensorType.GpsAltitude => 45.0,
+            SensorType.Airspeed => 5.0,
+            SensorType.Heading => 4.0,
+            SensorType.VerticalSpeed => 150.0,
+            SensorType.Pitch => 1.5,
+            SensorType.Roll => 1.5,
+            SensorType.Yaw => 2.0,
+            SensorType.EngineTempLeft => 10.0,
+            SensorType.EngineTempRight => 10.0,
+            SensorType.Throttle => 0.03,
+            SensorType.FlapPosition => 1.0,
+            SensorType.TurnRate => 1.0,
+            _ => 10.0
+        };
+    }
+
+    private static double GetToleranceScale(int reputation)
+    {
+        if (reputation >= 80) return 1.2;
+        if (reputation >= 50) return 1.0;
+        if (reputation >= 25) return 0.85;
+        return 0.70;
+    }
+
+    private double StabilizeInference(SensorType sensorType, double inferredValue, ref bool usedFallback)
+    {
+        double currentValue = GetCurrentStateValue(sensorType);
+        double maxStep = GetMaxStep(sensorType);
+        double delta = inferredValue - currentValue;
+
+        if (Math.Abs(delta) <= maxStep)
+            return inferredValue;
+
+        usedFallback = true;
+        return currentValue + Math.Sign(delta) * maxStep;
+    }
+
+    private double GetCurrentStateValue(SensorType type)
+    {
+        return type switch
+        {
+            SensorType.Altimeter => Altitude,
+            SensorType.GpsAltitude => Altitude,
+            SensorType.Airspeed => Speed,
+            SensorType.Pitch => Pitch,
+            SensorType.Roll => Roll,
+            SensorType.EngineTempLeft => EngineLeft,
+            SensorType.EngineTempRight => EngineRight,
+            SensorType.Heading => Heading,
+            SensorType.VerticalSpeed => VerticalSpeed,
+            SensorType.Throttle => Throttle,
+            SensorType.FlapPosition => FlapPosition,
+            SensorType.TurnRate => TurnRate,
+            _ => 0
+        };
+    }
+
+    private static double GetMaxStep(SensorType type)
+    {
+        return type switch
+        {
+            SensorType.Altimeter => 1200.0,
+            SensorType.GpsAltitude => 1200.0,
+            SensorType.Airspeed => 25.0,
+            SensorType.Pitch => 4.0,
+            SensorType.Roll => 4.0,
+            SensorType.Yaw => 5.0,
+            SensorType.EngineTempLeft => 120.0,
+            SensorType.EngineTempRight => 120.0,
+            SensorType.Heading => 12.0,
+            SensorType.VerticalSpeed => 1200.0,
+            SensorType.Throttle => 0.20,
+            SensorType.FlapPosition => 8.0,
+            SensorType.TurnRate => 4.0,
+            _ => 10.0
+        };
+    }
+
+    private readonly record struct ConsensusResult(
+        double Value,
+        HashSet<string> Outliers,
+        int AcceptedCount,
+        int TotalCount,
+        bool UsedFallback,
+        string Summary);
 }
