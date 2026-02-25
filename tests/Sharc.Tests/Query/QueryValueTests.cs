@@ -173,6 +173,34 @@ public class QueryValueTests
         Assert.Same(DBNull.Value, qv.ToObject());
     }
 
+    [Fact]
+    public void ValuesEqual_Int64AndDoubleNumericEquivalent_ReturnsTrue()
+    {
+        var i = QueryValue.FromInt64(42);
+        var d = QueryValue.FromDouble(42.0);
+        Assert.True(QueryValueOps.ValuesEqual(i, d));
+        Assert.True(QueryValueOps.ValuesEqual(d, i));
+    }
+
+    [Fact]
+    public void GetValueHashCode_Int64AndDoubleNumericEquivalent_Match()
+    {
+        var i = QueryValue.FromInt64(42);
+        var d = QueryValue.FromDouble(42.0);
+        Assert.Equal(QueryValueOps.GetValueHashCode(i), QueryValueOps.GetValueHashCode(d));
+    }
+
+    [Fact]
+    public void RowEqualityComparer_Dedups_Int64AndDoubleEquivalentRows()
+    {
+        var comparer = new QueryValueOps.QvRowEqualityComparer(columnCount: 1);
+        var set = new HashSet<QueryValue[]>(comparer);
+
+        Assert.True(set.Add([QueryValue.FromInt64(42)]));
+        Assert.False(set.Add([QueryValue.FromDouble(42.0)]));
+        Assert.Single(set);
+    }
+
     // ─── Struct size verification ────────────────────────────────
 
     [Fact]

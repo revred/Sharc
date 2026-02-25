@@ -12,6 +12,8 @@ namespace Sharc.Query;
 /// </summary>
 internal static class QueryValueOps
 {
+    private static readonly StringComparer OrdinalComparer = StringComparer.Ordinal;
+
     /// <summary>
     /// Compares two <see cref="QueryValue"/> instances for ordering.
     /// NULLs sort last (positive for a-NULL, negative for b-NULL).
@@ -20,22 +22,31 @@ internal static class QueryValueOps
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int CompareValues(QueryValue a, QueryValue b)
     {
-        bool aNull = a.IsNull;
-        bool bNull = b.IsNull;
+        var aType = a.Type;
+        var bType = b.Type;
 
-        if (aNull && bNull) return 0;
-        if (aNull) return 1;  // NULLs sort last by default
-        if (bNull) return -1;
+        if (aType == QueryValueType.Null)
+            return bType == QueryValueType.Null ? 0 : 1; // NULLs sort last by default
+        if (bType == QueryValueType.Null)
+            return -1;
 
-        return (a.Type, b.Type) switch
+        if (aType == bType)
         {
-            (QueryValueType.Int64, QueryValueType.Int64) => a.AsInt64().CompareTo(b.AsInt64()),
-            (QueryValueType.Double, QueryValueType.Double) => a.AsDouble().CompareTo(b.AsDouble()),
-            (QueryValueType.Text, QueryValueType.Text) => string.Compare(a.AsString(), b.AsString(), StringComparison.Ordinal),
-            (QueryValueType.Int64, QueryValueType.Double) => ((double)a.AsInt64()).CompareTo(b.AsDouble()),
-            (QueryValueType.Double, QueryValueType.Int64) => a.AsDouble().CompareTo((double)b.AsInt64()),
-            _ => 0
-        };
+            return aType switch
+            {
+                QueryValueType.Int64 => a.AsInt64().CompareTo(b.AsInt64()),
+                QueryValueType.Double => a.AsDouble().CompareTo(b.AsDouble()),
+                QueryValueType.Text => string.Compare(a.AsString(), b.AsString(), StringComparison.Ordinal),
+                _ => 0,
+            };
+        }
+
+        if (aType == QueryValueType.Int64 && bType == QueryValueType.Double)
+            return ((double)a.AsInt64()).CompareTo(b.AsDouble());
+        if (aType == QueryValueType.Double && bType == QueryValueType.Int64)
+            return a.AsDouble().CompareTo((double)b.AsInt64());
+
+        return 0;
     }
 
     /// <summary>
@@ -85,6 +96,50 @@ internal static class QueryValueOps
         };
     }
 
+    /// <summary>
+    /// Fast value equality used by row/group comparers.
+    /// Cross-type numeric equality (int vs double) matches SQL comparison behavior.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool ValuesEqual(QueryValue a, QueryValue b)
+    {
+        if (a.Type == b.Type)
+        {
+            return a.Type switch
+            {
+                QueryValueType.Null => true,
+                QueryValueType.Int64 => a.AsInt64() == b.AsInt64(),
+                QueryValueType.Double => a.AsDouble() == b.AsDouble(),
+                QueryValueType.Text => string.Equals(a.AsString(), b.AsString(), StringComparison.Ordinal),
+                _ => Equals(a.ObjectValue, b.ObjectValue),
+            };
+        }
+
+        if (a.Type == QueryValueType.Int64 && b.Type == QueryValueType.Double)
+            return (double)a.AsInt64() == b.AsDouble();
+        if (a.Type == QueryValueType.Double && b.Type == QueryValueType.Int64)
+            return a.AsDouble() == (double)b.AsInt64();
+
+        return a.IsNull && b.IsNull;
+    }
+
+    /// <summary>
+    /// Stable hash for a single value, consistent with <see cref="ValuesEqual"/>.
+    /// Numeric values normalize through <c>double</c> so int/double equivalents hash identically.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int GetValueHashCode(in QueryValue value)
+    {
+        return value.Type switch
+        {
+            QueryValueType.Null => 0,
+            QueryValueType.Int64 => BitConverter.DoubleToInt64Bits((double)value.AsInt64()).GetHashCode(),
+            QueryValueType.Double => BitConverter.DoubleToInt64Bits(value.AsDouble()).GetHashCode(),
+            QueryValueType.Text => OrdinalComparer.GetHashCode(value.AsString()),
+            _ => value.ObjectValue?.GetHashCode() ?? 0,
+        };
+    }
+
     // ─── Row equality ──────────────────────────────────────────────
 
     /// <summary>
@@ -92,7 +147,7 @@ internal static class QueryValueOps
     /// Shared by DISTINCT, UNION, INTERSECT, EXCEPT, and GROUP BY operations.
     /// No boxing: compares int/double inline.
     /// </summary>
-    internal class QvRowEqualityComparer : IEqualityComparer<QueryValue[]>
+    internal sealed class QvRowEqualityComparer : IEqualityComparer<QueryValue[]>
     {
         private readonly int _columnCount;
 
@@ -113,55 +168,12 @@ internal static class QueryValueOps
 
         public int GetHashCode(QueryValue[] obj)
         {
-            var hash = new HashCode();
+            int hash = 17;
             for (int i = 0; i < _columnCount; i++)
             {
-                ref var val = ref obj[i];
-                switch (val.Type)
-                {
-                    case QueryValueType.Null:
-                        hash.Add(0);
-                        break;
-                    case QueryValueType.Int64:
-                        hash.Add(val.AsInt64());
-                        break;
-                    case QueryValueType.Double:
-                        hash.Add(val.AsDouble());
-                        break;
-                    case QueryValueType.Text:
-                        hash.Add(val.AsString(), StringComparer.Ordinal);
-                        break;
-                    default:
-                        hash.Add(val.ObjectValue);
-                        break;
-                }
+                hash = unchecked((hash * 31) + GetValueHashCode(in obj[i]));
             }
-            return hash.ToHashCode();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool ValuesEqual(QueryValue a, QueryValue b)
-        {
-            if (a.Type != b.Type)
-            {
-                // Cross-type comparison: int vs double
-                if (a.Type == QueryValueType.Int64 && b.Type == QueryValueType.Double)
-                    return (double)a.AsInt64() == b.AsDouble();
-                if (a.Type == QueryValueType.Double && b.Type == QueryValueType.Int64)
-                    return a.AsDouble() == (double)b.AsInt64();
-                // null vs non-null
-                if (a.IsNull && b.IsNull) return true;
-                return false;
-            }
-
-            return a.Type switch
-            {
-                QueryValueType.Null => true,
-                QueryValueType.Int64 => a.AsInt64() == b.AsInt64(),
-                QueryValueType.Double => a.AsDouble() == b.AsDouble(),
-                QueryValueType.Text => string.Equals(a.AsString(), b.AsString(), StringComparison.Ordinal),
-                _ => Equals(a.ObjectValue, b.ObjectValue),
-            };
+            return hash;
         }
     }
 
@@ -207,13 +219,6 @@ internal static class QueryValueOps
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void AddToHash(ref HashCode hash, ref QueryValue val)
     {
-        switch (val.Type)
-        {
-            case QueryValueType.Null: hash.Add(0); break;
-            case QueryValueType.Int64: hash.Add(val.AsInt64()); break;
-            case QueryValueType.Double: hash.Add(val.AsDouble()); break;
-            case QueryValueType.Text: hash.Add(val.AsString(), StringComparer.Ordinal); break;
-            default: hash.Add(val.ObjectValue); break;
-        }
+        hash.Add(GetValueHashCode(in val));
     }
 }

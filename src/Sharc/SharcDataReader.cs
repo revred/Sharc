@@ -1462,7 +1462,7 @@ public sealed partial class SharcDataReader : IDisposable
             DedupUnderlying = underlying;
             DedupMode = mode;
             DedupRightIndex = rightIndex;
-            DedupSeen = IndexSet.Rent();
+            DedupSeen = mode == SetDedupMode.Intersect ? null : IndexSet.Rent();
             ColumnNames = underlying.GetColumnNames();
         }
 
@@ -1489,17 +1489,35 @@ public sealed partial class SharcDataReader : IDisposable
             // Dedup streaming mode: filter rows by index
             if (DedupUnderlying != null)
             {
+                if (DedupMode == SetDedupMode.Union)
+                {
+                    while (DedupUnderlying.Read())
+                    {
+                        var fp = DedupUnderlying.GetRowFingerprint();
+                        if (DedupSeen!.Add(fp))
+                            return true;
+                    }
+                    return false;
+                }
+
+                if (DedupMode == SetDedupMode.Intersect)
+                {
+                    // INTERSECT emits distinct rows. Removing from right index
+                    // makes repeated left duplicates fail without a second seen set.
+                    while (DedupUnderlying.Read())
+                    {
+                        var fp = DedupUnderlying.GetRowFingerprint();
+                        if (DedupRightIndex!.Remove(fp))
+                            return true;
+                    }
+                    return false;
+                }
+
                 while (DedupUnderlying.Read())
                 {
                     var fp = DedupUnderlying.GetRowFingerprint();
-                    bool pass = DedupMode switch
-                    {
-                        SetDedupMode.Union => DedupSeen!.Add(fp),
-                        SetDedupMode.Intersect => DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
-                        SetDedupMode.Except => !DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp),
-                        _ => false,
-                    };
-                    if (pass) return true;
+                    if (!DedupRightIndex!.Contains(fp) && DedupSeen!.Add(fp))
+                        return true;
                 }
                 return false;
             }

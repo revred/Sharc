@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Sharc.Query.Intent;
 
@@ -18,7 +19,6 @@ internal sealed class StreamingAggregator
     private readonly int[] _aggSourceOrdinals;
     private readonly int[]? _groupOrdinals;
     private readonly string[] _outputColumns;
-    private readonly string[] _sourceColumnNames;
 
     // Precomputed output column mapping: for each output ordinal, either:
     //   groupKeyIndex >= 0: copy from groupKeyValues[groupKeyIndex]
@@ -43,7 +43,6 @@ internal sealed class StreamingAggregator
         IReadOnlyList<string>? groupByColumns,
         IReadOnlyList<string>? outputColumnNames)
     {
-        _sourceColumnNames = sourceColumnNames;
         _aggregates = aggregates;
         _outputColumns = outputColumnNames?.ToArray()
             ?? BuildOutputColumnNames(aggregates, groupByColumns);
@@ -122,30 +121,21 @@ internal sealed class StreamingAggregator
 
         var lookupKey = new GroupKey(_lookupKeyBuffer!);
 
-        // .NET dict[key] = value for existing keys updates value but keeps stored key,
-        // so the stored key (with its own copy) is preserved even when lookupKey
-        // references the reusable buffer.
-        ref var accRef = ref CollectionsMarshal.GetValueRefOrAddDefault(_groups, lookupKey, out bool exists);
-
-        if (exists)
+        // Fast path for existing groups: direct by-ref update, no struct copy.
+        ref var accRef = ref CollectionsMarshal.GetValueRefOrNullRef(_groups, lookupKey);
+        if (!Unsafe.IsNullRef(ref accRef))
         {
-            // Fast path: update accumulator in-place via ref — no struct copy + write-back
             UpdateAccumulator(ref accRef, row);
+            return;
         }
-        else
-        {
-            // New group — copy key values for permanent storage in the dictionary.
-            // We must fix the stored key since GetValueRefOrAddDefault stored our
-            // reusable buffer reference. Remove + re-add with a proper key.
-            _groups.Remove(lookupKey);
 
-            var storedValues = new QueryValue[_groupOrdinals.Length];
-            _lookupKeyBuffer.AsSpan(0, _groupOrdinals.Length).CopyTo(storedValues);
+        // New group: copy key values once for stable dictionary ownership.
+        var storedValues = new QueryValue[_groupOrdinals.Length];
+        _lookupKeyBuffer.AsSpan(0, _groupOrdinals.Length).CopyTo(storedValues);
 
-            accRef = CreateAccumulator(row);
-            accRef.GroupKeyValues = storedValues;
-            _groups[new GroupKey(storedValues)] = accRef;
-        }
+        var acc = CreateAccumulator(row);
+        acc.GroupKeyValues = storedValues;
+        _groups.Add(new GroupKey(storedValues, lookupKey.HashCode), acc);
     }
 
     /// <summary>
@@ -174,16 +164,16 @@ internal sealed class StreamingAggregator
     {
         var acc = new GroupAccumulator
         {
-            Count = 1,
             PerAgg = new AggState[_aggregates.Count],
         };
 
         for (int i = 0; i < _aggregates.Count; i++)
         {
+            var function = _aggregates[i].Function;
             int srcOrd = _aggSourceOrdinals[i];
             ref var state = ref acc.PerAgg[i];
 
-            if (_aggregates[i].Function == AggregateFunction.CountStar)
+            if (function == AggregateFunction.CountStar)
             {
                 state.CountStarOrNonNull = 1;
                 continue;
@@ -192,7 +182,7 @@ internal sealed class StreamingAggregator
             if (srcOrd < 0) continue;
             ref var val = ref row[srcOrd];
 
-            if (_aggregates[i].Function == AggregateFunction.Count)
+            if (function == AggregateFunction.Count)
             {
                 state.CountStarOrNonNull = val.IsNull ? 0 : 1;
                 continue;
@@ -200,22 +190,27 @@ internal sealed class StreamingAggregator
 
             if (val.IsNull) continue;
 
-            switch (val.Type)
+            if (function is AggregateFunction.Sum or AggregateFunction.Avg)
             {
-                case QueryValueType.Int64:
-                    state.SumInt = val.AsInt64();
-                    state.NumericCount = 1;
-                    break;
-                case QueryValueType.Double:
-                    state.SumDouble = val.AsDouble();
-                    state.HasDouble = true;
-                    state.NumericCount = 1;
-                    break;
+                switch (val.Type)
+                {
+                    case QueryValueType.Int64:
+                        state.SumInt = val.AsInt64();
+                        state.NumericCount = 1;
+                        break;
+                    case QueryValueType.Double:
+                        state.SumDouble = val.AsDouble();
+                        state.HasDouble = true;
+                        state.NumericCount = 1;
+                        break;
+                }
             }
-
-            state.Min = val;
-            state.Max = val;
-            state.HasMinMax = true;
+            else if (function is AggregateFunction.Min or AggregateFunction.Max)
+            {
+                state.Min = val;
+                state.Max = val;
+                state.HasMinMax = true;
+            }
         }
 
         return acc;
@@ -223,14 +218,13 @@ internal sealed class StreamingAggregator
 
     private void UpdateAccumulator(ref GroupAccumulator acc, QueryValue[] row)
     {
-        acc.Count++;
-
         for (int i = 0; i < _aggregates.Count; i++)
         {
+            var function = _aggregates[i].Function;
             int srcOrd = _aggSourceOrdinals[i];
             ref var state = ref acc.PerAgg[i];
 
-            if (_aggregates[i].Function == AggregateFunction.CountStar)
+            if (function == AggregateFunction.CountStar)
             {
                 state.CountStarOrNonNull++;
                 continue;
@@ -239,7 +233,7 @@ internal sealed class StreamingAggregator
             if (srcOrd < 0) continue;
             ref var val = ref row[srcOrd];
 
-            if (_aggregates[i].Function == AggregateFunction.Count)
+            if (function == AggregateFunction.Count)
             {
                 if (!val.IsNull) state.CountStarOrNonNull++;
                 continue;
@@ -247,45 +241,47 @@ internal sealed class StreamingAggregator
 
             if (val.IsNull) continue;
 
-            switch (val.Type)
+            if (function is AggregateFunction.Sum or AggregateFunction.Avg)
             {
-                case QueryValueType.Int64:
-                    long lv = val.AsInt64();
-                    if (state.HasDouble)
-                        state.SumDouble += lv;
-                    else
-                        state.SumInt += lv;
-                    state.NumericCount++;
-                    break;
-                case QueryValueType.Double:
-                    double dv = val.AsDouble();
-                    if (!state.HasDouble)
-                    {
-                        // Promote int sum to double
-                        state.SumDouble = state.SumInt + dv;
-                        state.HasDouble = true;
-                    }
-                    else
-                    {
-                        state.SumDouble += dv;
-                    }
-                    state.NumericCount++;
-                    break;
+                switch (val.Type)
+                {
+                    case QueryValueType.Int64:
+                        long lv = val.AsInt64();
+                        if (state.HasDouble)
+                            state.SumDouble += lv;
+                        else
+                            state.SumInt += lv;
+                        state.NumericCount++;
+                        break;
+                    case QueryValueType.Double:
+                        double dv = val.AsDouble();
+                        if (!state.HasDouble)
+                        {
+                            // Promote int sum to double.
+                            state.SumDouble = state.SumInt + dv;
+                            state.HasDouble = true;
+                        }
+                        else
+                        {
+                            state.SumDouble += dv;
+                        }
+                        state.NumericCount++;
+                        break;
+                }
+                continue;
             }
 
-            // Min/Max
-            if (!state.HasMinMax)
+            if (function == AggregateFunction.Min)
             {
-                state.Min = val;
-                state.Max = val;
+                if (!state.HasMinMax || QueryValueOps.CompareValues(val, state.Min) < 0)
+                    state.Min = val;
                 state.HasMinMax = true;
             }
-            else
+            else if (function == AggregateFunction.Max)
             {
-                if (QueryPostProcessor.CompareValues(val, state.Min) < 0)
-                    state.Min = val;
-                if (QueryPostProcessor.CompareValues(val, state.Max) > 0)
+                if (!state.HasMinMax || QueryValueOps.CompareValues(val, state.Max) > 0)
                     state.Max = val;
+                state.HasMinMax = true;
             }
         }
     }
@@ -334,7 +330,6 @@ internal sealed class StreamingAggregator
 
     private struct GroupAccumulator
     {
-        public long Count;
         public AggState[] PerAgg;
         public QueryValue[]? GroupKeyValues;
     }
@@ -360,7 +355,27 @@ internal sealed class StreamingAggregator
     private readonly struct GroupKey
     {
         public readonly QueryValue[] Values;
-        public GroupKey(QueryValue[] values) => Values = values;
+        public readonly int HashCode;
+
+        public GroupKey(QueryValue[] values)
+        {
+            Values = values;
+            HashCode = ComputeHash(values);
+        }
+
+        public GroupKey(QueryValue[] values, int hashCode)
+        {
+            Values = values;
+            HashCode = hashCode;
+        }
+
+        private static int ComputeHash(QueryValue[] values)
+        {
+            int hash = 17;
+            for (int i = 0; i < values.Length; i++)
+                hash = unchecked((hash * 31) + QueryValueOps.GetValueHashCode(in values[i]));
+            return hash;
+        }
     }
 
     /// <summary>
@@ -377,30 +392,13 @@ internal sealed class StreamingAggregator
             if (x.Values.Length != y.Values.Length) return false;
             for (int i = 0; i < x.Values.Length; i++)
             {
-                if (QueryPostProcessor.CompareValues(x.Values[i], y.Values[i]) != 0)
+                if (!QueryValueOps.ValuesEqual(x.Values[i], y.Values[i]))
                     return false;
             }
             return true;
         }
 
-        public int GetHashCode(GroupKey obj)
-        {
-            var hash = new HashCode();
-            var values = obj.Values;
-            for (int i = 0; i < values.Length; i++)
-            {
-                ref var val = ref values[i];
-                switch (val.Type)
-                {
-                    case QueryValueType.Null: hash.Add(0); break;
-                    case QueryValueType.Int64: hash.Add(val.AsInt64()); break;
-                    case QueryValueType.Double: hash.Add(val.AsDouble()); break;
-                    case QueryValueType.Text: hash.Add(val.AsString(), StringComparer.Ordinal); break;
-                    default: hash.Add(val.ObjectValue); break;
-                }
-            }
-            return hash.ToHashCode();
-        }
+        public int GetHashCode(GroupKey obj) => obj.HashCode;
     }
 
     // ─── Helpers ────────────────────────────────────────────────
