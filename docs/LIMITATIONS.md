@@ -19,7 +19,7 @@ This document summarizes what is **missing**, **experimental**, or **intentional
     *   Common Table Expressions (`WITH ... AS`)
     *   Parameterized queries (`$param`)
 *   **Missing Features**:
-    *   **Limited JOINs**: `INNER JOIN`, `LEFT JOIN`, and `CROSS JOIN` are supported via hash join. `RIGHT JOIN` and `FULL OUTER JOIN` are not yet supported.
+    *   **JOINs**: `INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `FULL OUTER JOIN`, and `CROSS JOIN` are supported via hash join with tiered zero-allocation execution.
     *   **No Virtual Tables**: `FTS5`, `R*Tree`, `json_each` are not supported.
     *   **No CASE execution**: `CASE` expressions are parsed but not yet executable.
     *   **No Window Functions**: `OVER`, `PARTITION BY` are parsed but not yet executable.

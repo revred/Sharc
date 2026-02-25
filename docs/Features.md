@@ -25,7 +25,7 @@ These remove the most critical gaps against Sharc's own stated limitations. Ship
 
 ### 1.1 RIGHT OUTER JOIN and FULL OUTER JOIN
 
-**Status:** INNER, LEFT, and CROSS joins are implemented. RIGHT and FULL OUTER are absent.
+**Status:** All five JOIN types are implemented: INNER, LEFT, RIGHT, FULL OUTER, and CROSS. FULL OUTER uses tiered zero-allocation execution (Zero.Hash).
 
 **Why it matters:** AI agent queries routinely join a context table against a knowledge base or graph node table. A missing JOIN type forces callers to restructure queries in application code, leaking logic that belongs in the query layer. RIGHT JOIN is algebraically equivalent to a swapped LEFT JOIN. FULL OUTER is LEFT UNION RIGHT minus the intersection. The existing hash-join infrastructure handles both without new I/O primitives.
 
@@ -204,7 +204,7 @@ These require deeper investment but deliver capabilities no competing embedded d
 | Network file system support | Sharc is an embedded, single-machine context store by design. |
 | Full PostgreSQL-compatible SQL | Sharq (the query language) is intentionally minimal. Complexity is the enemy of a 52 KB engine footprint. |
 | Multi-tenant server mode | Out of scope. Sharc is a library, not a server. For server workloads, use PostgreSQL. |
-| RIGHT/FULL OUTER JOIN (deprioritized) | Only after streaming results and TTL ship — these serve the agent use case more directly. |
+| ~~RIGHT/FULL OUTER JOIN~~ | ✅ **Shipped** — all five JOIN types (INNER, LEFT, RIGHT, FULL OUTER, CROSS) are implemented with tiered zero-allocation execution. |
 
 ---
 

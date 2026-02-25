@@ -56,6 +56,23 @@ internal struct PooledBitArray : IDisposable
     }
 
     /// <summary>
+    /// Sets bit at <paramref name="index"/> to true and returns true only on
+    /// a 0 -&gt; 1 transition.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TrySet(int index)
+    {
+        ref var cell = ref _buffer![index >> 3];
+        byte mask = (byte)(1 << (index & 7));
+        byte prior = cell;
+        if ((prior & mask) != 0)
+            return false;
+
+        cell = (byte)(prior | mask);
+        return true;
+    }
+
+    /// <summary>
     /// Gets the value of the bit at <paramref name="index"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

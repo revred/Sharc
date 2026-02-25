@@ -6,10 +6,9 @@ Sharc is a specialized **Context Engine**, not a general-purpose database. Hones
 
 ### 1. Views, Triggers, or Stored Procedures
 
-Sharc's query pipeline supports `SELECT`, `WHERE`, `JOIN` (INNER/LEFT/CROSS), `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, Cotes (`WITH ... AS`), compound queries (`UNION`, `INTERSECT`, `EXCEPT`), and parameterized queries. However, it does **NOT** support:
+Sharc's query pipeline supports `SELECT`, `WHERE`, `JOIN` (INNER/LEFT/RIGHT/FULL OUTER/CROSS), `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, Cotes (`WITH ... AS`), compound queries (`UNION`, `INTERSECT`, `EXCEPT`), and parameterized queries. However, it does **NOT** support:
 
 *   Views, Triggers, or Stored Procedures
-*   `RIGHT JOIN` or `FULL OUTER JOIN`
 *   `CASE` expressions, Window Functions (parsed but not yet executable)
 
 **Use SQLite** if you need views, triggers, or complex multi-table queries. For large-scale analytics, consider DuckDB.

@@ -21,6 +21,13 @@ namespace Sharc.Query;
 /// </remarks>
 internal sealed class ExecutionRouter : IDisposable
 {
+    /// <summary>
+    /// Maximum number of cached entries per cache. Prevents unbounded memory growth
+    /// in long-running processes with dynamic query generation. When exceeded, the
+    /// cache is cleared (entries disposed) and re-populated from scratch.
+    /// </summary>
+    internal const int MaxCacheCapacity = 512;
+
     // CACHED hint: QueryIntent → PreparedQuery (reference-equality keyed, O(1) identity lookup)
     private Dictionary<QueryIntent, PreparedQuery>? _cachedQueries;
 
@@ -92,6 +99,7 @@ internal sealed class ExecutionRouter : IDisposable
 
         if (!_cachedQueries.TryGetValue(intent, out var prepared))
         {
+            EvictIfFull(_cachedQueries, static v => v.Dispose());
             prepared = db.Prepare(rawSql);
             _cachedQueries[intent] = prepared;
         }
@@ -113,6 +121,7 @@ internal sealed class ExecutionRouter : IDisposable
 
         if (!_jitEntries.TryGetValue(intent, out var entry))
         {
+            EvictIfFull(_jitEntries, static v => v.Jit.Dispose());
             // First call for this exact SQL — create JitQuery, apply filters, cache everything
             var jit = db.Jit(intent.TableName);
 
@@ -178,6 +187,7 @@ internal sealed class ExecutionRouter : IDisposable
             if (!CanUseCached(plan))
                 return null; // Fall back to QueryCore
 
+            EvictIfFull(_directCachedCache, static v => v.Dispose());
             prepared = db.Prepare(rawSql);
             _directCachedCache[rawSql] = prepared;
         }
@@ -204,6 +214,7 @@ internal sealed class ExecutionRouter : IDisposable
             if (!CanUseJit(plan))
                 return null; // Fall back to QueryCore
 
+            EvictIfFull(_directJitCache, static v => v.Jit.Dispose());
             var intent = plan.Simple!;
             var jit = db.Jit(intent.TableName);
 
@@ -259,6 +270,20 @@ internal sealed class ExecutionRouter : IDisposable
 
     private static long ComputeParamKey(IReadOnlyDictionary<string, object>? parameters)
         => ParameterKeyHasher.Compute(parameters);
+
+    /// <summary>
+    /// Clears a cache when it reaches <see cref="MaxCacheCapacity"/>, disposing all values.
+    /// Simple full-eviction: disposable resources require orderly cleanup, and cached entries
+    /// are cheap to rebuild (compile + prepare is sub-millisecond).
+    /// </summary>
+    private static void EvictIfFull<TKey, TValue>(
+        Dictionary<TKey, TValue> cache, Action<TValue> disposeValue) where TKey : notnull
+    {
+        if (cache.Count < MaxCacheCapacity) return;
+        foreach (var v in cache.Values)
+            disposeValue(v);
+        cache.Clear();
+    }
 
     /// <inheritdoc/>
     public void Dispose()

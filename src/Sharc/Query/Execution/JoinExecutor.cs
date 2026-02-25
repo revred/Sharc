@@ -184,8 +184,8 @@ internal static class JoinExecutor
     /// Hash join implementation supporting INNER, LEFT, RIGHT, FULL, and CROSS joins.
     /// Build side is indexed into a <c>Dictionary&lt;QueryValue, List&lt;int&gt;&gt;</c> mapping
     /// join keys to build-row indices. FULL JOIN uses a <see cref="System.Collections.BitArray"/>
-    /// to track which build rows were matched — avoiding the destructive-probe pattern
-    /// (<c>hashTable.Remove</c>) which fails for duplicate probe keys.
+    /// to track which build rows were matched — using a read-only probe pattern
+    /// with PooledBitArray instead of destructive removal, which is correct for duplicate probe keys.
     /// </summary>
     private static IEnumerable<QueryValue[]> HashJoin(
         IEnumerable<QueryValue[]> leftRows, Dictionary<string, int> leftSchema,
@@ -197,7 +197,7 @@ internal static class JoinExecutor
         int mergedWidth = leftColumnCount + rightColumnCount;
 
         // FULL OUTER JOIN: delegate to tiered zero-allocation executor.
-        // Uses PooledBitArray (Tier I/II) or destructive probe (Tier III)
+        // Uses PooledBitArray (Tier I/II) or open-address read-only probe (Tier III)
         // instead of System.Collections.BitArray for matched-row tracking.
         if (join.Kind == JoinType.Full)
         {
@@ -551,7 +551,13 @@ internal static class JoinExecutor
         if (intent.Filter.HasValue)
         {
             foreach (var node in intent.Filter.Value.Nodes)
-                Record(node.ColumnName);
+            {
+                // Only collect qualified columns (alias.column) for per-table
+                // materialization.  Unqualified names are resolved post-join by
+                // ResolveUnqualifiedColumn which handles ambiguity and missing columns.
+                if (node.ColumnName != null && node.ColumnName.Contains('.'))
+                    Record(node.ColumnName);
+            }
         }
     }
 
