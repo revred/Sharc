@@ -9,7 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sharc.Arc\Sharc.Arc.csproj" />
     <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />
-    <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Engine\Sharc.Engine.csproj" />
   </ItemGroup>
 
 </Project>

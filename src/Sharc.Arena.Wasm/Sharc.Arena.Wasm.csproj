@@ -29,7 +29,7 @@
   <ItemGroup>
     <!-- Tier 1: Sharc (pure C#) -->
     <ProjectReference Include="..\Sharc\Sharc.csproj" />
-    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\Sharc.Engine\Sharc.Engine.csproj" />
     <ProjectReference Include="..\Sharc.Graph\Sharc.Graph.csproj" />
     <ProjectReference Include="..\Sharc.Graph.Surface\Sharc.Graph.Surface.csproj" />
     <ProjectReference Include="..\Sharc.Crypto\Sharc.Crypto.csproj" />
