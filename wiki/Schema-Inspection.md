@@ -40,7 +40,7 @@ ViewInfo? view = db.Schema.GetView("active_users"); // Returns null if not found
 | `Columns` | `IReadOnlyList<ColumnInfo>` | Column definitions |
 | `Indexes` | `IReadOnlyList<IndexInfo>` | Indexes on this table |
 | `IsWithoutRowId` | `bool` | WITHOUT ROWID table |
-| `HasMergedColumns` | `bool` | Has GUID `__hi`/`__lo` merged columns |
+| `HasMergedColumns` | `bool` | Has merged 128-bit columns (`__hi`/`__lo` and/or `__dhi`/`__dlo`) |
 
 ### Column Ordinal Lookup
 
@@ -57,8 +57,11 @@ int ordinal = table.GetColumnOrdinal("email");  // Case-insensitive
 | `Ordinal` | `int` | Zero-based position |
 | `IsPrimaryKey` | `bool` | Part of PRIMARY KEY |
 | `IsNotNull` | `bool` | Has NOT NULL constraint |
-| `IsGuidColumn` | `bool` | GUID column (BLOB(16)) |
-| `IsMergedGuidColumn` | `bool` | Merged from `__hi`/`__lo` pair |
+| `IsGuidColumn` | `bool` | Declared `GUID` or `UUID` |
+| `IsDecimalColumn` | `bool` | Declared `FIX128`, `DECIMAL128`, or `DECIMAL` |
+| `IsMergedFix128Column` | `bool` | Any merged 128-bit logical column |
+| `IsMergedGuidColumn` | `bool` | Merged GUID from `__hi`/`__lo` pair |
+| `IsMergedDecimalColumn` | `bool` | Merged decimal from `__dhi`/`__dlo` pair |
 
 ## IndexInfo
 

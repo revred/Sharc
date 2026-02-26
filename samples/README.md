@@ -1,6 +1,7 @@
 # Samples
 
 This folder contains runnable examples that demonstrate core Sharc capabilities.
+It includes typed 128-bit samples for `GUID`/`UUID` and `FIX128` decimal (28-29 significant digits).
 
 ## Run all samples
 
@@ -24,6 +25,7 @@ dotnet script ./samples/run-all.csx
 | `ContextGraph` | Graph node lookup, zero-allocation edge cursor, BFS traversal |
 | `EncryptedRead` | Opening encrypted databases with decryption options |
 | `FilterAndProject` | Column filters and projection pipelines |
+| `GuidFix128` | Strict typed 128-bit columns (`GUID`/`UUID` + `FIX128`/`DECIMAL128`) |
 | `PointLookup` | Primary-key seek / point lookup path |
 | `PrimeExample` | Streaming TopK with custom scoring (spatial nearest-neighbor) |
 | `TrustComplex` | Multi-agent trust, authority ceilings, and signatures |

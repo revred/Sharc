@@ -91,6 +91,86 @@ public sealed class TopKIntegrationTests
     }
 
     [Fact]
+    public void TopK_WithIndexedFilter_UsesIndexAndReturnsNearest()
+    {
+        var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE points (id INTEGER PRIMARY KEY, x REAL, y REAL, payload TEXT)";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "CREATE INDEX idx_points_x ON points (x)";
+            cmd.ExecuteNonQuery();
+
+            for (int i = 0; i < 200; i++)
+            {
+                cmd.CommandText = "INSERT INTO points (x, y, payload) VALUES ($x, $y, $p)";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("$x", (double)i);
+                cmd.Parameters.AddWithValue("$y", (double)i);
+                cmd.Parameters.AddWithValue("$p", new string('Z', 256));
+                cmd.ExecuteNonQuery();
+            }
+        });
+
+        using var db = SharcDatabase.OpenMemory(data);
+        var jit = db.Jit("points");
+        jit.Where(FilterStar.Column("x").Between(50.0, 80.0));
+
+        using var reader = jit.TopK(4, new DistanceScorer(50, 50), "id", "x", "y", "payload");
+
+        // P1.4 path is cursor-backed and should be index-accelerated before TopK materialization.
+        Assert.True(reader.Read());
+        var rows = new List<(long id, double x, double y)>();
+        do
+        {
+            rows.Add((reader.GetInt64(0), reader.GetDouble(1), reader.GetDouble(2)));
+            Assert.Equal(256, reader.GetString(3).Length);
+        }
+        while (reader.Read());
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(50.0, rows[0].x);
+        Assert.Equal(51.0, rows[1].x);
+        Assert.Equal(52.0, rows[2].x);
+        Assert.Equal(53.0, rows[3].x);
+    }
+
+    [Fact]
+    public void TopK_OnWithoutRowIdTable_FallsBackToEagerMaterialization()
+    {
+        var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE points_wr (key TEXT PRIMARY KEY, x REAL, y REAL) WITHOUT ROWID";
+            cmd.ExecuteNonQuery();
+
+            for (int i = 0; i < 20; i++)
+            {
+                cmd.CommandText = "INSERT INTO points_wr (key, x, y) VALUES ($k, $x, $y)";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("$k", $"p{i:D2}");
+                cmd.Parameters.AddWithValue("$x", (double)i);
+                cmd.Parameters.AddWithValue("$y", (double)i);
+                cmd.ExecuteNonQuery();
+            }
+        });
+
+        using var db = SharcDatabase.OpenMemory(data);
+        var jit = db.Jit("points_wr");
+
+        using var reader = jit.TopK(3, new DistanceScorer(10, 10), "x", "y");
+
+        var results = new List<(double x, double y)>();
+        while (reader.Read())
+            results.Add((reader.GetDouble(0), reader.GetDouble(1)));
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal(10.0, results[0].x);
+        Assert.Equal(9.0, results[1].x);
+        Assert.Equal(11.0, results[2].x);
+    }
+
+    [Fact]
     public void TopK_LambdaOverload_WithDatabase()
     {
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
