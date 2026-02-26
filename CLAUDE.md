@@ -66,7 +66,7 @@ Sharc is a **layered file-format reader**, not a database engine.
 │  LedgerManager: hash-chain audit log           │
 │  ReputationEngine, Co-Signatures, Governance   │
 ├────────────────────────────────────────────────┤
-│  Write Layer (Sharc/Write/, Sharc.Engine/Write/)│
+│  Write Layer (Sharc/Write/, Sharc.Core/Write/)│
 │  SharcWriter → WriteEngine → BTreeMutator      │
 │  RecordEncoder, CellBuilder, PageManager       │
 │  RollbackJournal, Transaction (ACID)           │
@@ -74,20 +74,20 @@ Sharc is a **layered file-format reader**, not a database engine.
 │  Graph Layer (Sharc.Graph/)                    │
 │  ConceptStore, RelationStore, SeekFirst        │
 ├────────────────────────────────────────────────┤
-│  Schema Layer (Sharc.Engine/Schema/)            │
+│  Schema Layer (Sharc.Core/Schema/)            │
 │  SchemaReader: parses sqlite_schema table      │
 ├────────────────────────────────────────────────┤
-│  Record Layer (Sharc.Engine/Records/)           │
+│  Record Layer (Sharc.Core/Records/)           │
 │  RecordDecoder: varint + serial type → values  │
 ├────────────────────────────────────────────────┤
-│  B-Tree Layer (Sharc.Engine/BTree/)             │
+│  B-Tree Layer (Sharc.Core/BTree/)             │
 │  BTreeReader<T> → BTreeCursor<T> → CellParser  │
 ├────────────────────────────────────────────────┤
-│  Page I/O Layer (Sharc.Engine/IO/)              │
+│  Page I/O Layer (Sharc.Core/IO/)              │
 │  IPageSource: File | Memory | Mmap | Cached    │
 │  IPageTransform: Identity | Decrypting         │
 ├────────────────────────────────────────────────┤
-│  Primitives (Sharc.Engine/Primitives/)          │
+│  Primitives (Sharc.Core/Primitives/)          │
 │  VarintDecoder, SerialTypeCodec                │
 ├────────────────────────────────────────────────┤
 │  Crypto (Sharc.Crypto/)                        │
@@ -193,7 +193,7 @@ sharc/
 ├── secrets/                           ← Competitive analysis, internal strategy
 ├── src/
 │   ├── Sharc/                         ← Public API + Trust Layer + Write Engine
-│   ├── Sharc.Engine/                  ← Internal engine (B-Tree, Records, IO, Write, Trust models)
+│   ├── Sharc.Core/                  ← Internal engine (B-Tree, Records, IO, Write, Trust models)
 │   ├── Sharc.Query/                   ← SQL pipeline (parser, compiler, executor)
 │   ├── Sharc.Crypto/                  ← Encryption (KDF, AEAD ciphers, key management)
 │   ├── Sharc.Graph/                   ← Graph engine (Cypher, PageRank, GraphWriter, algorithms)
