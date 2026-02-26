@@ -31,6 +31,15 @@ jobs:
           echo "Changed files in PR:"
           echo "$changed_files"
 
+          # Allow workflow/policy-only PRs to main without forcing README/CHANGELOG churn.
+          # Enforce release docs when product/code files change.
+          allowlist='^(README\.md|CHANGELOG\.md|CONTRIBUTING\.md|\.github/pull_request_template\.md|\.github/workflows/ci\.yml|\.github/workflows/publish\.yml)$'
+          non_allowlisted_changes="$(grep -Ev "$allowlist" <<<"$changed_files" || true)"
+          if [ -z "$non_allowlisted_changes" ]; then
+            echo "Only release policy/workflow files changed. Skipping README/CHANGELOG enforcement."
+            exit 0
+          fi
+
           require_changed_file() {
             local required_path="$1"
             if ! grep -Fxq "$required_path" <<<"$changed_files"; then
