@@ -122,6 +122,7 @@ public sealed class WithoutRowIdCursorAdapterTests
         public void Reset() => _index = -1;
 
         public bool SeekFirst(long firstColumnKey) => false;
+        public bool SeekFirst(double firstColumnKey) => false;
         public bool SeekFirst(ReadOnlySpan<byte> utf8Key) => false;
 
         public ReadOnlySpan<byte> Payload => _payload;

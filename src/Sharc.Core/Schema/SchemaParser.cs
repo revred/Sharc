@@ -71,12 +71,17 @@ internal static class SchemaParser
         if (name.Length == 0) return null;
         string type = ReadUntilKeyword(definition, ref pos);
         var rem = definition.Slice(pos);
+        bool isGuid = type.Equals("GUID", StringComparison.OrdinalIgnoreCase) ||
+                      type.Equals("UUID", StringComparison.OrdinalIgnoreCase);
+        bool isDecimal = type.Equals("FIX128", StringComparison.OrdinalIgnoreCase) ||
+                         type.Equals("DECIMAL128", StringComparison.OrdinalIgnoreCase) ||
+                         type.Equals("DECIMAL", StringComparison.OrdinalIgnoreCase);
         return new ColumnInfo {
             Name = name, DeclaredType = type, Ordinal = ordinal,
             IsPrimaryKey = Contains(rem, "PRIMARY KEY"),
             IsNotNull = Contains(rem, "NOT NULL") || Contains(rem, "PRIMARY KEY"),
-            IsGuidColumn = type.Equals("GUID", StringComparison.OrdinalIgnoreCase) ||
-                           type.Equals("UUID", StringComparison.OrdinalIgnoreCase)
+            IsGuidColumn = isGuid,
+            IsDecimalColumn = isDecimal
         };
     }
 
@@ -93,8 +98,10 @@ internal static class SchemaParser
     }
 
     /// <summary>
-    /// Detects __hi/__lo column pairs and merges them into logical GUID columns.
-    /// Columns named "foo__hi" + "foo__lo" become a single "foo" of type GUID.
+    /// Detects merged 128-bit column pairs and folds them into logical columns.
+    /// Conventions:
+    /// - "foo__hi" + "foo__lo" => GUID
+    /// - "foo__dhi" + "foo__dlo" => FIX128 decimal
     /// </summary>
     public static (IReadOnlyList<ColumnInfo> LogicalColumns, int PhysicalColumnCount) MergeColumnPairs(
         IReadOnlyList<ColumnInfo> physicalColumns)
@@ -102,11 +109,14 @@ internal static class SchemaParser
         if (physicalColumns.Count < 2)
             return (physicalColumns, physicalColumns.Count);
 
-        // Build a set of __lo names for quick lookup
+        // Build a set of low-half suffix names for quick lookup.
+        // Supports GUID (__lo) and FIX128 decimal (__dlo) conventions.
         var loNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < physicalColumns.Count; i++)
         {
-            if (physicalColumns[i].Name.EndsWith("__lo", StringComparison.OrdinalIgnoreCase))
+            string name = physicalColumns[i].Name;
+            if (name.EndsWith("__lo", StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith("__dlo", StringComparison.OrdinalIgnoreCase))
                 loNames.Add(physicalColumns[i].Name);
         }
 
@@ -151,6 +161,43 @@ internal static class SchemaParser
                         IsPrimaryKey = col.IsPrimaryKey && loCol.IsPrimaryKey,
                         IsNotNull = col.IsNotNull && loCol.IsNotNull,
                         IsGuidColumn = true,
+                        IsDecimalColumn = false,
+                        MergedPhysicalOrdinals = [col.Ordinal, loCol.Ordinal]
+                    });
+                    continue;
+                }
+            }
+
+            // Decimal FIX128 convention: foo__dhi + foo__dlo -> logical foo FIX128
+            if (col.Name.EndsWith("__dhi", StringComparison.OrdinalIgnoreCase))
+            {
+                string baseName = col.Name[..^5]; // strip __dhi
+                string expectedLo = baseName + "__dlo";
+
+                int loIndex = -1;
+                for (int j = i + 1; j < physicalColumns.Count; j++)
+                {
+                    if (physicalColumns[j].Name.Equals(expectedLo, StringComparison.OrdinalIgnoreCase))
+                    {
+                        loIndex = j;
+                        break;
+                    }
+                }
+
+                if (loIndex >= 0)
+                {
+                    var loCol = physicalColumns[loIndex];
+                    consumed.Add(i);
+                    consumed.Add(loIndex);
+                    result.Add(new ColumnInfo
+                    {
+                        Name = baseName,
+                        DeclaredType = "FIX128",
+                        Ordinal = logicalOrdinal++,
+                        IsPrimaryKey = col.IsPrimaryKey && loCol.IsPrimaryKey,
+                        IsNotNull = col.IsNotNull && loCol.IsNotNull,
+                        IsGuidColumn = false,
+                        IsDecimalColumn = true,
                         MergedPhysicalOrdinals = [col.Ordinal, loCol.Ordinal]
                     });
                     continue;
@@ -168,6 +215,7 @@ internal static class SchemaParser
                 IsPrimaryKey = col.IsPrimaryKey,
                 IsNotNull = col.IsNotNull,
                 IsGuidColumn = col.IsGuidColumn,
+                IsDecimalColumn = col.IsDecimalColumn,
                 MergedPhysicalOrdinals = [col.Ordinal]
             });
         }

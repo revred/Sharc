@@ -219,6 +219,37 @@ public class CreateTableParserTests
     }
 
     [Fact]
+    public void ParseColumns_Fix128Type_IsDecimalColumnTrue()
+    {
+        const string sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, amount FIX128 NOT NULL)";
+
+        var columns = SchemaParser.ParseTableColumns(sql);
+
+        Assert.Equal(2, columns.Count);
+        Assert.False(columns[0].IsGuidColumn);
+        Assert.True(columns[1].IsDecimalColumn);
+        Assert.False(columns[1].IsGuidColumn);
+        Assert.Equal("FIX128", columns[1].DeclaredType);
+    }
+
+    [Fact]
+    public void MergeColumnPairs_DecimalHiLoPair_CreatesMergedDecimalColumn()
+    {
+        const string sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, amount__dhi INTEGER, amount__dlo INTEGER)";
+        var physical = SchemaParser.ParseTableColumns(sql);
+
+        var (logical, physCount) = SchemaParser.MergeColumnPairs(physical);
+
+        Assert.Equal(3, physCount);
+        Assert.Equal(2, logical.Count);
+        Assert.Equal("amount", logical[1].Name);
+        Assert.True(logical[1].IsMergedDecimalColumn);
+        Assert.True(logical[1].IsDecimalColumn);
+        Assert.False(logical[1].IsGuidColumn);
+        Assert.Equal("FIX128", logical[1].DeclaredType);
+    }
+
+    [Fact]
     public void ParseColumns_NonGuidType_IsGuidColumnFalse()
     {
         const string sql = "CREATE TABLE t (id INTEGER, name TEXT, data BLOB)";

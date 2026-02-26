@@ -211,6 +211,13 @@ public readonly struct ColumnValue
         return new(Primitives.GuidCodec.GuidSerialType, ColumnStorageClass.UniqueId, blobValue: bytes);
     }
 
+    /// <summary>Creates a decimal column value stored as a canonical 16-byte BLOB (serial type 44).</summary>
+    public static ColumnValue FromDecimal(decimal value)
+    {
+        var bytes = Primitives.DecimalCodec.Encode(value);
+        return new(Primitives.DecimalCodec.DecimalSerialType, ColumnStorageClass.Blob, blobValue: bytes);
+    }
+
     /// <summary>Gets the integer value. Only valid when StorageClass is Integer.</summary>
     public long AsInt64() => _intValue;
 
@@ -225,6 +232,9 @@ public readonly struct ColumnValue
 
     /// <summary>Gets the GUID value. Only valid when StorageClass is Guid.</summary>
     public Guid AsGuid() => Primitives.GuidCodec.Decode(_blobValue.Span);
+
+    /// <summary>Gets the decimal value from a canonical 16-byte BLOB payload.</summary>
+    public decimal AsDecimal() => Primitives.DecimalCodec.Decode(_blobValue.Span);
 
     /// <summary>Returns true if this is a NULL value.</summary>
     public bool IsNull => StorageClass == ColumnStorageClass.Null;
@@ -247,6 +257,9 @@ public readonly struct ColumnValue
 
     /// <summary>Implicitly converts a double to a ColumnValue (serial type 7).</summary>
     public static implicit operator ColumnValue(double value) => FromDouble(value);
+
+    /// <summary>Implicitly converts a decimal to a ColumnValue (serial type 44 BLOB).</summary>
+    public static implicit operator ColumnValue(decimal value) => FromDecimal(value);
 
     /// <summary>Implicitly converts a string to a ColumnValue (serial type 13+2N).</summary>
     public static implicit operator ColumnValue(string value)

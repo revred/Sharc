@@ -137,8 +137,13 @@ public sealed class ColumnInfo
     /// <summary>Whether the column has a NOT NULL constraint.</summary>
     public required bool IsNotNull { get; init; }
 
-    /// <summary>Whether the declared type is GUID or UUID, indicating a 16-byte unique identifier.</summary>
+    /// <summary>Whether the declared type is GUID or UUID.</summary>
     public bool IsGuidColumn { get; init; }
+
+    /// <summary>
+    /// Whether the declared type is a decimal-backed fixed 128-bit type (e.g., FIX128/DECIMAL128).
+    /// </summary>
+    public bool IsDecimalColumn { get; init; }
 
     /// <summary>
     /// Physical ordinals of the __hi and __lo columns when this is a merged GUID column.
@@ -146,8 +151,14 @@ public sealed class ColumnInfo
     /// </summary>
     public int[]? MergedPhysicalOrdinals { get; init; }
 
+    /// <summary>True if this is any merged 128-bit column backed by two physical Int64 columns.</summary>
+    public bool IsMergedFix128Column => MergedPhysicalOrdinals is { Length: 2 };
+
     /// <summary>True if this is a merged GUID column backed by two physical Int64 columns.</summary>
-    public bool IsMergedGuidColumn => MergedPhysicalOrdinals is { Length: 2 };
+    public bool IsMergedGuidColumn => IsGuidColumn && MergedPhysicalOrdinals is { Length: 2 };
+
+    /// <summary>True if this is a merged decimal FIX128 column backed by two physical Int64 columns.</summary>
+    public bool IsMergedDecimalColumn => IsDecimalColumn && MergedPhysicalOrdinals is { Length: 2 };
 }
 
 /// <summary>

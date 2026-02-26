@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using Sharc.Core.Primitives;
 
@@ -63,6 +64,9 @@ internal sealed class PredicateNode : IFilterNode
         if (SerialTypeCodec.IsText(serialType))
             return EvaluateText(columnData);
 
+        if (SerialTypeCodec.IsBlob(serialType))
+            return EvaluateBlob(columnData, serialType);
+
         return false;
     }
 
@@ -94,13 +98,13 @@ internal sealed class PredicateNode : IFilterNode
             FilterOp.Eq => _value.ValueTag switch
             {
                 TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) == 0,
-                TypedFilterValue.Tag.Double => (double)RawByteComparer.DecodeInt64(data, serialType) == _value.AsDouble(),
+                TypedFilterValue.Tag.Double => RawByteComparer.AreClose((double)RawByteComparer.DecodeInt64(data, serialType), _value.AsDouble()),
                 _ => false // No typed path for this combination — defensively reject
             },
             FilterOp.Neq => _value.ValueTag switch
             {
                 TypedFilterValue.Tag.Int64 => RawByteComparer.CompareInt64(data, serialType, _value.AsInt64()) != 0,
-                TypedFilterValue.Tag.Double => (double)RawByteComparer.DecodeInt64(data, serialType) != _value.AsDouble(),
+                TypedFilterValue.Tag.Double => !RawByteComparer.AreClose((double)RawByteComparer.DecodeInt64(data, serialType), _value.AsDouble()),
                 _ => true
             },
             FilterOp.Lt => _value.ValueTag switch
@@ -150,14 +154,14 @@ internal sealed class PredicateNode : IFilterNode
         {
             FilterOp.Eq => _value.ValueTag switch
             {
-                TypedFilterValue.Tag.Double => colVal == _value.AsDouble(),
-                TypedFilterValue.Tag.Int64 => colVal == (double)_value.AsInt64(),
+                TypedFilterValue.Tag.Double => RawByteComparer.AreClose(colVal, _value.AsDouble()),
+                TypedFilterValue.Tag.Int64 => RawByteComparer.AreClose(colVal, (double)_value.AsInt64()),
                 _ => false
             },
             FilterOp.Neq => _value.ValueTag switch
             {
-                TypedFilterValue.Tag.Double => colVal != _value.AsDouble(),
-                TypedFilterValue.Tag.Int64 => colVal != (double)_value.AsInt64(),
+                TypedFilterValue.Tag.Double => !RawByteComparer.AreClose(colVal, _value.AsDouble()),
+                TypedFilterValue.Tag.Int64 => !RawByteComparer.AreClose(colVal, (double)_value.AsInt64()),
                 _ => true
             },
             FilterOp.Lt => _value.ValueTag switch
@@ -220,6 +224,31 @@ internal sealed class PredicateNode : IFilterNode
                            EvaluateUtf8In(data),
             FilterOp.NotIn => _value.ValueTag != TypedFilterValue.Tag.Utf8Set ||
                               !EvaluateUtf8In(data),
+            _ => false
+        };
+    }
+
+    private bool EvaluateBlob(ReadOnlySpan<byte> data, long serialType)
+    {
+        if (_value.ValueTag != TypedFilterValue.Tag.Decimal)
+            return false;
+
+        if (serialType != DecimalCodec.DecimalSerialType || data.Length != DecimalCodec.ByteCount)
+            return false;
+
+        if (!DecimalCodec.TryDecode(data, out decimal columnValue))
+            return false;
+
+        decimal filterValue = DecimalCodec.Decode(_value.AsDecimalBytes());
+        int cmp = columnValue.CompareTo(filterValue);
+        return _operator switch
+        {
+            FilterOp.Eq => cmp == 0,
+            FilterOp.Neq => cmp != 0,
+            FilterOp.Lt => cmp < 0,
+            FilterOp.Lte => cmp <= 0,
+            FilterOp.Gt => cmp > 0,
+            FilterOp.Gte => cmp >= 0,
             _ => false
         };
     }
@@ -337,5 +366,61 @@ internal sealed class GuidPredicateNode : IFilterNode
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Predicate node for merged FIX128 decimal columns backed by __hi/__lo INTEGER pairs.
+/// </summary>
+internal sealed class MergedDecimalPredicateNode : IFilterNode
+{
+    private readonly int _hiOrdinal;
+    private readonly int _loOrdinal;
+    private readonly FilterOp _operator;
+    private readonly decimal _filterValue;
+
+    internal MergedDecimalPredicateNode(int hiOrdinal, int loOrdinal, FilterOp op, TypedFilterValue value)
+    {
+        _hiOrdinal = hiOrdinal;
+        _loOrdinal = loOrdinal;
+        _operator = op;
+        _filterValue = DecimalCodec.Decode(value.AsDecimalBytes());
+    }
+
+    public bool Evaluate(ReadOnlySpan<byte> payload, ReadOnlySpan<long> serialTypes, int bodyOffset, long rowId)
+    {
+        if (_hiOrdinal >= serialTypes.Length || _loOrdinal >= serialTypes.Length)
+            return false;
+
+        long hiSerialType = serialTypes[_hiOrdinal];
+        long loSerialType = serialTypes[_loOrdinal];
+        if (!SerialTypeCodec.IsIntegral(hiSerialType) || !SerialTypeCodec.IsIntegral(loSerialType))
+            return false;
+
+        var (hiOffset, hiLength) = PredicateNode.GetColumnBodyPosition(serialTypes, bodyOffset, _hiOrdinal);
+        var (loOffset, loLength) = PredicateNode.GetColumnBodyPosition(serialTypes, bodyOffset, _loOrdinal);
+        var hiData = payload.Slice(hiOffset, hiLength);
+        var loData = payload.Slice(loOffset, loLength);
+
+        long hi = RawByteComparer.DecodeInt64(hiData, hiSerialType);
+        long lo = RawByteComparer.DecodeInt64(loData, loSerialType);
+
+        Span<byte> fix128 = stackalloc byte[DecimalCodec.ByteCount];
+        BinaryPrimitives.WriteInt64BigEndian(fix128[..8], hi);
+        BinaryPrimitives.WriteInt64BigEndian(fix128.Slice(8, 8), lo);
+        if (!DecimalCodec.TryDecode(fix128, out decimal rowValue))
+            return false;
+
+        int cmp = rowValue.CompareTo(_filterValue);
+        return _operator switch
+        {
+            FilterOp.Eq => cmp == 0,
+            FilterOp.Neq => cmp != 0,
+            FilterOp.Lt => cmp < 0,
+            FilterOp.Lte => cmp <= 0,
+            FilterOp.Gt => cmp > 0,
+            FilterOp.Gte => cmp >= 0,
+            _ => false
+        };
     }
 }

@@ -86,11 +86,22 @@ internal static class FilterTreeCompiler
         ColumnInfo col = ResolveColumn(pred, columns, columnMap);
 
         // GUID expansion for merged columns
-        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid &&
+            col.IsMergedGuidColumn &&
+            col.MergedPhysicalOrdinals is { Length: 2 } guidOrdinals)
         {
-            var hiOrdinal = col.MergedPhysicalOrdinals[0];
-            var loOrdinal = col.MergedPhysicalOrdinals[1];
+            var hiOrdinal = guidOrdinals[0];
+            var loOrdinal = guidOrdinals[1];
             return new GuidPredicateNode(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
+        }
+
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Decimal &&
+            col.IsMergedDecimalColumn &&
+            col.MergedPhysicalOrdinals is { Length: 2 } decimalOrdinals)
+        {
+            var hiOrdinal = decimalOrdinals[0];
+            var loOrdinal = decimalOrdinals[1];
+            return new MergedDecimalPredicateNode(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
         }
 
         int ordinal = col.MergedPhysicalOrdinals?[0] ?? col.Ordinal;

@@ -4,7 +4,7 @@
 namespace Sharc.Vector;
 
 /// <summary>
-/// Optional execution controls for <see cref="VectorQuery.NearestTo(ReadOnlySpan{float}, int, VectorSearchOptions, string[])"/>.
+/// Optional execution controls for vector query execution paths.
 /// </summary>
 public readonly record struct VectorSearchOptions
 {

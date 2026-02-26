@@ -16,7 +16,9 @@
 --------------------------------------------------------------------------------------------------*/
 
 using Sharc.Core;
+using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
+using System.Buffers.Binary;
 using Xunit;
 
 namespace Sharc.Tests.Write;
@@ -179,5 +181,31 @@ public sealed class ExpandMergedColumnsTests
         Assert.Equal(3, result.Length);
         Assert.True(result[1].IsNull);
         Assert.True(result[2].IsNull);
+    }
+
+    [Fact]
+    public void ExpandMergedColumns_WithMergedDecimal_ExpandsToTwoInt64s()
+    {
+        var columns = new[]
+        {
+            new ColumnInfo { Name = "id", DeclaredType = "INTEGER", Ordinal = 0, IsPrimaryKey = true, IsNotNull = true,
+                MergedPhysicalOrdinals = [0] },
+            new ColumnInfo { Name = "price", DeclaredType = "FIX128", Ordinal = 1, IsPrimaryKey = false, IsNotNull = true,
+                IsDecimalColumn = true, MergedPhysicalOrdinals = [1, 2] }
+        };
+        var table = MakeTable(columns, 3);
+
+        const decimal amount = 1234.5600m;
+        var logical = new[] { ColumnValue.FromInt64(6, 1), ColumnValue.FromDecimal(amount) };
+        var result = SharcWriter.ExpandMergedColumns(logical, table);
+
+        Assert.Equal(3, result.Length);
+        Assert.Equal(ColumnStorageClass.Integral, result[1].StorageClass);
+        Assert.Equal(ColumnStorageClass.Integral, result[2].StorageClass);
+
+        Span<byte> payload = stackalloc byte[DecimalCodec.ByteCount];
+        BinaryPrimitives.WriteInt64BigEndian(payload[..8], result[1].AsInt64());
+        BinaryPrimitives.WriteInt64BigEndian(payload.Slice(8, 8), result[2].AsInt64());
+        Assert.Equal(DecimalCodec.Normalize(amount), DecimalCodec.Decode(payload));
     }
 }

@@ -51,7 +51,10 @@ jobs:
           fi
 
       - name: Run all tests
-        run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --filter "Category!=Performance"
+        run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --filter "Category!=Performance&Category!=PerformanceGate"
+
+      - name: Run vector performance gates
+        run: dotnet test tests/Sharc.Vector.Tests/Sharc.Vector.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=vector-perf-gates.trx" --filter "Category=PerformanceGate"
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

@@ -57,11 +57,23 @@ internal static class FilterStarCompiler
         ColumnInfo col = ResolveColumn(pred, columns, columnMap);
 
         // GUID expansion for merged columns
-        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid && col.MergedPhysicalOrdinals?.Length == 2)
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Guid &&
+            col.IsMergedGuidColumn &&
+            col.MergedPhysicalOrdinals is { Length: 2 } guidOrdinals)
         {
-            var hiOrdinal = col.MergedPhysicalOrdinals[0];
-            var loOrdinal = col.MergedPhysicalOrdinals[1];
+            var hiOrdinal = guidOrdinals[0];
+            var loOrdinal = guidOrdinals[1];
             return JitPredicateBuilder.BuildGuidComparison(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
+        }
+
+        // Decimal expansion for merged FIX128 columns (__hi/__lo).
+        if (pred.Value.ValueTag == TypedFilterValue.Tag.Decimal &&
+            col.IsMergedDecimalColumn &&
+            col.MergedPhysicalOrdinals is { Length: 2 } decimalOrdinals)
+        {
+            var hiOrdinal = decimalOrdinals[0];
+            var loOrdinal = decimalOrdinals[1];
+            return JitPredicateBuilder.BuildMergedDecimalComparison(hiOrdinal, loOrdinal, pred.Operator, pred.Value);
         }
 
         return JitPredicateBuilder.Build(pred, col, rowidAliasOrdinal);
@@ -200,6 +212,7 @@ internal static class FilterStarCompiler
             FilterOp.IsNull or FilterOp.IsNotNull => 1,
             FilterOp.Eq or FilterOp.Neq when pred.Value.ValueTag == TypedFilterValue.Tag.Double => 2,
             FilterOp.Between when pred.Value.ValueTag == TypedFilterValue.Tag.DoubleRange => 2,
+            FilterOp.Eq or FilterOp.Neq when pred.Value.ValueTag == TypedFilterValue.Tag.Decimal => 2,
             FilterOp.Eq or FilterOp.Neq when pred.Value.ValueTag == TypedFilterValue.Tag.Utf8 => 3,
             FilterOp.StartsWith => 4,
             FilterOp.Contains or FilterOp.EndsWith => 5,

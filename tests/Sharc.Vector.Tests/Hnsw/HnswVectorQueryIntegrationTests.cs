@@ -109,6 +109,108 @@ public sealed class HnswVectorQueryIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void UseIndex_WithinDistance_UsesHnswWidening()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        var query = new float[VectorDim];
+        var result = vq.WithinDistance(query, maxDistance: 0.5f);
+
+        Assert.Equal(VectorExecutionStrategy.HnswWithinDistanceWidening, vq.LastExecutionInfo.Strategy);
+        Assert.False(vq.LastExecutionInfo.UsedFallbackScan);
+        Assert.All(result.Matches, m => Assert.True(m.Distance <= 0.5f));
+    }
+
+    [Fact]
+    public void UseIndex_WithinDistance_WithFilter_UsesHnswWidening()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        vq.Where(FilterStar.Column("category").Eq("science"));
+
+        var query = new float[VectorDim];
+        var result = vq.WithinDistance(query, maxDistance: 1.5f, "category");
+
+        Assert.Equal(VectorExecutionStrategy.HnswWithinDistanceWidening, vq.LastExecutionInfo.Strategy);
+        Assert.False(vq.LastExecutionInfo.UsedFallbackScan);
+        Assert.All(result.Matches, m =>
+        {
+            Assert.True(m.Distance <= 1.5f);
+            Assert.NotNull(m.Metadata);
+            Assert.Equal("science", m.Metadata!["category"]);
+        });
+    }
+
+    [Fact]
+    public void UseIndex_WithinDistance_BroadThreshold_FallsBackToFlatScan()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        var query = new float[VectorDim];
+        var result = vq.WithinDistance(query, maxDistance: float.MaxValue);
+
+        Assert.Equal(RowCount, result.Count);
+        Assert.Equal(VectorExecutionStrategy.HnswWithinDistanceWidening, vq.LastExecutionInfo.Strategy);
+        Assert.True(vq.LastExecutionInfo.UsedFallbackScan);
+    }
+
+    [Fact]
+    public void UseIndex_WithinDistance_WithForceFlatScanOption_BypassesHnsw()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        var query = new float[VectorDim];
+        var options = new VectorSearchOptions
+        {
+            ForceFlatScan = true
+        };
+
+        var result = vq.WithinDistance(query, maxDistance: 1.5f, options);
+
+        Assert.True(result.Count > 0);
+        Assert.Equal(VectorExecutionStrategy.FlatScan, vq.LastExecutionInfo.Strategy);
+    }
+
+    [Fact]
+    public void UseIndex_WithinDistance_MatchesForcedFlatScanResults()
+    {
+        using var index = HnswIndex.Build(_db, "docs", "embedding",
+            DistanceMetric.Euclidean, HnswConfig.Default with { Seed = 42 }, persist: false);
+        using var vq = _db.Vector("docs", "embedding", DistanceMetric.Euclidean);
+        vq.UseIndex(index);
+
+        var query = new float[VectorDim];
+        for (int i = 0; i < query.Length; i++)
+            query[i] = (i - 2) * 0.1f;
+
+        var nearestFlat = vq.NearestTo(query, k: 12, new VectorSearchOptions { ForceFlatScan = true });
+        float radius = nearestFlat[nearestFlat.Count - 1].Distance;
+
+        var ann = vq.WithinDistance(query, radius, new VectorSearchOptions { EfSearch = 128 });
+        var annInfo = vq.LastExecutionInfo;
+        var flat = vq.WithinDistance(query, radius, new VectorSearchOptions { ForceFlatScan = true });
+
+        Assert.Equal(flat.Count, ann.Count);
+        var annIds = ann.Matches.Select(m => m.RowId).OrderBy(v => v).ToArray();
+        var flatIds = flat.Matches.Select(m => m.RowId).OrderBy(v => v).ToArray();
+        Assert.Equal(flatIds, annIds);
+        Assert.True(annInfo.Strategy is VectorExecutionStrategy.HnswWithinDistanceWidening
+            or VectorExecutionStrategy.FlatScan);
+    }
+
+    [Fact]
     public void UseIndex_WithBroadFilter_UsesIndexedPostFilterWidening()
     {
         using var index = HnswIndex.Build(_db, "docs", "embedding",

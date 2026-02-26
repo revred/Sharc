@@ -13,6 +13,9 @@ namespace Sharc;
 /// </summary>
 internal static class RawByteComparer
 {
+    internal const double DoubleEqualityAbsoluteTolerance = 1e-12;
+    internal const double DoubleEqualityRelativeTolerance = 1e-12;
+
     /// <summary>
     /// Decodes an integer from raw big-endian bytes based on serial type and compares to a filter value.
     /// Handles all SQLite integer serial types (1-6, 8, 9).
@@ -63,6 +66,25 @@ internal static class RawByteComparer
     {
         double columnValue = (double)DecodeInt64(data, serialType);
         return columnValue.CompareTo(filterValue);
+    }
+
+    /// <summary>
+    /// Returns true when two doubles are equal within absolute/relative tolerance.
+    /// Used for robust Eq/Neq semantics on REAL values.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool AreClose(double a, double b)
+    {
+        if (double.IsNaN(a) || double.IsNaN(b))
+            return false;
+
+        if (double.IsInfinity(a) || double.IsInfinity(b))
+            return a.Equals(b);
+
+        double diff = Math.Abs(a - b);
+        double scale = Math.Max(Math.Abs(a), Math.Abs(b));
+        double tolerance = Math.Max(DoubleEqualityAbsoluteTolerance, DoubleEqualityRelativeTolerance * scale);
+        return diff <= tolerance;
     }
 
     /// <summary>
