@@ -1,17 +1,43 @@
 name: Publish NuGet Packages
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to publish as version 1.2.<PR_NUMBER> (example: 65)"
+        required: true
+        type: string
+      publish_ref:
+        description: "Git ref to publish from (default: main)"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-nuget-main
+  cancel-in-progress: false
 
 jobs:
-  build-and-publish:
+  build-and-test:
+    name: Build & Test
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      PUBLISH_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_ref || 'main' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH_REF }}
 
-      - name: Setup .NET
+      - name: Setup .NET 10.0
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -19,20 +45,224 @@ jobs:
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      - name: Restore dependencies
+        run: |
+          dotnet restore Sharc.sln
+          dotnet restore bench/Sharc.Benchmarks/Sharc.Benchmarks.csproj
+
       - name: Build
-        run: dotnet build Sharc.sln --configuration Release
+        run: dotnet build --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test Sharc.sln --configuration Release --no-build --verbosity normal
+      - name: Run all tests
+        run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance"
 
-      - name: Pack Sharc
-        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist
+      - name: Run vector performance gates
+        run: dotnet test tests/Sharc.Vector.Tests/Sharc.Vector.Tests.csproj --no-build --configuration Release --verbosity normal --filter "Category=PerformanceGate"
+
+  publish:
+    name: Pack & Publish
+    needs: build-and-test
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_ref || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH_REF }}
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PR_NUMBER="${{ github.event.inputs.pr_number }}"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid PR number '$PR_NUMBER'. Expected an integer."
+            exit 1
+          fi
+
+          VERSION="1.2.${PR_NUMBER}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
+
+      - name: Build Release
+        run: dotnet build --configuration Release /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Core
+        run: dotnet pack src/Sharc.Core/Sharc.Core.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Query
+        run: dotnet pack src/Sharc.Query/Sharc.Query.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Crypto
-        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist
+        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Graph.Surface
+        run: dotnet pack src/Sharc.Graph.Surface/Sharc.Graph.Surface.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc
+        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Graph
-        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist
+        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
-      - name: Push to NuGet
-        run: dotnet nuget push "dist/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: Pack Sharc.Vector
+        run: dotnet pack src/Sharc.Vector/Sharc.Vector.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Arc
+        run: dotnet pack src/Sharc.Arc/Sharc.Arc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Verify package artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          packages=(
+            "Sharc.Core"
+            "Sharc.Query"
+            "Sharc.Crypto"
+            "Sharc"
+            "Sharc.Graph.Surface"
+            "Sharc.Graph"
+            "Sharc.Vector"
+            "Sharc.Arc"
+          )
+          for package in "${packages[@]}"; do
+            artifact="dist/${package}.${VERSION}.nupkg"
+            if [[ ! -f "$artifact" ]]; then
+              echo "::error::Missing package artifact: $artifact"
+              exit 1
+            fi
+          done
+
+      - name: Validate NuGet API key
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::error::NUGET_API_KEY secret is not set."
+            exit 1
+          fi
+
+      - name: Push foundational packages to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
+            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+      - name: Wait for foundational packages on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          wait_for_package_version() {
+            local package="$1"
+            local package_path
+            package_path="$(echo "$package" | tr '[:upper:]' '[:lower:]')"
+            local url="https://api.nuget.org/v3-flatcontainer/${package_path}/index.json"
+            for attempt in $(seq 1 30); do
+              local index_json=""
+              if index_json="$(curl -fsSL "$url" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+                echo "${package} ${VERSION} is available on nuget.org"
+                return 0
+              fi
+              echo "Waiting for ${package} ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+              sleep 10
+            done
+            echo "::error::${package} ${VERSION} did not appear on nuget.org within 5 minutes"
+            return 1
+          }
+
+          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
+            wait_for_package_version "$package"
+          done
+
+      - name: Push Sharc to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push "dist/Sharc.${VERSION}.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Wait for Sharc on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            index_json=""
+            if index_json="$(curl -fsSL "https://api.nuget.org/v3-flatcontainer/sharc/index.json" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+              echo "Sharc ${VERSION} is available on nuget.org"
+              exit 0
+            fi
+            echo "Waiting for Sharc ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "::error::Sharc ${VERSION} did not appear on nuget.org within 5 minutes"
+          exit 1
+
+      - name: Push Sharc.Graph.Surface to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push "dist/Sharc.Graph.Surface.${VERSION}.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Wait for Sharc.Graph.Surface on nuget.org
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            index_json=""
+            if index_json="$(curl -fsSL "https://api.nuget.org/v3-flatcontainer/sharc.graph.surface/index.json" 2>/dev/null)" && grep -q "\"${VERSION}\"" <<< "$index_json"; then
+              echo "Sharc.Graph.Surface ${VERSION} is available on nuget.org"
+              exit 0
+            fi
+            echo "Waiting for Sharc.Graph.Surface ${VERSION} to be indexed on nuget.org (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "::error::Sharc.Graph.Surface ${VERSION} did not appear on nuget.org within 5 minutes"
+          exit 1
+
+      - name: Push extension packages to NuGet
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for package in "Sharc.Graph" "Sharc.Vector" "Sharc.Arc"; do
+            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
