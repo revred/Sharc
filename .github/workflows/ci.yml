@@ -66,8 +66,8 @@ jobs:
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
           if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "0" ]; then
-            echo "suffix=1.2.1.$PR_NUMBER" >> "$GITHUB_OUTPUT"
-            echo "Version: 1.2.1.$PR_NUMBER (PR #$PR_NUMBER)"
+            echo "suffix=1.2.$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "Version: 1.2.$PR_NUMBER (PR #$PR_NUMBER)"
           else
             echo "suffix=" >> "$GITHUB_OUTPUT"
             echo "Version: using default from Directory.Build.props"
