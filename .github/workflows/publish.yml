@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version to publish (e.g. 1.2.65)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,7 +17,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +45,8 @@ jobs:
     name: Pack & Publish
     needs: build-and-test
     runs-on: ubuntu-latest
+    env:
+      PACKAGE_DIR: artifacts/nuget
     steps:
       - uses: actions/checkout@v4
 
@@ -53,37 +61,45 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          VERSION="1.2.${PR_NUMBER}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Publishing version: $VERSION (manual dispatch)"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            VERSION="1.2.${PR_NUMBER}"
+            echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
 
       - name: Build Release
         run: dotnet build --configuration Release /p:Version=${{ steps.version.outputs.version }}
 
-      - name: Pack Sharc.Core
-        run: dotnet pack src/Sharc.Core/Sharc.Core.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+      - name: Prepare package output directory
+        run: mkdir -p "${{ env.PACKAGE_DIR }}"
 
       - name: Pack Sharc.Query
-        run: dotnet pack src/Sharc.Query/Sharc.Query.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Query/Sharc.Query.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Sharc.Core
+        run: dotnet pack src/Sharc.Core/Sharc.Core.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Crypto
-        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Graph.Surface
-        run: dotnet pack src/Sharc.Graph.Surface/Sharc.Graph.Surface.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Graph.Surface/Sharc.Graph.Surface.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc
-        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc/Sharc.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Graph
-        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Graph/Sharc.Graph.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Vector
-        run: dotnet pack src/Sharc.Vector/Sharc.Vector.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Vector/Sharc.Vector.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Sharc.Arc
-        run: dotnet pack src/Sharc.Arc/Sharc.Arc.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+        run: dotnet pack src/Sharc.Arc/Sharc.Arc.csproj --configuration Release --no-build -o "${{ env.PACKAGE_DIR }}" /p:Version=${{ steps.version.outputs.version }}
 
       - name: Verify package artifacts
         env:
@@ -91,8 +107,8 @@ jobs:
         run: |
           set -euo pipefail
           packages=(
-            "Sharc.Core"
             "Sharc.Query"
+            "Sharc.Core"
             "Sharc.Crypto"
             "Sharc"
             "Sharc.Graph.Surface"
@@ -101,7 +117,7 @@ jobs:
             "Sharc.Arc"
           )
           for package in "${packages[@]}"; do
-            artifact="dist/${package}.${VERSION}.nupkg"
+            artifact="${PACKAGE_DIR}/${package}.${VERSION}.nupkg"
             if [[ ! -f "$artifact" ]]; then
               echo "::error::Missing package artifact: $artifact"
               exit 1
@@ -114,8 +130,8 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
-            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+          for package in "Sharc.Query" "Sharc.Core" "Sharc.Crypto"; do
+            dotnet nuget push "${PACKAGE_DIR}/${package}.${VERSION}.nupkg" \
               --api-key "$NUGET_API_KEY" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
@@ -144,7 +160,7 @@ jobs:
             return 1
           }
 
-          for package in "Sharc.Core" "Sharc.Query" "Sharc.Crypto"; do
+          for package in "Sharc.Query" "Sharc.Core" "Sharc.Crypto"; do
             wait_for_package_version "$package"
           done
 
@@ -154,7 +170,7 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          dotnet nuget push "dist/Sharc.${VERSION}.nupkg" \
+          dotnet nuget push "${PACKAGE_DIR}/Sharc.${VERSION}.nupkg" \
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
@@ -182,7 +198,7 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          dotnet nuget push "dist/Sharc.Graph.Surface.${VERSION}.nupkg" \
+          dotnet nuget push "${PACKAGE_DIR}/Sharc.Graph.Surface.${VERSION}.nupkg" \
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
@@ -211,7 +227,7 @@ jobs:
         run: |
           set -euo pipefail
           for package in "Sharc.Graph" "Sharc.Vector" "Sharc.Arc"; do
-            dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
+            dotnet nuget push "${PACKAGE_DIR}/${package}.${VERSION}.nupkg" \
               --api-key "$NUGET_API_KEY" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
