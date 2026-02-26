@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version to publish (e.g. 1.2.65)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,7 +17,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,10 +59,15 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          VERSION="1.2.${PR_NUMBER}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Publishing version: $VERSION (manual dispatch)"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            VERSION="1.2.${PR_NUMBER}"
+            echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing version: $VERSION (from PR #$PR_NUMBER)"
 
       - name: Build Release
         run: dotnet build --configuration Release /p:Version=${{ steps.version.outputs.version }}
