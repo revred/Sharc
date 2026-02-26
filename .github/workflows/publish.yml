@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/nuget
-          for project in Sharc.Query Sharc.Engine Sharc.Crypto Sharc.Graph.Surface \
+          for project in Sharc.Query Sharc.Core Sharc.Crypto Sharc.Graph.Surface \
                          Sharc Sharc.Graph Sharc.Vector Sharc.Arc; do
             echo "Packing ${project}..."
             dotnet pack "src/${project}/${project}.csproj" \
@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.value }}"
-          for pkg in Sharc.Query Sharc.Engine Sharc.Crypto Sharc.Graph.Surface \
+          for pkg in Sharc.Query Sharc.Core Sharc.Crypto Sharc.Graph.Surface \
                      Sharc Sharc.Graph Sharc.Vector Sharc.Arc; do
             [[ -f "artifacts/nuget/${pkg}.${VERSION}.nupkg" ]] \
               || { echo "::error::Missing ${pkg}.${VERSION}.nupkg"; exit 1; }

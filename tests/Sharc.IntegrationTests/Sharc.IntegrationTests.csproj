@@ -11,7 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sharc\Sharc.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Query\Sharc.Query.csproj" />
-    <ProjectReference Include="..\..\src\Sharc.Engine\Sharc.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Sharc.Core\Sharc.Core.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Crypto\Sharc.Crypto.csproj" />
     <ProjectReference Include="..\..\src\Sharc.Arena.Wasm\Sharc.Arena.Wasm.csproj" />
   </ItemGroup>

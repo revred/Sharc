@@ -67,7 +67,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharc.Repo", "tools\Sharc.R
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharc.Repo.Tests", "tests\Sharc.Repo.Tests\Sharc.Repo.Tests.csproj", "{42149845-6F85-4E07-92E2-51871135F037}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharc.Engine", "src\Sharc.Engine\Sharc.Engine.csproj", "{F4D32DDF-F5C6-4AFD-94E4-78C48A049085}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharc.Core", "src\Sharc.Core\Sharc.Core.csproj", "{F4D32DDF-F5C6-4AFD-94E4-78C48A049085}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
