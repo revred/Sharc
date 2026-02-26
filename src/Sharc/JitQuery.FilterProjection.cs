@@ -19,6 +19,7 @@ public sealed partial class JitQuery
 
         if (_filters is null or { Count: 0 })
         {
+            ts.CachedFilterExpression = null;
             ts.CachedFilterNode = null;
             _compiledFilterVersion = _filterVersion;
             return null;
@@ -31,6 +32,7 @@ public sealed partial class JitQuery
             ? _filters[0]
             : FilterStar.And(_filters.ToArray());
 
+        ts.CachedFilterExpression = expression;
         ts.CachedFilterNode = FilterTreeCompiler.CompileBaked(
             expression, ts.Info.Columns, ts.RowidAliasOrdinal);
         _compiledFilterVersion = _filterVersion;

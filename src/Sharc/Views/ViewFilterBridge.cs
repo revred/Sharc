@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text;
+using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
 namespace Sharc.Views;
@@ -93,6 +94,7 @@ internal static class ViewFilterBridge
             TypedFilterValue.Tag.Int64 => BuildInt64(ordinal, op, value.AsInt64()),
             TypedFilterValue.Tag.Double => BuildDouble(ordinal, op, value.AsDouble()),
             TypedFilterValue.Tag.Utf8 => BuildString(ordinal, op, Encoding.UTF8.GetString(value.AsUtf8())),
+            TypedFilterValue.Tag.Decimal => BuildDecimal(ordinal, op, value.AsDecimalBytes().ToArray()),
             TypedFilterValue.Tag.Null => BuildNull(ordinal, op),
             _ => throw new NotSupportedException($"ViewFilterBridge does not support filter value tag: {value.ValueTag}")
         };
@@ -174,6 +176,45 @@ internal static class ViewFilterBridge
             FilterOp.Gte => row => !row.IsNull(ordinal) && string.Compare(row.GetString(ordinal), value, StringComparison.Ordinal) >= 0,
             _ => throw new NotSupportedException($"ViewFilterBridge does not support operator {op} for String.")
         };
+    }
+
+    private static Func<IRowAccessor, bool> BuildDecimal(int ordinal, FilterOp op, byte[] valueBytes)
+    {
+        decimal filterValue = DecimalCodec.Decode(valueBytes);
+        return op switch
+        {
+            FilterOp.Eq => row =>
+                !row.IsNull(ordinal) &&
+                TryGetDecimal(row, ordinal, out var value) &&
+                value == filterValue,
+            FilterOp.Neq => row =>
+                row.IsNull(ordinal) ||
+                !TryGetDecimal(row, ordinal, out var value) ||
+                value != filterValue,
+            FilterOp.Lt => row =>
+                !row.IsNull(ordinal) &&
+                TryGetDecimal(row, ordinal, out var value) &&
+                value < filterValue,
+            FilterOp.Lte => row =>
+                !row.IsNull(ordinal) &&
+                TryGetDecimal(row, ordinal, out var value) &&
+                value <= filterValue,
+            FilterOp.Gt => row =>
+                !row.IsNull(ordinal) &&
+                TryGetDecimal(row, ordinal, out var value) &&
+                value > filterValue,
+            FilterOp.Gte => row =>
+                !row.IsNull(ordinal) &&
+                TryGetDecimal(row, ordinal, out var value) &&
+                value >= filterValue,
+            _ => throw new NotSupportedException($"ViewFilterBridge does not support operator {op} for Decimal.")
+        };
+    }
+
+    private static bool TryGetDecimal(IRowAccessor row, int ordinal, out decimal value)
+    {
+        var bytes = row.GetBlob(ordinal);
+        return DecimalCodec.TryDecode(bytes, out value);
     }
 
     private static Func<IRowAccessor, bool> BuildNull(int ordinal, FilterOp op)

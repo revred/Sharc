@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -251,6 +252,9 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
 
     // Per-row generation counter for lazy decode (full 32-bit, ~4.3B row cycle)
     private int _decodedGeneration;
+    private int _scannedRowCount;
+    private int _returnedRowCount;
+    private readonly QueryExecutionStrategy _executionStrategy;
 
     // F-7: Cursor-based pagination — skip rows with RowId <= this value (0 = disabled)
     private long _afterRowId;
@@ -444,12 +448,12 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         else if (cursor is BTreeCursor<MemoryPageSource> mc)
             _btreeMemoryCursor = mc;
 
-        // Detect merged columns (__hi/__lo pairs) and build ordinal mappings.
+        // Detect merged FIX128 columns (__hi/__lo or __dhi/__dlo pairs) and build ordinal mappings.
         // When merged columns exist, buffers must be sized to physical column count.
         int physicalColumnCount = columns.Count;
         for (int i = 0; i < columns.Count; i++)
         {
-            if (columns[i].IsMergedGuidColumn)
+            if (columns[i].IsMergedFix128Column)
             {
                 var mergedOrdinals = columns[i].MergedPhysicalOrdinals!;
                 _mergedColumns ??= new Dictionary<int, int[]>();
@@ -520,6 +524,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         }
 
         _decodedGeneration = 1;
+        _executionStrategy = DetermineExecutionStrategy(cursor);
         _scanMode = ResolveScanMode();
     }
 
@@ -533,6 +538,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         _composite = new CompositeState(rows, columnNames);
         _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
+        _executionStrategy = QueryExecutionStrategy.Materialized;
     }
 
     /// <summary>
@@ -544,6 +550,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         _composite = new CompositeState(rows, columnNames);
         _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
+        _executionStrategy = QueryExecutionStrategy.Materialized;
     }
 
     /// <summary>
@@ -555,6 +562,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         _composite = new CompositeState(rows, columnNames);
         _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
+        _executionStrategy = QueryExecutionStrategy.Materialized;
     }
 
     /// <summary>
@@ -566,6 +574,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         _composite = new CompositeState(first, second, columnNames);
         _columnCount = (short)columnNames.Length;
         _rowidAliasOrdinal = -1;
+        _executionStrategy = QueryExecutionStrategy.Concat;
     }
 
     /// <summary>
@@ -579,6 +588,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         _composite = new CompositeState(underlying, mode, rightIndex);
         _columnCount = (short)underlying.FieldCount;
         _rowidAliasOrdinal = -1;
+        _executionStrategy = QueryExecutionStrategy.SetDedup;
     }
 
     /// <summary>
@@ -592,6 +602,44 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     /// Gets the rowid of the current row.
     /// </summary>
     public long RowId => _composite?.DedupUnderlying?.RowId ?? _cursor?.RowId ?? 0;
+
+    /// <summary>
+    /// True when this reader is backed by an index-seek cursor.
+    /// Exposed internally for diagnostics and test assertions.
+    /// </summary>
+    internal bool IsIndexAccelerated => _cursor is Sharc.Query.Optimization.IndexSeekCursor
+        or Sharc.Query.Optimization.IndexIntersectionCursor;
+
+    /// <summary>
+    /// Execution diagnostics for this reader instance.
+    /// </summary>
+    public QueryExecutionInfo ExecutionInfo
+    {
+        get
+        {
+            int indexEntriesScanned = 0;
+            int indexHits = 0;
+
+            if (_cursor is Sharc.Query.Optimization.IIndexCursorDiagnostics diagnostics)
+            {
+                indexEntriesScanned = diagnostics.IndexEntriesScanned;
+                indexHits = diagnostics.IndexHits;
+            }
+
+            return new QueryExecutionInfo(
+                Strategy: _executionStrategy,
+                ScannedRows: _scannedRowCount,
+                ReturnedRows: _returnedRowCount,
+                IndexEntriesScanned: indexEntriesScanned,
+                IndexHits: indexHits);
+        }
+    }
+
+    /// <summary>
+    /// True when this reader can seek directly by table rowid.
+    /// </summary>
+    internal bool CanSeekByRowId => _cursor != null
+        && _cursor is not WithoutRowIdCursorAdapter;
 
     /// <summary>
     /// Configures cursor-based pagination: only rows with RowId greater than
@@ -641,7 +689,11 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     {
         bool found = cursor.Seek(rowId);
         if (found)
-            DecodeCurrentRow(cursor.Payload);
+        {
+            var payload = cursor.Payload;
+            RefreshFilterSerialCacheForSeek(payload);
+            DecodeCurrentRow(payload);
+        }
         else
         {
             _currentRow = null;
@@ -657,13 +709,28 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     {
         bool found = _cursor!.Seek(rowId);
         if (found)
-            DecodeCurrentRow(_cursor!.Payload);
+        {
+            var payload = _cursor!.Payload;
+            RefreshFilterSerialCacheForSeek(payload);
+            DecodeCurrentRow(payload);
+        }
         else
         {
             _currentRow = null;
             IsLazy = false;
         }
         return found;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RefreshFilterSerialCacheForSeek(ReadOnlySpan<byte> payload)
+    {
+        if (_filter?.FilterNode == null || _filter.FilterSerialTypes == null)
+            return;
+
+        int colCount = _recordDecoder!.ReadSerialTypes(payload, _filter.FilterSerialTypes, out int bodyOffset);
+        _filterColCount = (short)colCount;
+        _filterBodyOffset = (short)bodyOffset;
     }
 
     /// <summary>
@@ -701,6 +768,12 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
             case int i:
                 seeked = indexCursor.SeekFirst((long)i);
                 break;
+            case double d:
+                seeked = indexCursor.SeekFirst(d);
+                break;
+            case float f:
+                seeked = indexCursor.SeekFirst((double)f);
+                break;
             case string s:
                 int maxUtf8 = Encoding.UTF8.GetMaxByteCount(s.Length);
                 Span<byte> utf8Buf = maxUtf8 <= 256 ? stackalloc byte[256] : new byte[maxUtf8];
@@ -708,12 +781,12 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
                 seeked = indexCursor.SeekFirst(utf8Buf[..written]);
                 break;
             default:
-                // double or unsupported type — fall back to full scan from start
+                // Unsupported type — fall back to full scan from start
                 break;
         }
 
         // If SeekFirst found no match and we had a seekable type, no match exists
-        if (!seeked && keyValues[0] is long or int or string)
+        if (!seeked && keyValues[0] is long or int or double or float or string)
         {
             _currentRow = null;
             IsLazy = false;
@@ -787,7 +860,8 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
             long l => !indexValue.IsNull && indexValue.AsInt64() == l,
             int i => !indexValue.IsNull && indexValue.AsInt64() == i,
             string s => !indexValue.IsNull && indexValue.AsString().Equals(s, StringComparison.Ordinal),
-            double d => !indexValue.IsNull && indexValue.AsDouble() == d,
+            double d => !indexValue.IsNull && TryGetNumericValue(indexValue, out double value) && value == d,
+            float f => !indexValue.IsNull && TryGetNumericValue(indexValue, out double value) && value == f,
             _ => false
         };
     }
@@ -806,13 +880,32 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
             long l => indexValue.AsInt64().CompareTo(l),
             int i => indexValue.AsInt64().CompareTo((long)i),
             string s => string.Compare(indexValue.AsString(), s, StringComparison.Ordinal),
-            double d => indexValue.AsDouble().CompareTo(d),
+            double d => TryGetNumericValue(indexValue, out double value) ? value.CompareTo(d) : 1,
+            float f => TryGetNumericValue(indexValue, out double value) ? value.CompareTo((double)f) : 1,
             _ => 0
         };
 
         // For ASC: if index value > target, we've passed it
         // For DESC: if index value < target, we've passed it
         return isDescending ? cmp < 0 : cmp > 0;
+    }
+
+    private static bool TryGetNumericValue(ColumnValue value, out double number)
+    {
+        if (value.StorageClass == ColumnStorageClass.Real)
+        {
+            number = value.AsDouble();
+            return true;
+        }
+
+        if (value.StorageClass == ColumnStorageClass.Integral)
+        {
+            number = value.AsInt64();
+            return true;
+        }
+
+        number = 0;
+        return false;
     }
 
     /// <summary>
@@ -825,6 +918,16 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         if (_btreeCachedCursor != null) return ScanMode.TypedCached;
         if (_btreeMemoryCursor != null) return ScanMode.TypedMemory;
         return ScanMode.Default;
+    }
+
+    private static QueryExecutionStrategy DetermineExecutionStrategy(IBTreeCursor cursor)
+    {
+        return cursor switch
+        {
+            Sharc.Query.Optimization.IndexSeekCursor => QueryExecutionStrategy.SingleIndexSeek,
+            Sharc.Query.Optimization.IndexIntersectionCursor => QueryExecutionStrategy.RowIdIntersection,
+            _ => QueryExecutionStrategy.TableScan
+        };
     }
 
     /// <summary>
@@ -854,7 +957,15 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     {
         // Composite mode: dedup, concat, materialized — dispatch through CompositeState
         if (_composite != null)
-            return _composite.ReadComposite(this);
+        {
+            bool hasRow = _composite.ReadComposite(this);
+            if (hasRow)
+            {
+                _scannedRowCount++;
+                _returnedRowCount++;
+            }
+            return hasRow;
+        }
 
         // Devirtualized scan with filter dispatch
         if (_btreeCachedCursor != null)
@@ -874,7 +985,10 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         while (cursor.MoveNext())
         {
             if (ProcessRow(cursor.Payload, cursor.RowId))
+            {
+                _returnedRowCount++;
                 return true;
+            }
         }
         _currentRow = null;
         IsLazy = false;
@@ -890,7 +1004,10 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         while (_cursor!.MoveNext())
         {
             if (ProcessRow(_cursor.Payload, _cursor.RowId))
+            {
+                _returnedRowCount++;
                 return true;
+            }
         }
         _currentRow = null;
         IsLazy = false;
@@ -905,6 +1022,8 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool ProcessRow(ReadOnlySpan<byte> payload, long rowId)
     {
+        _scannedRowCount++;
+
         // F-7: Cursor-based pagination — skip rows at or before the cursor position
         if (_afterRowId > 0 && rowId <= _afterRowId)
             return false;
@@ -1102,6 +1221,62 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     }
 
     /// <summary>
+    /// Gets a column value as a decimal from canonical 16-byte BLOB storage.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public decimal GetDecimal(int ordinal)
+    {
+        if (_composite != null)
+            return _composite.GetDecimal(this, ordinal);
+
+        int logicalOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        if (logicalOrdinal < 0 || logicalOrdinal >= _columnCount)
+            throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal, "Column ordinal is out of range.");
+
+        var logicalColumn = _columns![logicalOrdinal];
+        if (!logicalColumn.IsDecimalColumn)
+            throw new InvalidOperationException($"Column '{logicalColumn.Name}' is not declared as decimal FIX128.");
+
+        if (_mergedColumns != null && _mergedColumns.TryGetValue(logicalOrdinal, out var phys))
+        {
+            long hi;
+            long lo;
+            if (IsLazy)
+            {
+                hi = _recordDecoder!.DecodeInt64At(
+                    _cursor!.Payload, _serialTypes![phys[0]], _columnOffsets![phys[0]]);
+                lo = _recordDecoder!.DecodeInt64At(
+                    _cursor!.Payload, _serialTypes[phys[1]], _columnOffsets[phys[1]]);
+            }
+            else
+            {
+                hi = _currentRow![phys[0]].AsInt64();
+                lo = _currentRow[phys[1]].AsInt64();
+            }
+
+            Span<byte> payload = stackalloc byte[Core.Primitives.DecimalCodec.ByteCount];
+            BinaryPrimitives.WriteInt64BigEndian(payload[..8], hi);
+            BinaryPrimitives.WriteInt64BigEndian(payload.Slice(8, 8), lo);
+            return Core.Primitives.DecimalCodec.Decode(payload);
+        }
+
+        if (IsLazy)
+        {
+            int actualOrdinal = logicalOrdinal;
+            if (_physicalOrdinals != null) actualOrdinal = _physicalOrdinals[actualOrdinal];
+
+            long serialType = _serialTypes![actualOrdinal];
+            if (serialType != Core.Primitives.DecimalCodec.DecimalSerialType)
+                throw new InvalidOperationException($"Column {ordinal} is not a decimal payload (serial type {serialType}).");
+
+            return Core.Primitives.DecimalCodec.Decode(
+                _cursor!.Payload.Slice(_columnOffsets![actualOrdinal], Core.Primitives.DecimalCodec.ByteCount));
+        }
+
+        return GetColumnValue(ordinal).AsDecimal();
+    }
+
+    /// <summary>
     /// Gets a column value as a UTF-8 string.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1281,17 +1456,25 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
 
     /// <summary>
     /// Gets a column value as a GUID.
-    /// Supports both BLOB(16) storage (serial type 44) and merged column storage
-    /// (two Int64 columns named __hi/__lo combined into a single logical GUID).
+    /// Supports declared GUID/UUID columns stored as 16-byte BLOB payloads,
+    /// and merged GUID logical columns (__hi/__lo Int64 pair).
     /// </summary>
     public Guid GetGuid(int ordinal)
     {
         if (_composite != null)
             return _composite.GetGuid(this, ordinal);
 
+        int logicalOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        if (logicalOrdinal < 0 || logicalOrdinal >= _columnCount)
+            throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal, "Column ordinal is out of range.");
+
+        var logicalColumn = _columns![logicalOrdinal];
+        if (!logicalColumn.IsGuidColumn)
+            throw new InvalidOperationException($"Column '{logicalColumn.Name}' is not declared as GUID/UUID.");
+
         // Merged column path: read two physical Int64 columns, combine into GUID.
         // Zero-alloc: DecodeInt64At reads directly from the page span using precomputed O(1) offset.
-        if (_mergedColumns != null && _mergedColumns.TryGetValue(ordinal, out var phys))
+        if (_mergedColumns != null && _mergedColumns.TryGetValue(logicalOrdinal, out var phys))
         {
             long hi = _recordDecoder!.DecodeInt64At(
                 _cursor!.Payload, _serialTypes![phys[0]], _columnOffsets![phys[0]]);
@@ -1341,6 +1524,8 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         // Reset per-scan state — preserve Reusable flag, clear Lazy
         _currentRow = null;
         _decodedGeneration++;
+        _scannedRowCount = 0;
+        _returnedRowCount = 0;
         _cachedColumnNames = null;
         _ordinalCache = null;
 
@@ -1575,6 +1760,13 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
             if (IsConcatMode) return ActiveConcatReader.GetDouble(ordinal);
             var qv = CurrentMaterializedRow[ordinal];
             return qv.Type == QueryValueType.Int64 ? (double)qv.AsInt64() : qv.AsDouble();
+        }
+
+        internal decimal GetDecimal(SharcDataReader outer, int ordinal)
+        {
+            if (DedupUnderlying != null) return DedupUnderlying.GetDecimal(ordinal);
+            if (IsConcatMode) return ActiveConcatReader.GetDecimal(ordinal);
+            return Core.Primitives.DecimalCodec.Decode(CurrentMaterializedRow[ordinal].AsBlob());
         }
 
         internal string GetString(SharcDataReader outer, int ordinal)

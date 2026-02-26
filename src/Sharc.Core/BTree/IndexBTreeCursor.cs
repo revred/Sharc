@@ -189,6 +189,37 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     }
 
     /// <inheritdoc />
+    public bool SeekFirst(double firstColumnKey)
+    {
+        ObjectDisposedException.ThrowIf((_flags & FlagDisposed) != 0, this);
+        _stack.Clear();
+        _flags = FlagInitialized; // clear exhausted, set initialized
+        _snapshotVersion = _writableSource?.DataVersion ?? 0;
+
+        bool exactMatch = DescendToLeafByNumericKey(_rootPage, firstColumnKey);
+
+        if (_currentCellIndex < _currentHeader.CellCount)
+        {
+            ParseCurrentLeafCell();
+            return exactMatch;
+        }
+        else
+        {
+            if (MoveToNextLeaf())
+            {
+                _currentCellIndex = 0;
+                ParseCurrentLeafCell();
+                return false;
+            }
+            else
+            {
+                _flags |= FlagExhausted;
+                return false;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public bool SeekFirst(ReadOnlySpan<byte> utf8Key)
     {
         ObjectDisposedException.ThrowIf((_flags & FlagDisposed) != 0, this);
@@ -459,6 +490,107 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
     }
 
     /// <summary>
+    /// Binary search descent through the index B-tree comparing the first column value
+    /// using SQLite numeric ordering semantics for REAL/INTEGER keys.
+    /// </summary>
+    private bool DescendToLeafByNumericKey(uint pageNumber, double targetKey)
+    {
+        while (true)
+        {
+            var page = _pageSource.GetPage(pageNumber);
+            int headerOffset = pageNumber == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+            var header = BTreePageHeader.Parse(page[headerOffset..]);
+
+            if (header.IsLeaf)
+            {
+                _currentLeafPage = pageNumber;
+                _currentHeaderOffset = headerOffset;
+                _currentHeader = header;
+
+                int low = 0;
+                int high = header.CellCount - 1;
+                while (low <= high)
+                {
+                    int mid = low + ((high - low) >> 1);
+                    int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
+
+                    int headerBytes = IndexCellParser.ParseIndexLeafCell(page[cellOffset..], out int payloadSize);
+                    int payloadStart = cellOffset + headerBytes;
+                    int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(payloadSize, _usablePageSize);
+                    int safeSize = Math.Min(payloadSize, inlineSize);
+
+                    int cmp = CompareFirstColumnToNumericTarget(page.Slice(payloadStart, safeSize), targetKey);
+
+                    if (cmp < 0)
+                        low = mid + 1;
+                    else if (cmp > 0)
+                        high = mid - 1;
+                    else
+                    {
+                        while (mid > 0)
+                        {
+                            int prevOffset = header.GetCellPointer(page[headerOffset..], mid - 1);
+                            int prevHdrBytes = IndexCellParser.ParseIndexLeafCell(page[prevOffset..], out int prevPayloadSize);
+                            int prevPayloadStart = prevOffset + prevHdrBytes;
+                            int prevInlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(prevPayloadSize, _usablePageSize);
+                            int prevSafeSize = Math.Min(prevPayloadSize, prevInlineSize);
+
+                            int prevCmp = CompareFirstColumnToNumericTarget(page.Slice(prevPayloadStart, prevSafeSize), targetKey);
+                            if (prevCmp != 0) break;
+                            mid--;
+                        }
+
+                        _currentCellIndex = mid;
+                        return true;
+                    }
+                }
+
+                _currentCellIndex = low;
+                return false;
+            }
+
+            int idx = -1;
+            int l = 0;
+            int r = header.CellCount - 1;
+
+            while (l <= r)
+            {
+                int mid = l + ((r - l) >> 1);
+                int cellOffset = header.GetCellPointer(page[headerOffset..], mid);
+
+                int cellHdrSize = IndexCellParser.ParseIndexInteriorCell(page[cellOffset..], out _, out int payloadSize);
+                int payloadStart = cellOffset + cellHdrSize;
+                int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(payloadSize, _usablePageSize);
+                int safeSize = Math.Min(payloadSize, inlineSize);
+
+                int cmp = CompareFirstColumnToNumericTarget(page.Slice(payloadStart, safeSize), targetKey);
+                if (cmp >= 0)
+                {
+                    idx = mid;
+                    r = mid - 1;
+                }
+                else
+                {
+                    l = mid + 1;
+                }
+            }
+
+            if (idx != -1)
+            {
+                _stack.Push(new CursorStackFrame(pageNumber, idx, headerOffset, header));
+                int cellOffset = header.GetCellPointer(page[headerOffset..], idx);
+                uint leftChild = BinaryPrimitives.ReadUInt32BigEndian(page[cellOffset..]);
+                pageNumber = leftChild;
+            }
+            else
+            {
+                _stack.Push(new CursorStackFrame(pageNumber, header.CellCount - 1, headerOffset, header));
+                pageNumber = header.RightChildPage;
+            }
+        }
+    }
+
+    /// <summary>
     /// Extracts the first integer column from a SQLite record payload without full decode.
     /// Assumes the first column is an integer type (serial types 0-9).
     /// </summary>
@@ -471,6 +603,36 @@ internal sealed class IndexBTreeCursor<TPageSource> : IIndexBTreeCursor
         // Body starts after the header
         int bodyOffset = (int)headerSize;
 
+        return DecodeIntegerAt(payload, bodyOffset, serialType);
+    }
+
+    private static int CompareFirstColumnToNumericTarget(ReadOnlySpan<byte> payload, double targetKey)
+    {
+        int offset = Primitives.VarintDecoder.Read(payload, out long headerSize);
+        Primitives.VarintDecoder.Read(payload[offset..], out long serialType);
+        int bodyOffset = (int)headerSize;
+
+        if (serialType == 0)
+            return -1; // NULL sorts before numeric values
+
+        if (serialType == 7)
+        {
+            double realValue = BinaryPrimitives.ReadDoubleBigEndian(payload.Slice(bodyOffset, 8));
+            return realValue.CompareTo(targetKey);
+        }
+
+        if (serialType is >= 1 and <= 6 or 8 or 9)
+        {
+            long intValue = DecodeIntegerAt(payload, bodyOffset, serialType);
+            return ((double)intValue).CompareTo(targetKey);
+        }
+
+        // TEXT/BLOB sort after numeric values in SQLite ordering.
+        return 1;
+    }
+
+    private static long DecodeIntegerAt(ReadOnlySpan<byte> payload, int bodyOffset, long serialType)
+    {
         return serialType switch
         {
             0 => 0,                   // NULL

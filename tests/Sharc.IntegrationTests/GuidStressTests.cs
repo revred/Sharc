@@ -25,7 +25,7 @@ public sealed class GuidStressTests
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
             TestDatabaseFactory.Execute(conn,
-                "CREATE TABLE items (id INTEGER PRIMARY KEY, g BLOB)");
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, g GUID)");
 
             foreach (var guid in guids)
             {
@@ -66,7 +66,7 @@ public sealed class GuidStressTests
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
             TestDatabaseFactory.Execute(conn,
-                "CREATE TABLE boundary (id INTEGER PRIMARY KEY, g BLOB)");
+                "CREATE TABLE boundary (id INTEGER PRIMARY KEY, g GUID)");
 
             foreach (var guid in guids)
             {

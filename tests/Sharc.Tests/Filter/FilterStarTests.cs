@@ -136,6 +136,19 @@ public sealed class FilterStarTests
     }
 
     [Fact]
+    public void Column_DecimalOverloads_CreatePredicateExpressions()
+    {
+        var col = FilterStar.Column("amount");
+
+        Assert.IsType<PredicateExpression>(col.Eq(10.5m));
+        Assert.IsType<PredicateExpression>(col.Neq(10.5m));
+        Assert.IsType<PredicateExpression>(col.Lt(10.5m));
+        Assert.IsType<PredicateExpression>(col.Lte(10.5m));
+        Assert.IsType<PredicateExpression>(col.Gt(10.5m));
+        Assert.IsType<PredicateExpression>(col.Gte(10.5m));
+    }
+
+    [Fact]
     public void Column_StringEqNeq_CreatePredicateExpressions()
     {
         var col = FilterStar.Column("name");

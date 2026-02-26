@@ -357,7 +357,8 @@ writer.Insert(agent, "users", ColumnValue.FromInt64(1, 1), ColumnValue.Text(13, 
 | Float | `ColumnValue.FromDouble(7, value)` | `ColumnValue.FromDouble(7, 3.14)` |
 | Text | `ColumnValue.Text(13, utf8Bytes)` | `ColumnValue.Text(13, "hello"u8.ToArray())` |
 | Blob | `ColumnValue.Blob(12, bytes)` | `ColumnValue.Blob(12, new byte[] { 1, 2, 3 })` |
-| GUID | `ColumnValue.FromGuid(guid)` | `ColumnValue.FromGuid(Guid.NewGuid())` |
+| GUID/UUID | `ColumnValue.FromGuid(guid)` | `ColumnValue.FromGuid(Guid.NewGuid())` |
+| FIX128 decimal | `ColumnValue.FromDecimal(value)` | `ColumnValue.FromDecimal(1234567890.12345678m)` |
 
 ## SharcOperator Quick Reference
 

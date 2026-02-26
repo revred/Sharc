@@ -1,6 +1,7 @@
 # Sharc API Documentation
 
 Sharc is a high-performance, pure managed C# library that reads and writes SQLite database files from disk and in-memory buffers. Zero native dependencies. 2-56x faster than Microsoft.Data.Sqlite.
+It includes strict typed 128-bit column support for `GUID`/`UUID` and `FIX128` (`decimal`, 28-29 significant digits).
 
 ## Quick Start
 
@@ -64,4 +65,4 @@ All operations go through the B-tree layer, which reads SQLite pages directly fr
 | [Graph DB Comparison](../docs/GRAPH_DB_COMPARISON.md) | Sharc vs SurrealDB, ArangoDB, Neo4j |
 | [Vector Search Guide](../docs/VECTOR_SEARCH.md) | Embedding storage, RAG, semantic cache patterns |
 | [Alternatives](../docs/ALTERNATIVES.md) | Honest comparison vs SQLite, LiteDB, DuckDB |
-| [Samples](../samples/) | 12 runnable sample projects including API comparison and TopK scoring |
+| [Samples](../samples/) | 13 runnable sample projects including GUID/FIX128 typed value usage |

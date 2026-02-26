@@ -36,6 +36,128 @@ public class IndexAcceleratedQueryTests
     }
 
     [Fact]
+    public void CreateReader_FilterStarOnIndexedColumn_UsesIndexCursor()
+    {
+        var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("events", FilterStar.Column("user_id").Eq(3L));
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            Assert.Equal(3L, reader.GetInt64(1));
+            count++;
+        }
+
+        Assert.Equal(10, count);
+        Assert.Equal(QueryExecutionStrategy.SingleIndexSeek, reader.ExecutionInfo.Strategy);
+        Assert.Equal(10, reader.ExecutionInfo.ReturnedRows);
+        Assert.True(reader.ExecutionInfo.ScannedRows >= 10);
+        Assert.True(reader.ExecutionInfo.IndexEntriesScanned >= reader.ExecutionInfo.IndexHits);
+    }
+
+    [Fact]
+    public void JitQuery_FilterChange_ReplansToIndexCursor()
+    {
+        var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        var jit = db.Jit("events");
+
+        // Unsargable filter on non-indexed column -> table scan
+        jit.Where(FilterStar.Column("event_type").Contains("cli"));
+        using (var first = jit.Query())
+        {
+            Assert.False(first.IsIndexAccelerated);
+            int count = 0;
+            while (first.Read()) count++;
+            Assert.Equal(25, count);
+            Assert.Equal(QueryExecutionStrategy.TableScan, first.ExecutionInfo.Strategy);
+            Assert.Equal(50, first.ExecutionInfo.ScannedRows);
+            Assert.Equal(25, first.ExecutionInfo.ReturnedRows);
+            Assert.Equal(0, first.ExecutionInfo.IndexHits);
+        }
+
+        // Replace with sargable indexed filter -> index seek
+        jit.ClearFilters();
+        jit.Where(FilterStar.Column("user_id").Eq(4L));
+        using var second = jit.Query();
+
+        Assert.True(second.IsIndexAccelerated);
+
+        int secondCount = 0;
+        while (second.Read())
+        {
+            Assert.Equal(4L, second.GetInt64(1));
+            secondCount++;
+        }
+
+        Assert.Equal(10, secondCount);
+    }
+
+    [Fact]
+    public void JitQuery_ReusedReader_ExecutionCountersResetBetweenRuns()
+    {
+        var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        var jit = db.Jit("events");
+        jit.Where(FilterStar.Column("user_id").Eq(2L));
+
+        // First run initializes reusable reader.
+        using (var first = jit.Query())
+        {
+            int count = 0;
+            while (first.Read()) count++;
+            Assert.Equal(10, count);
+            Assert.Equal(10, first.ExecutionInfo.ReturnedRows);
+            Assert.True(first.ExecutionInfo.ScannedRows >= 10);
+        }
+
+        // Second run should not accumulate previous counters.
+        using var second = jit.Query();
+        int secondCount = 0;
+        while (second.Read()) secondCount++;
+
+        Assert.Equal(10, secondCount);
+        Assert.Equal(10, second.ExecutionInfo.ReturnedRows);
+        Assert.True(second.ExecutionInfo.ScannedRows >= 10);
+        Assert.True(second.ExecutionInfo.ScannedRows < 30); // regression guard against accumulation
+    }
+
+    [Fact]
+    public void JitQuery_ReusedIndexReader_IndexDiagnosticsResetBetweenRuns()
+    {
+        var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        var jit = db.Jit("events");
+        jit.Where(FilterStar.Column("user_id").Eq(2L));
+
+        QueryExecutionInfo firstInfo;
+        using (var first = jit.Query())
+        {
+            int count = 0;
+            while (first.Read()) count++;
+            Assert.Equal(10, count);
+            firstInfo = first.ExecutionInfo;
+        }
+
+        using var second = jit.Query();
+        int secondCount = 0;
+        while (second.Read()) secondCount++;
+
+        Assert.Equal(10, secondCount);
+        Assert.True(firstInfo.IndexEntriesScanned > 0);
+        Assert.True(firstInfo.IndexHits > 0);
+        Assert.Equal(firstInfo.IndexEntriesScanned, second.ExecutionInfo.IndexEntriesScanned);
+        Assert.Equal(firstInfo.IndexHits, second.ExecutionInfo.IndexHits);
+    }
+
+    [Fact]
     public void Where_EqOnIndexedColumn_SingleMatch()
     {
         var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
@@ -237,5 +359,140 @@ public class IndexAcceleratedQueryTests
             count++;
         }
         Assert.Equal(5, count);
+    }
+
+    [Fact]
+    public void Where_RealBetweenOnIndexedColumn_ReturnsCorrectRows()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.Query("SELECT id, x FROM points WHERE x BETWEEN 2.0 AND 4.0");
+
+        int count = 0;
+        while (reader.Read())
+        {
+            double x = reader.GetDouble(1);
+            Assert.InRange(x, 2.0, 4.0);
+            count++;
+        }
+
+        Assert.Equal(5, count); // 2.0, 2.5, 3.0, 3.5, 4.0
+    }
+
+    [Fact]
+    public void CreateReader_FilterStarRealEqOnIndexedColumn_UsesIndexCursor()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("points", FilterStar.Column("x").Eq(3.0));
+
+        Assert.True(reader.IsIndexAccelerated);
+        Assert.True(reader.Read());
+        Assert.Equal(3.0, reader.GetDouble(1));
+    }
+
+    [Fact]
+    public void Where_RealGtOnIndexedColumn_NoExactBoundary_StillReturnsRows()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.Query("SELECT id, x FROM points WHERE x > 3.25");
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            double x = reader.GetDouble(1);
+            Assert.True(x > 3.25);
+            count++;
+        }
+
+        Assert.Equal(13, count); // 3.5 .. 9.5
+    }
+
+    [Fact]
+    public void Where_RealCompositeRanges_WithCompositeIndex_UsesCompositePlan()
+    {
+        var data = TestDatabaseFactory.CreateIndexedReal2dDatabase(withCompositeIndex: true);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.Query(
+            "SELECT id, x, y FROM points2d WHERE x BETWEEN 2.0 AND 6.0 AND y BETWEEN 1.0 AND 3.0");
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            double x = reader.GetDouble(1);
+            double y = reader.GetDouble(2);
+            Assert.InRange(x, 2.0, 6.0);
+            Assert.InRange(y, 1.0, 3.0);
+            count++;
+        }
+
+        Assert.Equal(25, count);
+    }
+
+    [Fact]
+    public void Where_RealCompositeRanges_WithSeparateIndexes_UsesIntersectionFallback()
+    {
+        var data = TestDatabaseFactory.CreateIndexedReal2dDatabase(withCompositeIndex: false);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.Query(
+            "SELECT id, x, y FROM points2d WHERE x BETWEEN 2.0 AND 6.0 AND y BETWEEN 1.0 AND 3.0");
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            double x = reader.GetDouble(1);
+            double y = reader.GetDouble(2);
+            Assert.InRange(x, 2.0, 6.0);
+            Assert.InRange(y, 1.0, 3.0);
+            count++;
+        }
+
+        Assert.Equal(25, count);
+        Assert.Equal(QueryExecutionStrategy.RowIdIntersection, reader.ExecutionInfo.Strategy);
+        Assert.True(reader.ExecutionInfo.IndexEntriesScanned > 0);
+        Assert.True(reader.ExecutionInfo.IndexHits > 0);
+    }
+
+    [Fact]
+    public void JitQuery_ReusedIntersectionReader_IndexDiagnosticsResetBetweenRuns()
+    {
+        var data = TestDatabaseFactory.CreateIndexedReal2dDatabase(withCompositeIndex: false);
+        using var db = SharcDatabase.OpenMemory(data);
+
+        var jit = db.Jit("points2d");
+        jit.Where(FilterStar.Column("x").Between(2.0, 6.0));
+        jit.Where(FilterStar.Column("y").Between(1.0, 3.0));
+
+        QueryExecutionInfo firstInfo;
+        using (var first = jit.Query())
+        {
+            int count = 0;
+            while (first.Read()) count++;
+            Assert.Equal(25, count);
+            firstInfo = first.ExecutionInfo;
+        }
+
+        using var second = jit.Query();
+        int secondCount = 0;
+        while (second.Read()) secondCount++;
+
+        Assert.Equal(25, secondCount);
+        Assert.Equal(QueryExecutionStrategy.RowIdIntersection, second.ExecutionInfo.Strategy);
+        Assert.True(firstInfo.IndexEntriesScanned > 0);
+        Assert.True(firstInfo.IndexHits > 0);
+        Assert.Equal(firstInfo.IndexEntriesScanned, second.ExecutionInfo.IndexEntriesScanned);
+        Assert.Equal(firstInfo.IndexHits, second.ExecutionInfo.IndexHits);
     }
 }
