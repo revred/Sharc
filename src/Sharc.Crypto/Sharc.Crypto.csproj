@@ -15,6 +15,6 @@
     <InternalsVisibleTo Include="Sharc.Arena.Wasm" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Sharc.Core\Sharc.Core.csproj" />
+    <ProjectReference Include="..\Sharc.Engine\Sharc.Engine.csproj" />
   </ItemGroup>
 </Project>

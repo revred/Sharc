@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Sharc.Core</RootNamespace>
-    <AssemblyName>Sharc.Core</AssemblyName>
+    <AssemblyName>Sharc.Engine</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageReadmeFile></PackageReadmeFile>
     <!-- Only this project contains unsafe code (UnsafeBuffer, SafeM2MPageSource) -->
