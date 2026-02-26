@@ -75,6 +75,9 @@ jobs:
       - name: Pack Sharc.Query
         run: dotnet pack src/Sharc.Query/Sharc.Query.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
+      - name: Pack Sharc.Core
+        run: dotnet pack src/Sharc.Core/Sharc.Core.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
+
       - name: Pack Sharc.Crypto
         run: dotnet pack src/Sharc.Crypto/Sharc.Crypto.csproj --configuration Release --no-build -o dist /p:Version=${{ steps.version.outputs.version }}
 
@@ -100,6 +103,7 @@ jobs:
           set -euo pipefail
           packages=(
             "Sharc.Query"
+            "Sharc.Core"
             "Sharc.Crypto"
             "Sharc"
             "Sharc.Graph.Surface"
@@ -121,7 +125,7 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          for package in "Sharc.Query" "Sharc.Crypto"; do
+          for package in "Sharc.Query" "Sharc.Core" "Sharc.Crypto"; do
             dotnet nuget push "dist/${package}.${VERSION}.nupkg" \
               --api-key "$NUGET_API_KEY" \
               --source https://api.nuget.org/v3/index.json \
@@ -151,7 +155,7 @@ jobs:
             return 1
           }
 
-          for package in "Sharc.Query" "Sharc.Crypto"; do
+          for package in "Sharc.Query" "Sharc.Core" "Sharc.Crypto"; do
             wait_for_package_version "$package"
           done
 
