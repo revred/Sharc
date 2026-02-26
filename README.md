@@ -429,6 +429,14 @@ dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *FocusedPerf
 dotnet script ./samples/run-all.csx -- --build-only     # Validate all samples compile (requires dotnet-script)
 ```
 
+## Release Rule
+
+PRs into `main` are treated as release PRs and must include:
+
+- `README.md` updates for user-facing package/API changes
+- `CHANGELOG.md` release notes under `## [1.2.<PR_NUMBER>] - YYYY-MM-DD`
+- NuGet package staging in `artifacts/nuget` (ignored folder) before publish
+
 ## Project Structure
 
 ```text

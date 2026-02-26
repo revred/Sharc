@@ -81,6 +81,19 @@ tools/Sharc.Index/            Git history → SQLite CLI
 4. Ensure the build has zero warnings: `dotnet build --configuration Release`
 5. Keep PRs focused — one feature or fix per PR
 6. Write a clear PR description explaining **what** and **why**
+7. For PRs into `main` (release PRs), update both `README.md` and `CHANGELOG.md`
+8. Add release notes heading in `CHANGELOG.md` as `## [1.2.<PR_NUMBER>] - YYYY-MM-DD`
+
+## NuGet Packaging Hygiene
+
+- Do not generate package artifacts in the repo root.
+- Use an ignored output folder for local packing:
+
+```bash
+dotnet pack src/Sharc/Sharc.csproj -c Release -o artifacts/nuget
+```
+
+- CI publish also stages packages in `artifacts/nuget`.
 
 ## What NOT to Do
 

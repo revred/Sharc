@@ -10,6 +10,43 @@ permissions:
   contents: read
 
 jobs:
+  release-readiness:
+    name: Release Readiness
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce release docs and notes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "Changed files in PR:"
+          echo "$changed_files"
+
+          require_changed_file() {
+            local required_path="$1"
+            if ! grep -Fxq "$required_path" <<<"$changed_files"; then
+              echo "::error::Release PRs to main must update ${required_path}."
+              exit 1
+            fi
+          }
+
+          require_changed_file "README.md"
+          require_changed_file "CHANGELOG.md"
+
+          if ! grep -Eq "^## \\[1\\.2\\.(${PR_NUMBER}|PR-NUM)\\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md must include release heading '## [1.2.${PR_NUMBER}]' (or placeholder '## [1.2.PR-NUM]')."
+            exit 1
+          fi
+
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest
