@@ -3,6 +3,7 @@
 
 
 using System.Text;
+using Sharc.Core.Primitives;
 
 namespace Sharc;
 
@@ -12,7 +13,7 @@ namespace Sharc;
 /// </summary>
 internal readonly struct TypedFilterValue
 {
-    internal enum Tag : byte { Null, Int64, Double, Utf8, Utf8Set, Int64Set, Int64Range, DoubleRange, Guid }
+    internal enum Tag : byte { Null, Int64, Double, Utf8, Utf8Set, Int64Set, Int64Range, DoubleRange, Decimal, Guid }
 
     internal Tag ValueTag { get; }
     private readonly long _int64;
@@ -22,10 +23,12 @@ internal readonly struct TypedFilterValue
     private readonly long[]? _int64Set;
     private readonly long _int64High;     // for Between (int64)
     private readonly double _doubleHigh;  // for Between (double)
+    private readonly ReadOnlyMemory<byte> _blob;
 
     private TypedFilterValue(Tag tag, long int64 = 0, double dbl = 0,
         ReadOnlyMemory<byte> utf8 = default, ReadOnlyMemory<byte>[]? utf8Set = null,
-        long[]? int64Set = null, long int64High = 0, double doubleHigh = 0)
+        long[]? int64Set = null, long int64High = 0, double doubleHigh = 0,
+        ReadOnlyMemory<byte> blob = default)
     {
         ValueTag = tag;
         _int64 = int64;
@@ -35,6 +38,7 @@ internal readonly struct TypedFilterValue
         _int64Set = int64Set;
         _int64High = int64High;
         _doubleHigh = doubleHigh;
+        _blob = blob;
     }
 
     internal long AsInt64() => _int64;
@@ -45,12 +49,16 @@ internal readonly struct TypedFilterValue
     internal long[] AsInt64Set() => _int64Set!;
     internal long AsInt64High() => _int64High;
     internal double AsDoubleHigh() => _doubleHigh;
+    internal ReadOnlySpan<byte> AsDecimalBytes() => _blob.Span;
 
     internal static TypedFilterValue FromNull() => new(Tag.Null);
 
     internal static TypedFilterValue FromInt64(long v) => new(Tag.Int64, int64: v);
 
     internal static TypedFilterValue FromDouble(double v) => new(Tag.Double, dbl: v);
+
+    internal static TypedFilterValue FromDecimal(decimal v) =>
+        new(Tag.Decimal, blob: DecimalCodec.Encode(v));
 
     internal static TypedFilterValue FromGuid(Guid v)
     {

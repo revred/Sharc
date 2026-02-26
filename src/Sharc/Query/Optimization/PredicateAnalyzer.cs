@@ -2,7 +2,10 @@
 // Licensed under the MIT License.
 
 using IntentPredicateNode = Sharc.Query.Intent.PredicateNode;
+using Sharc;
 using Sharc.Query.Intent;
+using Sharc.Core.Schema;
+using System.Text;
 
 namespace Sharc.Query.Optimization;
 
@@ -12,6 +15,22 @@ namespace Sharc.Query.Optimization;
 /// </summary>
 internal static class PredicateAnalyzer
 {
+    /// <summary>
+    /// Walks a FilterStar tree and extracts leaf conditions suitable for index lookup.
+    /// Only conditions under AND branches are extracted; OR and NOT branches are skipped
+    /// because they cannot be satisfied by a single index seek.
+    /// </summary>
+    /// <param name="filter">The FilterStar expression to analyze.</param>
+    /// <param name="columns">Resolved table columns, used to map ordinal predicates to names.</param>
+    /// <returns>List of sargable conditions that may be index-accelerated.</returns>
+    public static List<SargableCondition> ExtractSargableConditions(
+        IFilterStar filter, IReadOnlyList<ColumnInfo> columns)
+    {
+        var result = new List<SargableCondition>();
+        ExtractFromFilter(filter, columns, result);
+        return result;
+    }
+
     /// <summary>
     /// Walks the predicate tree and extracts leaf conditions suitable for index lookup.
     /// Only conditions under AND branches are extracted; OR and NOT branches are skipped
@@ -28,6 +47,29 @@ internal static class PredicateAnalyzer
 
         ExtractFromNode(filter.Nodes, filter.RootIndex, tableAlias, result);
         return result;
+    }
+
+    private static void ExtractFromFilter(
+        IFilterStar filter,
+        IReadOnlyList<ColumnInfo> columns,
+        List<SargableCondition> result)
+    {
+        switch (filter)
+        {
+            case AndExpression and:
+                for (int i = 0; i < and.Children.Length; i++)
+                    ExtractFromFilter(and.Children[i], columns, result);
+                return;
+
+            case OrExpression:
+            case NotExpression:
+                // OR/NOT: cannot be satisfied by a single index seek
+                return;
+
+            case PredicateExpression pred:
+                TryExtractFilterLeaf(pred, columns, result);
+                return;
+        }
     }
 
     private static void ExtractFromNode(
@@ -84,6 +126,25 @@ internal static class PredicateAnalyzer
                 IntegerValue = node.Value.AsInt64,
                 HighValue = highValue,
                 IsIntegerKey = true,
+                IsRealKey = false,
+                IsTextKey = false,
+                TextValue = null
+            });
+        }
+        else if (node.Value.Kind == IntentValueKind.Real)
+        {
+            double highValue = node.Op == IntentOp.Between && node.HighValue.Kind == IntentValueKind.Real
+                ? node.HighValue.AsFloat64
+                : 0;
+
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = node.Op,
+                RealValue = node.Value.AsFloat64,
+                RealHighValue = highValue,
+                IsIntegerKey = false,
+                IsRealKey = true,
                 IsTextKey = false,
                 TextValue = null
             });
@@ -98,10 +159,121 @@ internal static class PredicateAnalyzer
                 IntegerValue = 0,
                 HighValue = 0,
                 IsIntegerKey = false,
+                IsRealKey = false,
                 IsTextKey = true,
                 TextValue = node.Value.AsText
             });
         }
+    }
+
+    private static void TryExtractFilterLeaf(
+        PredicateExpression predicate,
+        IReadOnlyList<ColumnInfo> columns,
+        List<SargableCondition> result)
+    {
+        if (!TryMapFilterOp(predicate.Operator, out var op))
+            return;
+
+        string? columnName = predicate.ColumnName;
+        if (columnName == null && predicate.ColumnOrdinal is int ordinal && (uint)ordinal < (uint)columns.Count)
+            columnName = columns[ordinal].Name;
+        if (string.IsNullOrEmpty(columnName))
+            return;
+
+        if (predicate.Value.ValueTag == TypedFilterValue.Tag.Int64)
+        {
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = op,
+                IntegerValue = predicate.Value.AsInt64(),
+                HighValue = 0,
+                IsIntegerKey = true,
+                IsRealKey = false,
+                IsTextKey = false,
+                TextValue = null
+            });
+            return;
+        }
+
+        if (predicate.Value.ValueTag == TypedFilterValue.Tag.Double)
+        {
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = op,
+                RealValue = predicate.Value.AsDouble(),
+                RealHighValue = 0,
+                IsIntegerKey = false,
+                IsRealKey = true,
+                IsTextKey = false,
+                TextValue = null
+            });
+            return;
+        }
+
+        if (predicate.Value.ValueTag == TypedFilterValue.Tag.Int64Range && op == IntentOp.Between)
+        {
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = IntentOp.Between,
+                IntegerValue = predicate.Value.AsInt64(),
+                HighValue = predicate.Value.AsInt64High(),
+                IsIntegerKey = true,
+                IsRealKey = false,
+                IsTextKey = false,
+                TextValue = null
+            });
+            return;
+        }
+
+        if (predicate.Value.ValueTag == TypedFilterValue.Tag.DoubleRange && op == IntentOp.Between)
+        {
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = IntentOp.Between,
+                RealValue = predicate.Value.AsDouble(),
+                RealHighValue = predicate.Value.AsDoubleHigh(),
+                IsIntegerKey = false,
+                IsRealKey = true,
+                IsTextKey = false,
+                TextValue = null
+            });
+            return;
+        }
+
+        if (predicate.Value.ValueTag == TypedFilterValue.Tag.Utf8 && op == IntentOp.Eq)
+        {
+            result.Add(new SargableCondition
+            {
+                ColumnName = columnName,
+                Op = IntentOp.Eq,
+                IntegerValue = 0,
+                HighValue = 0,
+                IsIntegerKey = false,
+                IsRealKey = false,
+                IsTextKey = true,
+                TextValue = Encoding.UTF8.GetString(predicate.Value.AsUtf8())
+            });
+        }
+    }
+
+    private static bool TryMapFilterOp(FilterOp op, out IntentOp mapped)
+    {
+        mapped = op switch
+        {
+            FilterOp.Eq => IntentOp.Eq,
+            FilterOp.Gt => IntentOp.Gt,
+            FilterOp.Gte => IntentOp.Gte,
+            FilterOp.Lt => IntentOp.Lt,
+            FilterOp.Lte => IntentOp.Lte,
+            FilterOp.Between => IntentOp.Between,
+            _ => default
+        };
+
+        return op is FilterOp.Eq or FilterOp.Gt or FilterOp.Gte or FilterOp.Lt or FilterOp.Lte or FilterOp.Between;
     }
 
     private static string StripAlias(string columnName, string? tableAlias)
@@ -138,8 +310,17 @@ internal struct SargableCondition
     /// <summary>Upper bound for Between.</summary>
     public long HighValue;
 
+    /// <summary>Real comparison value (for Eq/Gt/Gte/Lt/Lte/Between lower bound).</summary>
+    public double RealValue;
+
+    /// <summary>Upper bound for Between on real keys.</summary>
+    public double RealHighValue;
+
     /// <summary>True if this condition compares an integer value.</summary>
     public bool IsIntegerKey;
+
+    /// <summary>True if this condition compares a real (double) value.</summary>
+    public bool IsRealKey;
 
     /// <summary>True if this condition compares a text value.</summary>
     public bool IsTextKey;

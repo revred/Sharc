@@ -198,7 +198,9 @@ public sealed class HnswIndex : IDisposable
             HnswShadowTable.Save(db, shadowName, graph, cfg, dimensions, metric);
         }
 
-        return new HnswIndex(graph, resolver, metric, cfg);
+        var index = new HnswIndex(graph, resolver, metric, cfg);
+        HnswIndexAutoSyncRegistry.Register(db, tableName, vectorColumn, index);
+        return index;
     }
 
     /// <summary>
@@ -248,7 +250,9 @@ public sealed class HnswIndex : IDisposable
                 $"matching rows found in table '{tableName}'. Rebuild the index.");
 
         var resolver = new MemoryVectorResolver(vectors);
-        return new HnswIndex(graph, resolver, metric, config);
+        var index = new HnswIndex(graph, resolver, metric, config);
+        HnswIndexAutoSyncRegistry.Register(db, tableName, vectorColumn, index);
+        return index;
     }
 
     /// <summary>

@@ -105,6 +105,16 @@ public interface IIndexBTreeCursor : IDisposable
     bool SeekFirst(long firstColumnKey);
 
     /// <summary>
+    /// Seeks to the first index entry whose first column (numeric REAL/INTEGER) equals or exceeds
+    /// <paramref name="firstColumnKey"/> using numeric comparison.
+    /// After calling this method, <see cref="Payload"/> points to the first matching entry
+    /// (if found), and subsequent <see cref="MoveNext"/> calls continue from that position.
+    /// </summary>
+    /// <param name="firstColumnKey">The numeric value to seek for in the first column of the index.</param>
+    /// <returns>True if an entry with first column == <paramref name="firstColumnKey"/> was found.</returns>
+    bool SeekFirst(double firstColumnKey);
+
+    /// <summary>
     /// Seeks to the first index entry whose first column (text, UTF-8) equals or exceeds
     /// <paramref name="utf8Key"/> using byte-ordinal comparison (BINARY collation).
     /// After calling this method, <see cref="Payload"/> points to the first matching entry
@@ -128,7 +138,8 @@ public interface IIndexBTreeCursor : IDisposable
 
     /// <summary>
     /// Returns true if the underlying page source has been mutated since this cursor
-    /// was created or last refreshed (via <see cref="Reset"/> or <see cref="SeekFirst(long)"/>).
+    /// was created or last refreshed (via <see cref="Reset"/>, <see cref="SeekFirst(long)"/>,
+    /// or <see cref="SeekFirst(double)"/>).
     /// Returns false for read-only sources that cannot track mutations.
     /// </summary>
     bool IsStale { get; }

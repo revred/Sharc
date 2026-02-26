@@ -224,11 +224,11 @@ bus.Subscribe(ConceptKind.Person, change =>
 
 ---
 
-## GUID as Native Type
+## GUID/UUID as Native Type
 
-Sharc treats GUIDs as a first-class storage type with two encoding paths:
+Sharc treats declared `GUID`/`UUID` columns as a first-class 128-bit identifier type with two encoding paths:
 
-| Path | On-Disk Format | Alloc per GUID | Index Seek |
+| Path | On-Disk Format | Alloc per value | Index Seek |
 | :--- | :--- | ---: | :--- |
 | **BLOB(16)** | Serial type 44 (16-byte blob) | 40 B | Byte comparison |
 | **Merged Int64 pair** | 2 × Int64 (`__hi`/`__lo` convention) | **0 B** | O(log N) via `SeekFirst(long)` |
@@ -247,7 +247,7 @@ CREATE INDEX idx_owner ON entities (owner_guid__hi, owner_guid__lo);
 ```
 
 ```csharp
-// Both paths: GetGuid() auto-detects encoding
+// Both paths: declared GUID/UUID columns are supported
 using var reader = db.CreateReader("entities");
 while (reader.Read())
 {
@@ -262,7 +262,48 @@ writer.Insert("entities",
     ColumnValue.Text(15, "Alice"u8.ToArray()));
 ```
 
-`GetGuid(ordinal)` checks merged columns first (two `DecodeInt64At` calls, zero-alloc), then falls back to BLOB(16). Both paths produce identical `Guid` values.
+`GetGuid(ordinal)` is strict: the column must be declared as `GUID` or `UUID`.
+For merged columns, it reads two Int64 halves (`__hi`/`__lo`) with zero-allocation decode. For BLOB-backed GUID columns, it decodes the 16-byte payload.
+
+## FIX128 / DECIMAL128 (28-29 Digit Precision)
+
+Sharc supports exact fixed-point decimal values backed by .NET `decimal` precision (28-29 significant digits).
+
+| Declared Type | Path | On-Disk Format | Precision | Accessor |
+| :--- | :--- | :--- | :--- | :--- |
+| `FIX128`, `DECIMAL128`, `DECIMAL` | Canonical payload | 16-byte BLOB | 28-29 digits | `GetDecimal()` |
+| merged decimal pair | `__dhi`/`__dlo` convention | 2 x Int64 | 28-29 digits | `GetDecimal()` |
+
+```sql
+-- Canonical decimal payload
+CREATE TABLE prices (
+    id INTEGER PRIMARY KEY,
+    amount FIX128 NOT NULL
+);
+
+-- Merged decimal FIX128 path
+CREATE TABLE ticks (
+    id INTEGER PRIMARY KEY,
+    px__dhi INTEGER NOT NULL,
+    px__dlo INTEGER NOT NULL
+);
+```
+
+```csharp
+using var writer = SharcWriter.From(db);
+
+writer.Insert("prices",
+    ColumnValue.FromInt64(1, 1),
+    ColumnValue.FromDecimal(12345678901234567890.12345678m));
+
+using var reader = db.CreateReader("prices");
+while (reader.Read())
+{
+    decimal amount = reader.GetDecimal(1);
+}
+```
+
+`GetDecimal(ordinal)` is strict: the column must be declared as `FIX128`/`DECIMAL128`/`DECIMAL` (or a merged decimal logical column).
 
 ---
 

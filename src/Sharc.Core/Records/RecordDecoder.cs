@@ -634,7 +634,20 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             {
                 case long l: cmp = val.CompareTo(l); break;
                 case int i: cmp = val.CompareTo((long)i); break;
-                case double d: cmp = ((double)val).CompareTo(d); break;
+                case double d:
+                {
+                    if (op == SharcOperator.Equal) return AreClose((double)val, d);
+                    if (op == SharcOperator.NotEqual) return !AreClose((double)val, d);
+                    cmp = ((double)val).CompareTo(d);
+                    break;
+                }
+                case float f:
+                {
+                    if (op == SharcOperator.Equal) return AreClose((double)val, f);
+                    if (op == SharcOperator.NotEqual) return !AreClose((double)val, f);
+                    cmp = ((double)val).CompareTo((double)f);
+                    break;
+                }
                 default: return false;
             }
         }
@@ -643,10 +656,26 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
             double val = BinaryPrimitives.ReadDoubleBigEndian(data);
             switch (filterValue)
             {
-                case double d: cmp = val.CompareTo(d); break;
-                case float f: cmp = val.CompareTo((double)f); break;
-                case long l: cmp = val.CompareTo((double)l); break;
-                case int i: cmp = val.CompareTo((double)i); break;
+                case double d:
+                    if (op == SharcOperator.Equal) return AreClose(val, d);
+                    if (op == SharcOperator.NotEqual) return !AreClose(val, d);
+                    cmp = val.CompareTo(d);
+                    break;
+                case float f:
+                    if (op == SharcOperator.Equal) return AreClose(val, f);
+                    if (op == SharcOperator.NotEqual) return !AreClose(val, f);
+                    cmp = val.CompareTo((double)f);
+                    break;
+                case long l:
+                    if (op == SharcOperator.Equal) return AreClose(val, (double)l);
+                    if (op == SharcOperator.NotEqual) return !AreClose(val, (double)l);
+                    cmp = val.CompareTo((double)l);
+                    break;
+                case int i:
+                    if (op == SharcOperator.Equal) return AreClose(val, (double)i);
+                    if (op == SharcOperator.NotEqual) return !AreClose(val, (double)i);
+                    cmp = val.CompareTo((double)i);
+                    break;
                 default: return false;
             }
         }
@@ -690,6 +719,23 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
                 }
             }
             else return false;
+        }
+        else if (SerialTypeCodec.IsBlob(st) && st == DecimalCodec.DecimalSerialType && filterValue is decimal dec)
+        {
+            if (!DecimalCodec.TryDecode(data, out decimal columnDecimal))
+                return false;
+
+            int decimalCmp = columnDecimal.CompareTo(DecimalCodec.Normalize(dec));
+            return op switch
+            {
+                SharcOperator.Equal => decimalCmp == 0,
+                SharcOperator.NotEqual => decimalCmp != 0,
+                SharcOperator.LessThan => decimalCmp < 0,
+                SharcOperator.GreaterThan => decimalCmp > 0,
+                SharcOperator.LessOrEqual => decimalCmp <= 0,
+                SharcOperator.GreaterOrEqual => decimalCmp >= 0,
+                _ => false
+            };
         }
         else
         {
@@ -740,5 +786,22 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         int raw = (data[0] << 16) | (data[1] << 8) | data[2];
         if ((raw & 0x800000) != 0) raw |= unchecked((int)0xFF000000);
         return raw;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool AreClose(double a, double b)
+    {
+        if (double.IsNaN(a) || double.IsNaN(b))
+            return false;
+
+        if (double.IsInfinity(a) || double.IsInfinity(b))
+            return a.Equals(b);
+
+        const double absTol = 1e-12;
+        const double relTol = 1e-12;
+        double diff = Math.Abs(a - b);
+        double scale = Math.Max(Math.Abs(a), Math.Abs(b));
+        double tol = Math.Max(absTol, relTol * scale);
+        return diff <= tol;
     }
 }

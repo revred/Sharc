@@ -82,4 +82,29 @@ public class IndexSeekTests
         using var reader = db.CreateReader("items");
         Assert.Throws<ArgumentException>(() => reader.SeekIndex("nonexistent_idx", "value"));
     }
+
+    [Fact]
+    public void SeekIndex_RealKey_FindsCorrectRow()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("points");
+        bool found = reader.SeekIndex("idx_points_x", 3.5);
+
+        Assert.True(found);
+        Assert.Equal(3.5, reader.GetDouble(1));
+    }
+
+    [Fact]
+    public void SeekIndex_RealKey_NoMatch_ReturnsFalse()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("points");
+        bool found = reader.SeekIndex("idx_points_x", 42.25);
+
+        Assert.False(found);
+    }
 }

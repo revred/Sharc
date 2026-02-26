@@ -76,10 +76,16 @@ Use typed getters for zero-boxing access:
 | `GetBlob(ordinal)` | `byte[]` | Binary data (allocates) |
 | `GetBlobSpan(ordinal)` | `ReadOnlySpan<byte>` | Binary data (zero-copy) |
 | `GetUtf8Span(ordinal)` | `ReadOnlySpan<byte>` | Raw UTF-8 bytes (zero-copy) |
-| `GetGuid(ordinal)` | `Guid` | From BLOB(16) or merged `__hi`/`__lo` columns |
+| `GetGuid(ordinal)` | `Guid` | Strict: column must be declared `GUID`/`UUID`; supports BLOB(16) or merged `__hi`/`__lo` |
+| `GetDecimal(ordinal)` | `decimal` | Strict: column must be declared `FIX128`/`DECIMAL128`/`DECIMAL`; 28-29 digits |
 | `IsNull(ordinal)` | `bool` | Check for NULL |
 | `GetValue(ordinal)` | `object` | Boxed value (slower, for dynamic access) |
 | `GetColumnType(ordinal)` | `SharcColumnType` | Runtime type of current value |
+
+### 128-bit Column Conventions
+
+- GUID logical merge: `name__hi` + `name__lo`
+- Decimal logical merge: `name__dhi` + `name__dlo`
 
 ### Zero-Copy Access
 

@@ -105,9 +105,28 @@ Construct values for inserts and updates:
 | `ColumnValue.FromDouble(serialType, value)` | Floating point (serial type: 7) |
 | `ColumnValue.Text(serialType, utf8Bytes)` | UTF-8 text (serial type: odd >= 13) |
 | `ColumnValue.Blob(serialType, bytes)` | Binary data (serial type: even >= 12) |
-| `ColumnValue.FromGuid(guid)` | GUID as BLOB(16) |
+| `ColumnValue.FromGuid(guid)` | GUID/UUID value (BLOB(16) or merged `__hi`/`__lo`) |
+| `ColumnValue.FromDecimal(value)` | FIX128/DECIMAL128 value (exact 28-29 digits; canonical or merged `__dhi`/`__dlo`) |
 
 > **Serial type hint:** For text, use `13` for short strings. For blobs, use `12`. Sharc computes the actual serial type from the data length.
+
+### 128-bit Schema Conventions
+
+```sql
+CREATE TABLE docs (
+    id INTEGER PRIMARY KEY,
+    doc_guid UUID NOT NULL,
+    amount FIX128 NOT NULL
+);
+
+CREATE TABLE merged_values (
+    id INTEGER PRIMARY KEY,
+    owner__hi INTEGER NOT NULL,
+    owner__lo INTEGER NOT NULL,
+    total__dhi INTEGER NOT NULL,
+    total__dlo INTEGER NOT NULL
+);
+```
 
 ## Vacuum
 
