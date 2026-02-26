@@ -52,10 +52,12 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
     {
         internal readonly TableInfo Info;
         internal readonly int RowidAliasOrdinal;
+        internal IFilterStar? CachedFilterExpression;
         internal IFilterNode? CachedFilterNode;
         internal IBTreeCursor? CachedCursor;
         internal SharcDataReader? CachedReader;
         internal int[]? ReaderProjection; // projection at time of reader creation (reference equality)
+        internal int ReaderFilterVersion = -1;
         internal Trust.IRowAccessEvaluator? RowAccessEvaluator;
         internal SharcWriteTransaction? Transaction;
         internal Dictionary<string, uint>? RootCache;
@@ -150,7 +152,11 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
         _offset = NoOffset;
         _filterVersion++;
         if (_table != null)
+        {
+            _table.CachedFilterExpression = null;
             _table.CachedFilterNode = null;
+            _table.ReaderFilterVersion = -1;
+        }
         if (_view != null)
             _view.CachedFilter = null;
         _cachedProjection = null;
@@ -238,7 +244,9 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
         IFilterNode? filterNode = CompileFilters();
 
         // Fastest path: reuse cached cursor + reader
-        if (ts.CachedReader != null && _limit < 0 && _offset < 0)
+        if (ts.CachedReader != null
+            && _limit < 0 && _offset < 0
+            && ts.ReaderFilterVersion == _filterVersion)
         {
             ts.CachedReader.ResetForReuse(filterNode);
             return ts.CachedReader;
@@ -264,6 +272,7 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
         // Reference equality on projection works because ResolveProjection caches its result.
         if (ts.CachedReader != null
             && _limit < 0 && _offset < 0
+            && ts.ReaderFilterVersion == _filterVersion
             && ReferenceEquals(ts.ReaderProjection, projection))
         {
             ts.CachedReader.ResetForReuse(filterNode);
@@ -287,7 +296,10 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
             ts.CachedCursor = null;
         }
 
-        var cursor = db.CreateTableCursorForPrepared(ts.Info);
+        var cursor = ts.CachedFilterExpression != null
+            ? db.TryCreateIndexSeekCursorForFilter(ts.CachedFilterExpression, ts.Info)
+                ?? db.CreateTableCursorForPrepared(ts.Info)
+            : db.CreateTableCursorForPrepared(ts.Info);
 
         var reader = new SharcDataReader(cursor, db.Decoder, new SharcDataReader.CursorReaderConfig
         {
@@ -316,6 +328,7 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
         ts.CachedCursor = cursor;
         ts.CachedReader = reader;
         ts.ReaderProjection = projection;
+        ts.ReaderFilterVersion = _filterVersion;
         _cachedProjection = projection;
 
         return reader;
@@ -685,7 +698,9 @@ public sealed partial class JitQuery : IPreparedReader, IPreparedWriter
             _table.RowAccessEvaluator = null;
             _table.Transaction = null;
             _table.RootCache = null;
+            _table.CachedFilterExpression = null;
             _table.CachedFilterNode = null;
+            _table.ReaderFilterVersion = -1;
         }
 
         if (_view != null)

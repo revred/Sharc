@@ -209,6 +209,31 @@ public class IndexSelectorTests
     }
 
     [Fact]
+    public void SelectBestIndex_RealBetweenCondition_ReturnsRealPlanWithBounds()
+    {
+        var indexes = new[] { MakeIndex("idx_score", false, "score") };
+        var conditions = new List<SargableCondition>
+        {
+            new()
+            {
+                ColumnName = "score",
+                Op = IntentOp.Between,
+                IsRealKey = true,
+                RealValue = 1.25,
+                RealHighValue = 4.75
+            }
+        };
+
+        var plan = IndexSelector.SelectBestIndex(conditions, indexes);
+
+        Assert.NotNull(plan.Index);
+        Assert.True(plan.IsRealKey);
+        Assert.Equal(1.25, plan.SeekRealKey);
+        Assert.Equal(4.75, plan.UpperBoundReal);
+        Assert.True(plan.HasUpperBound);
+    }
+
+    [Fact]
     public void SelectBestIndex_CaseInsensitiveColumnMatch()
     {
         var indexes = new[] { MakeIndex("idx_user_id", false, "User_Id") };
@@ -220,5 +245,63 @@ public class IndexSelectorTests
         var plan = IndexSelector.SelectBestIndex(conditions, indexes);
 
         Assert.NotNull(plan.Index);
+    }
+
+    [Fact]
+    public void SelectBestPlan_CompositeRange_PrefersCompositeAndAddsResidualConstraint()
+    {
+        var indexes = new[]
+        {
+            MakeIndex("idx_points_x", false, "x"),
+            MakeIndex("idx_points_xy", false, "x", "y")
+        };
+
+        var conditions = new List<SargableCondition>
+        {
+            new() { ColumnName = "x", Op = IntentOp.Between, IsRealKey = true, RealValue = 2.0, RealHighValue = 6.0 },
+            new() { ColumnName = "y", Op = IntentOp.Between, IsRealKey = true, RealValue = 1.0, RealHighValue = 3.0 }
+        };
+
+        var executionPlan = IndexSelector.SelectBestPlan(conditions, indexes);
+
+        Assert.Equal(IndexPlanStrategy.SingleIndex, executionPlan.Strategy);
+        Assert.NotNull(executionPlan.Primary.Index);
+        Assert.Equal("idx_points_xy", executionPlan.Primary.Index!.Name);
+        Assert.True(executionPlan.Primary.IsRealKey);
+        Assert.Equal(IntentOp.Between, executionPlan.Primary.SeekOp);
+        Assert.NotNull(executionPlan.Primary.ResidualConstraints);
+        Assert.Single(executionPlan.Primary.ResidualConstraints!);
+        Assert.Equal(1, executionPlan.Primary.ResidualConstraints![0].ColumnOrdinal);
+        Assert.Equal(IntentOp.Between, executionPlan.Primary.ResidualConstraints![0].Op);
+    }
+
+    [Fact]
+    public void SelectBestPlan_SeparateRangeIndexes_ChoosesIntersection()
+    {
+        var indexes = new[]
+        {
+            MakeIndex("idx_points_x", false, "x"),
+            MakeIndex("idx_points_y", false, "y")
+        };
+
+        var conditions = new List<SargableCondition>
+        {
+            new() { ColumnName = "x", Op = IntentOp.Between, IsRealKey = true, RealValue = 2.0, RealHighValue = 6.0 },
+            new() { ColumnName = "y", Op = IntentOp.Between, IsRealKey = true, RealValue = 1.0, RealHighValue = 3.0 }
+        };
+
+        var executionPlan = IndexSelector.SelectBestPlan(conditions, indexes);
+
+        Assert.Equal(IndexPlanStrategy.RowIdIntersection, executionPlan.Strategy);
+        Assert.NotNull(executionPlan.Primary.Index);
+        Assert.NotNull(executionPlan.Secondary.Index);
+        Assert.NotEqual(
+            executionPlan.Primary.Index!.Name,
+            executionPlan.Secondary.Index!.Name,
+            StringComparer.OrdinalIgnoreCase);
+        Assert.NotEqual(
+            executionPlan.Primary.ConsumedColumn,
+            executionPlan.Secondary.ConsumedColumn,
+            StringComparer.OrdinalIgnoreCase);
     }
 }

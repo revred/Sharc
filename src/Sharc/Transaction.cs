@@ -20,6 +20,7 @@ public sealed class Transaction : IDisposable
     private readonly IWritablePageSource _baseSource;
     private readonly ShadowPageSource _shadowSource;
     private readonly bool _ownsShadow; // false when shadow is pooled by SharcWriter
+    private Dictionary<string, HashSet<long>>? _rowMutations;
     private BTreeMutator? _mutator;
     private FreelistManager? _freelistManager;
     private bool _isCompleted;
@@ -93,6 +94,10 @@ public sealed class Transaction : IDisposable
 
         try
         {
+            List<TransactionRowMutation>? committedMutations = null;
+            if (_rowMutations is { Count: > 0 })
+                committedMutations = FlattenRowMutations(_rowMutations);
+
             // Track whether B-tree operations occurred (mutator was used)
             bool hadMutator = _mutator != null;
 
@@ -129,6 +134,8 @@ public sealed class Transaction : IDisposable
 
             _isCompleted = true;
             _db.EndTransaction(this);
+            if (committedMutations is { Count: > 0 })
+                _db.NotifyTransactionCommitted(committedMutations);
         }
         catch (Exception ex)
         {
@@ -144,6 +151,7 @@ public sealed class Transaction : IDisposable
         if (_disposed || _isCompleted) return;
         _mutator?.Dispose();
         _mutator = null;
+        _rowMutations?.Clear();
         _shadowSource.ClearShadow();
         _isCompleted = true;
         _db.EndTransaction(this);
@@ -157,6 +165,23 @@ public sealed class Transaction : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_isCompleted) throw new InvalidOperationException("Transaction already completed.");
         _shadowSource.WritePage(pageNumber, source);
+    }
+
+    /// <summary>
+    /// Tracks that a row in the given table was mutated in this transaction.
+    /// </summary>
+    internal void TrackRowMutation(string tableName, long rowId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_isCompleted) throw new InvalidOperationException("Transaction already completed.");
+
+        _rowMutations ??= new Dictionary<string, HashSet<long>>(StringComparer.OrdinalIgnoreCase);
+        if (!_rowMutations.TryGetValue(tableName, out var rows))
+        {
+            rows = new HashSet<long>();
+            _rowMutations[tableName] = rows;
+        }
+        rows.Add(rowId);
     }
 
     private uint? _newSchemaCookie;
@@ -235,6 +260,23 @@ public sealed class Transaction : IDisposable
         // Write updated header back to page 1
         DatabaseHeader.Write(page1, newHeader);
         _shadowSource.WritePage(1, page1);
+    }
+
+    private static List<TransactionRowMutation> FlattenRowMutations(
+        Dictionary<string, HashSet<long>> rowMutations)
+    {
+        int capacity = 0;
+        foreach (var pair in rowMutations)
+            capacity += pair.Value.Count;
+
+        var flattened = new List<TransactionRowMutation>(capacity);
+        foreach (var pair in rowMutations)
+        {
+            foreach (long rowId in pair.Value)
+                flattened.Add(new TransactionRowMutation(pair.Key, rowId));
+        }
+
+        return flattened;
     }
 
     /// <inheritdoc />

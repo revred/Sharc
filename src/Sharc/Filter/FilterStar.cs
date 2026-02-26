@@ -93,6 +93,26 @@ public readonly struct ColumnRef
 
     // â”€â”€ Comparison (string) â”€â”€
 
+    // Comparison (decimal)
+
+    /// <summary>Column value equals the given decimal (canonical exact match).</summary>
+    public IFilterStar Eq(decimal value) => Predicate(FilterOp.Eq, TypedFilterValue.FromDecimal(value));
+
+    /// <summary>Column value does not equal the given decimal (canonical exact match).</summary>
+    public IFilterStar Neq(decimal value) => Predicate(FilterOp.Neq, TypedFilterValue.FromDecimal(value));
+
+    /// <summary>Column value is less than the given decimal.</summary>
+    public IFilterStar Lt(decimal value) => Predicate(FilterOp.Lt, TypedFilterValue.FromDecimal(value));
+
+    /// <summary>Column value is less than or equal to the given decimal.</summary>
+    public IFilterStar Lte(decimal value) => Predicate(FilterOp.Lte, TypedFilterValue.FromDecimal(value));
+
+    /// <summary>Column value is greater than the given decimal.</summary>
+    public IFilterStar Gt(decimal value) => Predicate(FilterOp.Gt, TypedFilterValue.FromDecimal(value));
+
+    /// <summary>Column value is greater than or equal to the given decimal.</summary>
+    public IFilterStar Gte(decimal value) => Predicate(FilterOp.Gte, TypedFilterValue.FromDecimal(value));
+
     /// <summary>Column value equals the given string (ordinal UTF-8 comparison).</summary>
     public IFilterStar Eq(string value) => Predicate(FilterOp.Eq, TypedFilterValue.FromUtf8(value));
 

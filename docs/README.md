@@ -13,6 +13,7 @@ Welcome to the **Sharc Context Engine** documentation.
 *   [**Deep Dive: Parsing**](DeepDive_Parsing.md): How Sharq achieves zero-allocation parsing with SIMD.
 *   [**BakedFilter JIT**](BakedFilter.md): The internal engine that compiles your queries to machine code.
 *   [**Distributed Trust**](DistributedTrustArchitecture.md): **(Critical)** The architecture for Agent Identity, Ledgers, and decentralized AI memory.
+*   [**API Quick Reference**](API_QUICK_REFERENCE.md): Includes strict typed accessor guidance for `GUID`/`UUID` and `FIX128` decimal (28-29 digits).
 
 ## ⚙️ Architecture & Internals
 *   [**Architecture**](ARCHITECTURE.md): High-level system design and layer breakdown.
@@ -28,7 +29,6 @@ Welcome to the **Sharc Context Engine** documentation.
 *   [**Alternatives**](ALTERNATIVES.md): Honest comparison vs SQLite, LiteDB, DuckDB, SQLitePCLRaw.
 *   [**Graph DB Comparison**](GRAPH_DB_COMPARISON.md): Sharc vs SurrealDB, ArangoDB, Neo4j — when to use which.
 *   [**Integration Recipes**](INTEGRATION_RECIPES.md): 10 copy-paste integration recipes.
-*   [**API Quick Reference**](API_QUICK_REFERENCE.md): Full accessor and method table.
 
 ## 🧠 JitSQL & Vector Search
 

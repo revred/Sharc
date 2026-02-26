@@ -85,7 +85,34 @@ var filter = FilterStar.And(
 using var reader = db.CreateReader("users", filter);
 ```
 
-## Pattern 5: Encrypted Database
+## Pattern 5: Typed 128-bit Columns (GUID/UUID + FIX128)
+
+```csharp
+using Sharc.Core;
+using Sharc.Core.Query;
+
+using var db = SharcDatabase.Open("typed.db", new SharcOpenOptions { Writable = true });
+using var writer = SharcWriter.From(db);
+// Schema expected:
+// CREATE TABLE accounts (id INTEGER PRIMARY KEY, account_guid UUID NOT NULL, balance FIX128 NOT NULL);
+
+writer.Insert("accounts",
+    ColumnValue.FromInt64(1, 1),
+    ColumnValue.FromGuid(Guid.NewGuid()),                 // GUID/UUID column
+    ColumnValue.FromDecimal(1234567890123.12345678m));   // FIX128 decimal
+
+using var reader = db.CreateReader("accounts",
+    FilterStar.Column("balance").Gt(1000m));
+
+while (reader.Read())
+{
+    Guid accountId = reader.GetGuid(1);      // strict: GUID/UUID only
+    decimal balance = reader.GetDecimal(2);   // strict: FIX128/DECIMAL* only
+    Console.WriteLine($"{accountId} => {balance}");
+}
+```
+
+## Pattern 6: Encrypted Database
 
 ```csharp
 using Sharc;
@@ -100,14 +127,14 @@ using var reader = db.CreateReader("secrets");
 // Reads are transparently decrypted at the page level
 ```
 
-## Pattern 6: In-Memory
+## Pattern 7: In-Memory
 
 ```csharp
 byte[] dbBytes = await File.ReadAllBytesAsync("mydata.db");
 using var db = SharcDatabase.OpenMemory(dbBytes);
 ```
 
-## Pattern 7: Trust Layer (Agents & Ledger)
+## Pattern 8: Trust Layer (Agents & Ledger)
 
 Sharc includes a cryptographic ledger for provenance and multi-agent coordination.
 
@@ -133,7 +160,7 @@ var payload = new TrustPayload(PayloadType.Text, "Mission Complete");
 ledger.Append(payload, signer);
 ```
 
-## Pattern 8: Graph Traversal
+## Pattern 9: Graph Traversal
 
 Traverse relationships with the `Sharc.Graph` extension. Uses two-phase BFS: edge-only discovery then batch node lookup (31x faster than SQLite).
 

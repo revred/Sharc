@@ -13,6 +13,7 @@ using Sharc.Query;
 using Sharc.Query.Execution;
 using Sharc.Query.Optimization;
 using Sharc.Query.Sharq;
+using System.Buffers.Binary;
 using Intent = global::Sharc.Query.Intent;
 
 namespace Sharc;
@@ -63,6 +64,7 @@ public sealed class SharcDatabase : IDisposable
     private bool _disposed;
     private QueryPlanCache? _queryCache;
     private readonly ExecutionRouter _executionRouter = new();
+    private readonly TransactionCommitObserverRegistry _transactionCommitObservers = new();
 
     // ─── Registered programmatic views ────────────────────────────
     private readonly Views.ViewResolver _viewResolver;
@@ -419,8 +421,6 @@ public sealed class SharcDatabase : IDisposable
             }
         }
 
-        var cursor = CreateTableCursor(table);
-
         int[]? projection = null;
         if (columns is { Length: > 0 })
         {
@@ -435,6 +435,7 @@ public sealed class SharcDatabase : IDisposable
         if (filter != null)
         {
             var node = FilterTreeCompiler.CompileBaked(filter, table.Columns, FindIntegerPrimaryKeyOrdinal(table.Columns));
+            var cursor = TryCreateIndexSeekCursor(filter, table) ?? CreateTableCursor(table);
             return new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
             {
                 Columns = table.Columns,
@@ -445,7 +446,8 @@ public sealed class SharcDatabase : IDisposable
             });
         }
 
-        var reader = new SharcDataReader(cursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        var tableCursor = CreateTableCursor(table);
+        var reader = new SharcDataReader(tableCursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
         {
             Columns = table.Columns,
             Projection = projection,
@@ -961,16 +963,38 @@ public sealed class SharcDatabase : IDisposable
             }
 
             // GUID expansion for merged columns
-            if (filters[i].Value is Guid guid && col.MergedPhysicalOrdinals?.Length == 2)
+            if (filters[i].Value is Guid guid &&
+                col.IsMergedGuidColumn &&
+                col.MergedPhysicalOrdinals is { Length: 2 } guidOrdinals)
             {
                 var (hi, lo) = Sharc.Core.Primitives.GuidCodec.ToInt64Pair(guid);
                 
                 if (filters[i].Operator == SharcOperator.Equal)
                 {
-                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[0], Operator = SharcOperator.Equal, Value = hi });
-                    resolved.Add(new ResolvedFilter { ColumnOrdinal = col.MergedPhysicalOrdinals[1], Operator = SharcOperator.Equal, Value = lo });
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = guidOrdinals[0], Operator = SharcOperator.Equal, Value = hi });
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = guidOrdinals[1], Operator = SharcOperator.Equal, Value = lo });
                     continue;
                 }
+            }
+
+            // FIX128 decimal expansion for merged __hi/__lo storage (equality only in legacy filter path).
+            if (filters[i].Value is decimal dec &&
+                col.IsMergedDecimalColumn &&
+                col.MergedPhysicalOrdinals is { Length: 2 } decimalOrdinals)
+            {
+                if (filters[i].Operator == SharcOperator.Equal)
+                {
+                    byte[] bytes = Sharc.Core.Primitives.DecimalCodec.Encode(dec);
+                    long hi = BinaryPrimitives.ReadInt64BigEndian(bytes.AsSpan(0, 8));
+                    long lo = BinaryPrimitives.ReadInt64BigEndian(bytes.AsSpan(8, 8));
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = decimalOrdinals[0], Operator = SharcOperator.Equal, Value = hi });
+                    resolved.Add(new ResolvedFilter { ColumnOrdinal = decimalOrdinals[1], Operator = SharcOperator.Equal, Value = lo });
+                    continue;
+                }
+
+                throw new NotSupportedException(
+                    "Merged FIX128 decimal filters currently support only Equal in legacy SharcFilter mode. " +
+                    "Use FilterStar for full decimal comparison operators.");
             }
 
             resolved.Add(new ResolvedFilter
@@ -987,25 +1011,56 @@ public sealed class SharcDatabase : IDisposable
     /// Attempts to create an index-accelerated cursor for the given query intent.
     /// Returns null if no suitable index exists or conditions aren't sargable.
     /// </summary>
-    private IndexSeekCursor? TryCreateIndexSeekCursor(Intent.QueryIntent intent, TableInfo table)
+    private IBTreeCursor? TryCreateIndexSeekCursor(Intent.QueryIntent intent, TableInfo table)
     {
         if (!intent.Filter.HasValue || table.Indexes.Count == 0)
             return null;
 
         var conditions = PredicateAnalyzer.ExtractSargableConditions(
             intent.Filter.Value, intent.TableAlias);
+        return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    /// <summary>
+    /// Attempts to create an index-accelerated cursor for a FilterStar expression.
+    /// Returns null if no suitable index exists or conditions aren't sargable.
+    /// </summary>
+    private IBTreeCursor? TryCreateIndexSeekCursor(IFilterStar filter, TableInfo table)
+    {
+        if (table.Indexes.Count == 0)
+            return null;
+
+        var conditions = PredicateAnalyzer.ExtractSargableConditions(filter, table.Columns);
+        return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    private IBTreeCursor? TryCreateIndexSeekCursor(
+        List<SargableCondition> conditions, TableInfo table)
+    {
         if (conditions.Count == 0)
             return null;
 
-        var plan = IndexSelector.SelectBestIndex(conditions, table.Indexes);
-        if (plan.Index == null)
+        var executionPlan = IndexSelector.SelectBestPlan(conditions, table.Indexes);
+        if (executionPlan.Strategy == IndexPlanStrategy.None || executionPlan.Primary.Index == null)
             return null;
 
         // DECISION: Keep the compiled residual filter even for consumed index conditions.
         // The byte-level filter is near-zero cost and avoids predicate subtraction complexity.
-        return new IndexSeekCursor(
-            _bTreeReader, _recordDecoder,
-            (uint)plan.Index.RootPage, (uint)table.RootPage, plan);
+        return executionPlan.Strategy switch
+        {
+            IndexPlanStrategy.SingleIndex => new IndexSeekCursor(
+                _bTreeReader, _recordDecoder,
+                (uint)executionPlan.Primary.Index.RootPage,
+                (uint)table.RootPage,
+                executionPlan.Primary),
+            IndexPlanStrategy.RowIdIntersection when executionPlan.Secondary.Index != null => new IndexIntersectionCursor(
+                _bTreeReader,
+                _recordDecoder,
+                (uint)table.RootPage,
+                executionPlan.Primary,
+                executionPlan.Secondary),
+            _ => null
+        };
     }
 
     private IBTreeCursor CreateTableCursor(TableInfo table)
@@ -1065,9 +1120,13 @@ public sealed class SharcDatabase : IDisposable
     internal IRecordDecoder Decoder => _recordDecoder;
     internal IBTreeReader BTreeReaderInternal => _bTreeReader;
 
-    internal IndexSeekCursor? TryCreateIndexSeekCursorForPrepared(
+    internal IBTreeCursor? TryCreateIndexSeekCursorForPrepared(
         Intent.QueryIntent intent, TableInfo table)
         => TryCreateIndexSeekCursor(intent, table);
+
+    internal IBTreeCursor? TryCreateIndexSeekCursorForFilter(
+        IFilterStar filter, TableInfo table)
+        => TryCreateIndexSeekCursor(filter, table);
 
     internal IBTreeCursor CreateTableCursorForPrepared(TableInfo table)
         => CreateTableCursor(table);
@@ -1151,6 +1210,21 @@ public sealed class SharcDatabase : IDisposable
         }
     }
 
+    internal void RegisterTransactionCommitObserver(ITransactionCommitObserver observer)
+    {
+        _transactionCommitObservers.Register(observer);
+    }
+
+    internal void UnregisterTransactionCommitObserver(ITransactionCommitObserver observer)
+    {
+        _transactionCommitObservers.Unregister(observer);
+    }
+
+    internal void NotifyTransactionCommitted(IReadOnlyList<TransactionRowMutation> mutations)
+    {
+        _transactionCommitObservers.NotifyCommitted(this, mutations);
+    }
+
     /// <summary>
     /// Writes a page to the database. If a transaction is active, the write is buffered.
     /// Otherwise, it is written directly (auto-commit behavior can be added later).
@@ -1188,6 +1262,7 @@ public sealed class SharcDatabase : IDisposable
         if (_disposed) return;
         _disposed = true;
         _executionRouter.Dispose();
+        _transactionCommitObservers.Clear();
         _activeTransaction?.Dispose();
         _proxySource.Dispose();
         _rawSource.Dispose();
