@@ -11,4 +11,4 @@ Describe what changed and why.
 
 - [ ] Updated `README.md` with user-facing package/API changes
 - [ ] Added release notes in `CHANGELOG.md` under `## [1.2.<PR_NUMBER>] - YYYY-MM-DD`
-- [ ] Verified NuGet publish workflow can pack all required packages (`Sharc`, `Sharc.Core`, `Sharc.Query`, `Sharc.Crypto`, `Sharc.Graph.Surface`, `Sharc.Graph`, `Sharc.Vector`, `Sharc.Arc`)
+- [ ] Verified NuGet publish workflow can pack all required packages (`Sharc.Query`, `Sharc.Engine`, `Sharc.Crypto`, `Sharc.Graph.Surface`, `Sharc`, `Sharc.Graph`, `Sharc.Vector`, `Sharc.Arc`)
