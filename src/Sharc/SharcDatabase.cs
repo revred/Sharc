@@ -61,6 +61,7 @@ public sealed class SharcDatabase : IDisposable
     private readonly SharcExtensionRegistry _extensions = new();
     private readonly ISharcBufferPool _bufferPool = SharcBufferPool.Shared;
     private SharcSchema? _schema;
+    private readonly SchemaCache.SchemaCacheHandle? _schemaCacheHandle;
     private bool _disposed;
     private QueryPlanCache? _queryCache;
     private readonly ExecutionRouter _executionRouter = new();
@@ -163,7 +164,8 @@ public sealed class SharcDatabase : IDisposable
 
     internal SharcDatabase(ProxyPageSource proxySource, IPageSource rawSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
-        SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null)
+        SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null,
+        SharcSchema? preloadedSchema = null, SchemaCache.SchemaCacheHandle? schemaCacheHandle = null)
     {
         _proxySource = proxySource;
         _rawSource = rawSource;
@@ -174,6 +176,8 @@ public sealed class SharcDatabase : IDisposable
         _info = info;
         FilePath = filePath;
         _keyHandle = keyHandle;
+        _schema = preloadedSchema;
+        _schemaCacheHandle = schemaCacheHandle;
         _viewResolver = new Views.ViewResolver(this);
 
         // Register default extensions
@@ -189,8 +193,16 @@ public sealed class SharcDatabase : IDisposable
     /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
     /// Enriches ViewInfo objects with structural metadata from CREATE VIEW SQL.
     /// </summary>
-    private SharcSchema GetSchema() =>
-        _schema ??= EnrichViewMetadata(new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema());
+    private SharcSchema GetSchema()
+    {
+        if (_schema != null)
+            return _schema;
+
+        var schema = EnrichViewMetadata(new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema());
+        _schema = schema;
+        _schemaCacheHandle?.Store(schema);
+        return schema;
+    }
 
     /// <summary>
     /// Exposes the schema for internal consumers (e.g. <see cref="Views.ViewResolver"/>)
@@ -1415,6 +1427,56 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _proxySource.GetPage(pageNumber);
+    }
+
+    /// <summary>
+    /// Maximum database size (in bytes) that <see cref="CreateSnapshot"/> will copy into memory.
+    /// Defaults to 2 GB. Databases larger than this threshold should use file-backed reads
+    /// or a streaming approach instead of full in-memory snapshots.
+    /// </summary>
+    public static long MaxSnapshotBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Creates a read-only snapshot of the current database state.
+    /// The snapshot is a fully independent in-memory copy — changes to the original
+    /// database after this call are NOT reflected in the snapshot.
+    /// Useful for querying during active writes: the base page source is not
+    /// modified until a transaction commits, so a snapshot taken before commit
+    /// reflects the pre-transaction state.
+    /// </summary>
+    /// <returns>A new read-only <see cref="SharcDatabase"/> backed by a copy of the current pages.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the database exceeds <see cref="MaxSnapshotBytes"/> (default 2 GB).
+    /// </exception>
+    public SharcDatabase CreateSnapshot()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int pageSize = _header.PageSize;
+        int pageCount = PageSource.PageCount;
+        long totalBytes = (long)pageSize * pageCount;
+
+        if (totalBytes > MaxSnapshotBytes)
+            throw new InvalidOperationException(
+                $"Database size ({totalBytes:N0} bytes, {pageCount:N0} pages × {pageSize} bytes) " +
+                $"exceeds the maximum snapshot size ({MaxSnapshotBytes:N0} bytes). " +
+                $"Increase SharcDatabase.MaxSnapshotBytes or use file-backed reads instead.");
+
+        if (totalBytes > Array.MaxLength)
+            throw new InvalidOperationException(
+                $"Database size ({totalBytes:N0} bytes) exceeds the maximum .NET array length. " +
+                $"Use file-backed reads instead of in-memory snapshots for databases this large.");
+
+        var snapshotData = new byte[totalBytes];
+        var pageBuf = new byte[pageSize];
+
+        for (uint p = 1; p <= (uint)pageCount; p++)
+        {
+            PageSource.ReadPage(p, pageBuf);
+            pageBuf.CopyTo(snapshotData, pageSize * (int)(p - 1));
+        }
+
+        return OpenMemory(snapshotData);
     }
 
     /// <inheritdoc />

@@ -32,12 +32,14 @@ public enum QueryExecutionStrategy
 /// <param name="ReturnedRows">Rows returned to the caller via <c>Read()</c>.</param>
 /// <param name="IndexEntriesScanned">Index entries examined (0 for non-index strategies).</param>
 /// <param name="IndexHits">Index matches before table materialization (0 for non-index strategies).</param>
+/// <param name="ElapsedMs">Wall-clock elapsed time in milliseconds (0 if not measured).</param>
 public readonly record struct QueryExecutionInfo(
     QueryExecutionStrategy Strategy,
     int ScannedRows,
     int ReturnedRows,
     int IndexEntriesScanned,
-    int IndexHits)
+    int IndexHits,
+    double ElapsedMs = 0)
 {
     /// <summary>Default diagnostics before scanning begins.</summary>
     public static QueryExecutionInfo None => new(
@@ -45,5 +47,6 @@ public readonly record struct QueryExecutionInfo(
         ScannedRows: 0,
         ReturnedRows: 0,
         IndexEntriesScanned: 0,
-        IndexHits: 0);
+        IndexHits: 0,
+        ElapsedMs: 0);
 }

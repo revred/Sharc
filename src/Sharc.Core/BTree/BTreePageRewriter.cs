@@ -235,6 +235,60 @@ internal sealed class BTreePageRewriter
         BTreePageHeader.Write(span[hdrOff..], hdr);
     }
 
+    /// <summary>Builds an index leaf page (page type 0x0A) from a span of cell descriptors.</summary>
+    public void BuildIndexLeafPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, ReadOnlySpan<CellRef> cells)
+    {
+        var span = pageBuf.AsSpan(0, _source.PageSize);
+        span[hdrOff..].Clear();
+
+        int contentEnd = _usablePageSize;
+        int ptrBase = hdrOff + LeafHeaderSize;
+
+        for (int i = 0; i < cells.Length; i++)
+        {
+            var cell = cells[i];
+            contentEnd -= cell.Length;
+            cellBuf.AsSpan(cell.Offset, cell.Length).CopyTo(span[contentEnd..]);
+            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + i * 2)..], (ushort)contentEnd);
+        }
+
+        var hdr = new BTreePageHeader(
+            BTreePageType.LeafIndex, 0,
+            (ushort)cells.Length,
+            (ushort)contentEnd,
+            0, 0
+        );
+        BTreePageHeader.Write(span[hdrOff..], hdr);
+    }
+
+    /// <summary>Builds an index interior page (page type 0x02) from a span of cell descriptors.</summary>
+    public void BuildIndexInteriorPage(byte[] pageBuf, int hdrOff, byte[] cellBuf,
+        ReadOnlySpan<CellRef> cells, uint rightChildPage)
+    {
+        var span = pageBuf.AsSpan(0, _source.PageSize);
+        span[hdrOff..].Clear();
+
+        int contentEnd = _usablePageSize;
+        int ptrBase = hdrOff + InteriorHeaderSize;
+
+        for (int i = 0; i < cells.Length; i++)
+        {
+            var cell = cells[i];
+            contentEnd -= cell.Length;
+            cellBuf.AsSpan(cell.Offset, cell.Length).CopyTo(span[contentEnd..]);
+            BinaryPrimitives.WriteUInt16BigEndian(span[(ptrBase + i * 2)..], (ushort)contentEnd);
+        }
+
+        var hdr = new BTreePageHeader(
+            BTreePageType.InteriorIndex, 0,
+            (ushort)cells.Length,
+            (ushort)contentEnd,
+            0,
+            rightChildPage
+        );
+        BTreePageHeader.Write(span[hdrOff..], hdr);
+    }
+
     /// <summary>
     /// Removes the cell at <paramref name="cellIndex"/> from a leaf page.
     /// Shifts the cell pointer array left and recomputes FragmentedFreeBytes accurately.

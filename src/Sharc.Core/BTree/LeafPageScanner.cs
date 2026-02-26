@@ -222,6 +222,10 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
         var page = GetCachedLeafPage();
         int cellOffset = _leafHeader.GetCellPointer(page[_leafHeaderOffset..], _cellIndex);
 
+        if (cellOffset < 0 || cellOffset >= page.Length)
+            throw new CorruptPageException(_leafPages[_leafIndex],
+                $"Cell pointer {cellOffset} is out of page bounds (page size {page.Length}).");
+
         int cellHeaderSize = CellParser.ParseTableLeafCell(
             page[cellOffset..], out _payloadSize, out _rowId);
 
@@ -263,6 +267,12 @@ internal sealed class LeafPageScanner<TPageSource> : IBTreeCursor
 
             var ovfPage = _pageSource.GetPage(overflowPage);
             int toCopy = Math.Min(remaining, overflowDataSize);
+
+            // Guard: ensure the assembled payload buffer is not overrun
+            if (destOffset + toCopy > _payloadSize)
+                throw new CorruptPageException(overflowPage,
+                    $"Overflow chain would write {destOffset + toCopy} bytes into a {_payloadSize}-byte payload buffer.");
+
             ovfPage.Slice(4, toCopy).CopyTo(_assembledPayload.AsSpan(destOffset));
 
             destOffset += toCopy;

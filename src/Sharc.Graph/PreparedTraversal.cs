@@ -215,11 +215,15 @@ public sealed class PreparedTraversal : IDisposable
 
     private List<NodeKey> ReconstructPath(int index)
     {
+        // Guard: bounds check + cycle cap to prevent infinite loops on corrupted parent pointers
         int count = 0;
         int walk = index;
-        while (walk >= 0)
+        int maxSteps = _pathNodes.Count;
+        while (walk >= 0 && walk < _pathNodes.Count)
         {
             count++;
+            if (count > maxSteps)
+                throw new InvalidOperationException("Path reconstruction cycle detected — parent pointer chain exceeds node count.");
             walk = _pathNodes[walk].ParentIndex;
         }
 
@@ -242,7 +246,9 @@ public sealed class PreparedTraversal : IDisposable
         {
             int estimate = 1;
             for (int d = 0; d < policy.MaxDepth.Value && estimate < 4096; d++)
-                estimate *= policy.MaxFanOut.Value;
+            {
+                estimate = (int)Math.Min((long)estimate * policy.MaxFanOut.Value, 4096);
+            }
             return Math.Min(estimate, 4096);
         }
         return 128;
