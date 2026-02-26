@@ -442,7 +442,7 @@ PRs into `main` are treated as release PRs and must include:
 ```text
 src/
   Sharc/                    Public API + Write Engine + Trust Layer
-  Sharc.Core/               B-Tree, Records, Page I/O, Primitives
+  Sharc.Engine/             B-Tree, Records, Page I/O, Primitives
   Sharc.Query/              SQL pipeline: parser, compiler, executor
   Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF, HKDF-SHA256
   Sharc.Graph/              Graph engine: Cypher, PageRank, GraphWriter, algorithms
