@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,32 +8,22 @@
 
     <!-- OG Meta -->
     <meta property="og:title" content="Sharc Benchmark Arena" />
-    <meta property="og:description"
-        content="Core Engine Benchmarks — 16 benchmarks, 3 engines, real WASM performance" />
+    <meta property="og:description" content="Browser Database Showdown — 16 benchmarks, 4 engines, real WASM performance" />
     <meta property="og:type" content="website" />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap"
-        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
     <link rel="stylesheet" href="css/app.css" />
-
-    <!-- Favicon -->
-    <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦈</text></svg>">
 </head>
-
 <body>
     <div id="app">
         <div class="loading-screen">
             <div class="loading-shark">&#x1F988;</div>
             <div class="loading-text">Loading Sharc Arena...</div>
-            <div class="loading-bar">
-                <div class="loading-bar-fill"></div>
-            </div>
+            <div class="loading-bar"><div class="loading-bar-fill"></div></div>
         </div>
     </div>
 
@@ -42,31 +31,11 @@
         An unhandled error has occurred.
         <a href="" class="reload">Reload</a>
         <a class="dismiss">&#x2716;</a>
-        <pre id="error-dump"
-            style="color:red; background:#111; padding: 10px; font-family: monospace; white-space: pre-wrap; margin-top: 10px;"></pre>
     </div>
-
-    <script>
-        window.addEventListener('error', function (event) {
-            const dump = document.getElementById('error-dump');
-            if (dump) dump.innerText += '\n[ERROR]: ' + event.message + '\n' + (event.error ? event.error.stack : '');
-        });
-        window.addEventListener('unhandledrejection', function (event) {
-            const dump = document.getElementById('error-dump');
-            if (dump) dump.innerText += '\n[PROMISE_REJECTION]: ' + event.reason + '\n' + (event.reason ? event.reason.stack : '');
-        });
-    </script>
 
     <!-- Tier 2: IndexedDB adapter (browser-native API, JS interop required) -->
     <script src="js/indexeddb-adapter.js"></script>
-    <script src="js/viewport.js"></script>
-
-    <!-- OPFS persistent storage + cross-tab coordination + Web Crypto -->
-    <script src="js/opfs-bridge.js"></script>
-    <script src="js/web-locks-bridge.js"></script>
-    <script src="js/web-crypto-bridge.js"></script>
 
     <script src="_framework/blazor.webassembly.js"></script>
 </body>
-
 </html>

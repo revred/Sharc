@@ -1,6 +1,0 @@
-[
-  { "id": "core",     "label": "Core",     "color": "#60A5FA" },
-  { "id": "advanced", "label": "Advanced", "color": "#F472B6" },
-  { "id": "graph",    "label": "Graph",    "color": "#34D399" },
-  { "id": "meta",     "label": "Meta",     "color": "#FBBF24" }
-]
