@@ -32,27 +32,23 @@ jobs:
           echo "$changed_files"
 
           # Allow workflow/policy-only PRs to main without forcing release-note churn.
-          # Enforce CHANGELOG updates when product/code files change.
+          # Release notes are advisory (non-blocking) for other changes.
           allowlist='^(README\.md|CHANGELOG\.md|CONTRIBUTING\.md|\.github/pull_request_template\.md|\.github/workflows/ci\.yml|\.github/workflows/publish\.yml)$'
           non_allowlisted_changes="$(grep -Ev "$allowlist" <<<"$changed_files" || true)"
           if [ -z "$non_allowlisted_changes" ]; then
-            echo "Only release policy/workflow files changed. Skipping CHANGELOG enforcement."
+            echo "Only release policy/workflow files changed. Skipping release-note checks."
             exit 0
           fi
 
-          require_changed_file() {
-            local required_path="$1"
-            if ! grep -Fxq "$required_path" <<<"$changed_files"; then
-              echo "::error::Release PRs to main must update ${required_path}."
-              exit 1
-            fi
-          }
-
-          require_changed_file "CHANGELOG.md"
+          if ! grep -Fxq "CHANGELOG.md" <<<"$changed_files"; then
+            echo "::notice::CHANGELOG.md not updated in this PR."
+            exit 0
+          fi
 
           if ! grep -Eq "^## \\[1\\.2\\.(${PR_NUMBER}|PR-NUM)\\]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md must include release heading '## [1.2.${PR_NUMBER}]' (or placeholder '## [1.2.PR-NUM]')."
-            exit 1
+            echo "::warning::CHANGELOG.md does not include heading '## [1.2.${PR_NUMBER}]' (or placeholder '## [1.2.PR-NUM]')."
+          else
+            echo "CHANGELOG heading check passed."
           fi
 
   build-and-test:
