@@ -3,8 +3,11 @@
     <RootNamespace>Sharc.Query</RootNamespace>
     <AssemblyName>Sharc.Query</AssemblyName>
     <IsPackable>true</IsPackable>
-    <PackageReadmeFile></PackageReadmeFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc" />
     <InternalsVisibleTo Include="Sharc.Tests" />

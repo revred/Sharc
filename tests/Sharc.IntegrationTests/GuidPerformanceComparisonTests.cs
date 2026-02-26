@@ -1,3 +1,7 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
+
 using System.Diagnostics;
 using System.Linq;
 using Microsoft.Data.Sqlite;
