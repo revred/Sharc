@@ -1,0 +1,111 @@
+[
+  {
+    "id": "trust-ledger",
+    "title": "Trust: Ledger Verification",
+    "subtitle": "Verify cryptographic integrity of an AI memory trail",
+    "icon": "\ud83d\udcdc",
+    "unit": "\u03bcs",
+    "categoryId": "advanced",
+    "sectionId": "trust-meta",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Verifying the hash chain and agent identity of the distributed ledger. Sharc uses context-aware HMAC-SHA256 verifiable trails.",
+    "whyItMatters": "Trust verification ensures no agent has tampered with shared memory. Without cryptographic proof, multi-agent coordination is unsafe.",
+    "densityTiers": [
+      {
+        "id": "md",
+        "label": "-",
+        "rows": 0,
+        "scale": 1
+      }
+    ],
+    "baseResults": {
+      "sqlite": {
+        "notSupported": true,
+        "note": "No built-in ledger"
+      },
+      "indexeddb": {
+        "notSupported": true
+      },
+      "sharc": {
+        "value": 855,
+        "allocation": "12 KB",
+        "note": "Verified 50 trail entries (ECDSA + HMAC)"
+      }
+    }
+  },
+  {
+    "id": "memory-footprint",
+    "title": "Engine Footprint",
+    "subtitle": "Package size + baseline heap",
+    "icon": "\ud83d\udce6",
+    "unit": "KB",
+    "categoryId": "meta",
+    "sectionId": "trust-meta",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Total download/package + idle heap. Smaller = faster cold starts, better for mobile/edge.",
+    "whyItMatters": "Every KB of engine weight delays cold start. At 50KB, Sharc loads 30x faster than SQLite's 1.5MB WASM binary.",
+    "densityTiers": [
+      {
+        "id": "md",
+        "label": "-",
+        "rows": 0,
+        "scale": 1
+      }
+    ],
+    "baseResults": {
+      "sqlite": {
+        "value": 1536,
+        "allocation": "2.1 MB idle",
+        "note": "e_sqlite3.wasm + managed wrapper"
+      },
+      "indexeddb": {
+        "value": 0.1,
+        "allocation": "~0 (built-in)",
+        "note": "Browser-native"
+      },
+      "sharc": {
+        "value": 52,
+        "allocation": "52 KB total",
+        "note": "30\u2013200x smaller - pure C#"
+      }
+    }
+  },
+  {
+    "id": "primitives",
+    "title": "Primitives (Sharc-only)",
+    "subtitle": "Byte-level decode - no equivalent elsewhere",
+    "icon": "\u269b\ufe0f",
+    "unit": "ns",
+    "categoryId": "meta",
+    "sectionId": "trust-meta",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Sharc internals: header parse (8.5ns/0B), varint decode (231ns/100/0B). No equivalent in other engines.",
+    "whyItMatters": "These primitives are the foundation of every operation. Single-digit nanosecond parsing shows the zero-overhead design philosophy.",
+    "densityTiers": [
+      {
+        "id": "md",
+        "label": "-",
+        "rows": 0,
+        "scale": 1
+      }
+    ],
+    "baseResults": {
+      "sqlite": {
+        "notSupported": true,
+        "note": "Behind C library"
+      },
+      "indexeddb": {
+        "notSupported": true,
+        "note": "No byte-level API"
+      },
+      "sharc": {
+        "value": 8.5,
+        "allocation": "0 B",
+        "note": "Header: 8.5ns, 0 bytes"
+      }
+    }
+  }
+]

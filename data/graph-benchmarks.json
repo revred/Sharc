@@ -1,0 +1,92 @@
+[
+  {
+    "id": "graph-node-scan",
+    "title": "Graph: Node Scan",
+    "subtitle": "Full _concepts table scan (ConceptStore)",
+    "icon": "\ud83d\udd35",
+    "unit": "\u03bcs",
+    "categoryId": "graph",
+    "sectionId": "graph-ops",
+    "scaleMode": "linear",
+    "defaultDensity": "md",
+    "methodology": "Scan all N nodes in _concepts (id, key, kind, data). Tests graph abstraction overhead.",
+    "whyItMatters": "Graph node scans drive knowledge base discovery. 2.8x faster scans mean agents explore more concepts per turn.",
+    "densityTiers": [
+      { "id": "xs", "label": "50",  "rows": 50,    "scale": 0.01 },
+      { "id": "sm", "label": "500", "rows": 500,   "scale": 0.1 },
+      { "id": "md", "label": "5K",  "rows": 5000,  "scale": 1 },
+      { "id": "lg", "label": "50K", "rows": 50000, "scale": 10 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 2853, "allocation": "937 KB", "note": "Raw SQL - no graph layer" },
+      "indexeddb": { "notSupported": true },
+      "sharc":     { "value": 1027, "allocation": "1.5 MB", "note": "2.8x - ConceptStore B-tree" }
+    }
+  },
+  {
+    "id": "graph-edge-scan",
+    "title": "Graph: Edge Scan",
+    "subtitle": "Full _relations table scan (RelationStore)",
+    "icon": "\ud83d\udd17",
+    "unit": "\u03bcs",
+    "categoryId": "graph",
+    "sectionId": "graph-ops",
+    "scaleMode": "linear",
+    "defaultDensity": "md",
+    "methodology": "Scan N edges in _relations (source_key, target_key, kind, data). Tests RelationStore performance.",
+    "whyItMatters": "Edge scans power relationship discovery - how agents find connections between concepts for reasoning chains.",
+    "densityTiers": [
+      { "id": "xs", "label": "50",  "rows": 50,    "scale": 0.01 },
+      { "id": "sm", "label": "500", "rows": 500,   "scale": 0.1 },
+      { "id": "md", "label": "5K",  "rows": 5000,  "scale": 1 },
+      { "id": "lg", "label": "50K", "rows": 50000, "scale": 10 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 7673, "allocation": "1.4 MB", "note": "Raw SQL - no graph model" },
+      "indexeddb": { "notSupported": true },
+      "sharc":     { "value": 2268, "allocation": "2.8 MB", "note": "3.4x - RelationStore direct scan" }
+    }
+  },
+  {
+    "id": "graph-seek",
+    "title": "Graph: Node Seek",
+    "subtitle": "Single node by integer key (B-tree)",
+    "icon": "\ud83d\udccd",
+    "unit": "ns",
+    "categoryId": "graph",
+    "sectionId": "graph-ops",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Look up node by integer key via graph index seek (O(log N) ConceptStore). Measured: Sharc 421ns vs SQLite 26,000ns (62x).",
+    "whyItMatters": "Single-concept lookups happen on every agent tool call. Sub-microsecond index seeks keep tool latency imperceptible.",
+    "densityTiers": [
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 26000, "allocation": "600 B", "note": "WHERE key = ? prepared" },
+      "indexeddb": { "notSupported": true },
+      "sharc":     { "value": 421,   "allocation": "1,032 B", "note": "62x - graph index seek" }
+    }
+  },
+  {
+    "id": "graph-traverse",
+    "title": "Knowledge Expansion (BFS)",
+    "subtitle": "Traversing 2-hop neighborhood of a concept",
+    "icon": "\ud83c\udf10",
+    "unit": "\u03bcs",
+    "categoryId": "graph",
+    "sectionId": "graph-ops",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Expanding the local knowledge graph for an agent. Sharc uses zero-allocation cursor BFS: edge-only 2-hop traversal with cursor Reset(). Measured: 2.60\u03bcs vs 81.55\u03bcs.",
+    "whyItMatters": "Graph traversal is how agents expand context - from one fact to related concepts. 31x faster traversal unlocks real-time knowledge exploration.",
+    "densityTiers": [
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 81.55, "allocation": "2.8 KB", "note": "SQL JOIN/WHERE overhead" },
+      "indexeddb": { "notSupported": true },
+      "sharc":     { "value": 2.60,  "allocation": "928 B", "note": "31x - zero-alloc cursor BFS" }
+    }
+  }
+]

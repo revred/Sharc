@@ -1,0 +1,15 @@
+[
+  { "id": "q1",  "query": "SELECT *",                    "description": "Full table scan",                "sharcTimeUs": 171,  "sharcAlloc": "672 B",   "sqliteTimeUs": 893,  "sqliteAlloc": "688 B",   "winner": "sharc",  "speedup": 5.2 },
+  { "id": "q2",  "query": "WHERE age > 30",              "description": "Filtered scan with predicate",   "sharcTimeUs": 493,  "sharcAlloc": "98 KB",   "sqliteTimeUs": 1648, "sqliteAlloc": "98 KB",   "winner": "sharc",  "speedup": 3.3 },
+  { "id": "q3",  "query": "WHERE + ORDER BY + LIMIT",    "description": "Sort with top-N",                "sharcTimeUs": 516,  "sharcAlloc": "42 KB",   "sqliteTimeUs": 607,  "sqliteAlloc": "5.6 KB",  "winner": "sharc",  "speedup": 1.2 },
+  { "id": "q4",  "query": "GROUP BY + COUNT + AVG",      "description": "Aggregation pipeline",           "sharcTimeUs": 655,  "sharcAlloc": "5.4 KB",  "sqliteTimeUs": 1003, "sqliteAlloc": "920 B",   "winner": "sharc",  "speedup": 1.5 },
+  { "id": "q5",  "query": "UNION ALL (2x2500)",          "description": "Concatenate two result sets",    "sharcTimeUs": 1191, "sharcAlloc": "415 KB",  "sqliteTimeUs": 4602, "sqliteAlloc": "414 KB",  "winner": "sharc",  "speedup": 3.9 },
+  { "id": "q6",  "query": "UNION (dedup)",               "description": "Deduplicated union",             "sharcTimeUs": 1595, "sharcAlloc": "1.9 KB",  "sqliteTimeUs": 3761, "sqliteAlloc": "744 B",   "winner": "sharc",  "speedup": 2.4 },
+  { "id": "q7",  "query": "INTERSECT",                   "description": "Set intersection",               "sharcTimeUs": 1560, "sharcAlloc": "1.7 KB",  "sqliteTimeUs": 2673, "sqliteAlloc": "744 B",   "winner": "sharc",  "speedup": 1.7 },
+  { "id": "q8",  "query": "EXCEPT",                      "description": "Set difference",                 "sharcTimeUs": 1604, "sharcAlloc": "1.7 KB",  "sqliteTimeUs": 2462, "sqliteAlloc": "744 B",   "winner": "sharc",  "speedup": 1.5 },
+  { "id": "q9",  "query": "UNION ALL + ORDER BY + LIMIT","description": "Compound with top-N",            "sharcTimeUs": 905,  "sharcAlloc": "33 KB",   "sqliteTimeUs": 945,  "sqliteAlloc": "3.1 KB",  "winner": "tie",    "speedup": 1.0 },
+  { "id": "q10", "query": "3-way UNION ALL",             "description": "Triple concatenation",           "sharcTimeUs": 788,  "sharcAlloc": "2.7 KB",  "sqliteTimeUs": 2592, "sqliteAlloc": "776 B",   "winner": "sharc",  "speedup": 3.3 },
+  { "id": "q11", "query": "Cote -> SELECT WHERE",        "description": "Common table expression + filter","sharcTimeUs": 354,  "sharcAlloc": "32 KB",   "sqliteTimeUs": 852,  "sqliteAlloc": "32 KB",   "winner": "sharc",  "speedup": 2.4 },
+  { "id": "q12", "query": "Cote + UNION ALL",            "description": "Cote with compound query",       "sharcTimeUs": 531,  "sharcAlloc": "1.7 KB",  "sqliteTimeUs": 1465, "sqliteAlloc": "816 B",   "winner": "sharc",  "speedup": 2.8 },
+  { "id": "q13", "query": "Parameterized WHERE",         "description": "Prepared query with parameter",  "sharcTimeUs": 418,  "sharcAlloc": "82 KB",   "sqliteTimeUs": 1507, "sqliteAlloc": "82 KB",   "winner": "sharc",  "speedup": 3.6 }
+]

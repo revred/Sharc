@@ -1,0 +1,26 @@
+[
+  {
+    "id": "quick",
+    "label": "\u26a1 Quick Demo",
+    "description": "~15 sec \u00b7 100 rows",
+    "scale": 0.01,
+    "pauseMs": 200,
+    "transitionMs": 300
+  },
+  {
+    "id": "standard",
+    "label": "\ud83d\udcca Standard",
+    "description": "~40 sec \u00b7 5K rows",
+    "scale": 1,
+    "pauseMs": 400,
+    "transitionMs": 500
+  },
+  {
+    "id": "stress",
+    "label": "\ud83d\udd25 Stress Test",
+    "description": "~90 sec \u00b7 100K rows",
+    "scale": 20,
+    "pauseMs": 600,
+    "transitionMs": 700
+  }
+]

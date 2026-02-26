@@ -1,0 +1,73 @@
+[
+  {
+    "id": "where-filter",
+    "title": "WHERE Filter",
+    "subtitle": "Scan + match using comparison operators",
+    "icon": "\ud83d\udd0d",
+    "unit": "ms",
+    "categoryId": "advanced",
+    "sectionId": "scan-ops",
+    "scaleMode": "linear",
+    "defaultDensity": "md",
+    "methodology": "Scan 5K rows, filter by age > 30 AND score < 50. PreparedQuery pre-compiles filters for zero-allocation execution. Measured: Sharc 0.236ms vs SQLite 0.551ms (2.3x).",
+    "whyItMatters": "WHERE filters are the bread-and-butter of agent queries. PreparedQuery eliminates parse + filter construction overhead, achieving 2.3x faster with zero GC pressure.",
+    "densityTiers": [
+      { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
+      { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
+      { "id": "md", "label": "5K",   "rows": 5000,   "scale": 1 },
+      { "id": "lg", "label": "10K",  "rows": 10000,  "scale": 2 },
+      { "id": "xl", "label": "100K", "rows": 100000, "scale": 20 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 0.551, "allocation": "720 B", "note": "VDBE predicate pushdown" },
+      "indexeddb": { "notSupported": true, "note": "No query language" },
+      "sharc":     { "value": 0.236, "allocation": "0 B", "note": "2.3x - PreparedQuery zero-alloc filter" }
+    }
+  },
+  {
+    "id": "gc-pressure",
+    "title": "GC Pressure - Sustained Scan",
+    "subtitle": "Heap allocation under continuous load",
+    "icon": "\u267b\ufe0f",
+    "unit": "ms",
+    "categoryId": "advanced",
+    "sectionId": "scan-ops",
+    "scaleMode": "linear",
+    "defaultDensity": "xl",
+    "methodology": "Scan 5K integer rows sustained with PreparedReader. Measured: Sharc 0.168ms/0B vs SQLite 0.798ms/688B. Sharc 4.8x faster with zero allocation.",
+    "whyItMatters": "In WASM, GC pauses freeze the entire tab. PreparedReader achieves true zero-allocation scans, eliminating GC jank entirely.",
+    "densityTiers": [
+      { "id": "xs", "label": "500",  "rows": 500,    "scale": 0.01 },
+      { "id": "sm", "label": "1K",   "rows": 1000,   "scale": 0.1 },
+      { "id": "md", "label": "5K",   "rows": 5000,   "scale": 1 },
+      { "id": "lg", "label": "10K",  "rows": 10000,  "scale": 2 },
+      { "id": "xl", "label": "100K", "rows": 100000, "scale": 20 }
+    ],
+    "baseResults": {
+      "sqlite":    { "value": 0.798, "allocation": "688 B", "note": "P/Invoke path, minimal alloc" },
+      "indexeddb": { "notSupported": true, "note": "Impractical at this scale" },
+      "sharc":     { "value": 0.168, "allocation": "0 B", "note": "4.8x - PreparedReader zero-alloc scan" }
+    }
+  },
+  {
+    "id": "encryption",
+    "title": "Encrypted Read",
+    "subtitle": "AES-256-GCM + Argon2id KDF decrypt + read",
+    "icon": "\ud83d\udd12",
+    "unit": "\u03bcs",
+    "categoryId": "advanced",
+    "sectionId": "scan-ops",
+    "scaleMode": "fixed",
+    "defaultDensity": "md",
+    "methodology": "Open encrypted .db, derive key (Argon2id), decrypt page-level AES-256-GCM, read 100 rows.",
+    "whyItMatters": "Agent memory often contains sensitive data (PII, credentials, tool secrets). Page-level encryption is mandatory for production.",
+    "densityTiers": [
+      { "id": "md", "label": "-", "rows": 0, "scale": 1 }
+    ],
+    "baseResults": {
+      "sqlite":    { "notSupported": true, "note": "Requires SQLCipher" },
+      "indexeddb": { "notSupported": true },
+      "sharc":     { "value": 345, "allocation": "48 KB", "note": "AES-256-GCM + Argon2id, page-level" }
+    }
+  }
+]
