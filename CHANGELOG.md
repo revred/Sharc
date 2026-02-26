@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.PR-NUM] - 2026-02-26
+
+### Fixed
+- NuGet publish pipeline now packs and publishes `Sharc.Core` together with the `Sharc` meta package dependency chain.
+- `CreateReader(..., SharcFilter[] filters)` now uses index planning for sargable legacy filters instead of always forcing a table scan.
+
+### Changed
+- NuGet package staging moved to `artifacts/nuget` (ignored folder) to avoid root-level package artifacts.
+- Release PR policy formalized: PRs to `main` must include `README.md` and `CHANGELOG.md` updates.
+
 ## [1.0.0-beta.1] - 2026-02-16
 
 ### Core Engine
