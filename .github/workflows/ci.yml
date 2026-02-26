@@ -58,6 +58,7 @@ jobs:
 
   build-and-test:
     name: Build & Test
+    if: github.event_name != 'pull_request' || github.head_ref != 'dev'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
