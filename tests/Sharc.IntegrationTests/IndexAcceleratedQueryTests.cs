@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Sharc.IntegrationTests.Helpers;
+using Sharc.Core.Query;
 using Xunit;
 
 namespace Sharc.IntegrationTests;
@@ -57,6 +58,28 @@ public class IndexAcceleratedQueryTests
         Assert.Equal(10, reader.ExecutionInfo.ReturnedRows);
         Assert.True(reader.ExecutionInfo.ScannedRows >= 10);
         Assert.True(reader.ExecutionInfo.IndexEntriesScanned >= reader.ExecutionInfo.IndexHits);
+    }
+
+    [Fact]
+    public void CreateReader_LegacyFilterOnIndexedColumn_UsesIndexCursor()
+    {
+        var data = TestDatabaseFactory.CreateIndexedIntegerDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("events",
+            new SharcFilter("user_id", SharcOperator.Equal, 3L));
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            Assert.Equal(3L, reader.GetInt64(1));
+            count++;
+        }
+
+        Assert.Equal(10, count);
+        Assert.Equal(QueryExecutionStrategy.SingleIndexSeek, reader.ExecutionInfo.Strategy);
     }
 
     [Fact]
@@ -389,6 +412,43 @@ public class IndexAcceleratedQueryTests
         using var reader = db.CreateReader("points", FilterStar.Column("x").Eq(3.0));
 
         Assert.True(reader.IsIndexAccelerated);
+        Assert.True(reader.Read());
+        Assert.Equal(3.0, reader.GetDouble(1));
+    }
+
+    [Fact]
+    public void CreateReader_LegacyFilterRealRangeOnIndexedColumn_UsesIndexCursor()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("points",
+            new SharcFilter("x", SharcOperator.GreaterThan, 3.25));
+
+        Assert.True(reader.IsIndexAccelerated);
+
+        int count = 0;
+        while (reader.Read())
+        {
+            double x = reader.GetDouble(1);
+            Assert.True(x > 3.25);
+            count++;
+        }
+
+        Assert.Equal(13, count);
+    }
+
+    [Fact]
+    public void CreateReader_LegacyFilterRealEq_PreservesToleranceSemanticsWithTableScan()
+    {
+        var data = TestDatabaseFactory.CreateIndexedRealDatabase();
+        using var db = SharcDatabase.OpenMemory(data);
+
+        using var reader = db.CreateReader("points",
+            new SharcFilter("x", SharcOperator.Equal, 3.0));
+
+        Assert.False(reader.IsIndexAccelerated);
+        Assert.Equal(QueryExecutionStrategy.TableScan, reader.ExecutionInfo.Strategy);
         Assert.True(reader.Read());
         Assert.Equal(3.0, reader.GetDouble(1));
     }
