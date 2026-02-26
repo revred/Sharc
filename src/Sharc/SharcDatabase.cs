@@ -446,14 +446,15 @@ public sealed class SharcDatabase : IDisposable
             });
         }
 
-        var tableCursor = CreateTableCursor(table);
-        var reader = new SharcDataReader(tableCursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        var resolvedFilters = ResolveFilters(table, filters);
+        var cursorForLegacyFilters = TryCreateIndexSeekCursor(filters, table) ?? CreateTableCursor(table);
+        var reader = new SharcDataReader(cursorForLegacyFilters, _recordDecoder, new SharcDataReader.CursorReaderConfig
         {
             Columns = table.Columns,
             Projection = projection,
             BTreeReader = _bTreeReader,
             TableIndexes = table.Indexes,
-            Filters = ResolveFilters(table, filters)
+            Filters = resolvedFilters
         });
 
         if (isPoolable)
@@ -1008,6 +1009,19 @@ public sealed class SharcDatabase : IDisposable
     }
 
     /// <summary>
+    /// Attempts to create an index-accelerated cursor for legacy <see cref="SharcFilter"/> arrays.
+    /// Returns null if no suitable index exists or conditions aren't sargable.
+    /// </summary>
+    private IBTreeCursor? TryCreateIndexSeekCursor(SharcFilter[]? filters, TableInfo table)
+    {
+        if (filters is not { Length: > 0 } || table.Indexes.Count == 0)
+            return null;
+
+        var conditions = ExtractLegacySargableConditions(filters, table.Columns);
+        return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    /// <summary>
     /// Attempts to create an index-accelerated cursor for the given query intent.
     /// Returns null if no suitable index exists or conditions aren't sargable.
     /// </summary>
@@ -1032,6 +1046,153 @@ public sealed class SharcDatabase : IDisposable
 
         var conditions = PredicateAnalyzer.ExtractSargableConditions(filter, table.Columns);
         return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    private static List<SargableCondition> ExtractLegacySargableConditions(
+        SharcFilter[] filters,
+        IReadOnlyList<ColumnInfo> columns)
+    {
+        var result = new List<SargableCondition>(filters.Length);
+
+        for (int i = 0; i < filters.Length; i++)
+        {
+            var filter = filters[i];
+            if (!TryMapLegacyOperator(filter.Operator, out var mappedOp))
+                continue;
+
+            ColumnInfo? column = null;
+            for (int c = 0; c < columns.Count; c++)
+            {
+                if (columns[c].Name.Equals(filter.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    column = columns[c];
+                    break;
+                }
+            }
+
+            if (column == null || column.IsMergedFix128Column)
+                continue;
+
+            if (TryGetLegacyIntegerValue(filter.Value, out long integerValue))
+            {
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = mappedOp,
+                    IntegerValue = integerValue,
+                    HighValue = 0,
+                    IsIntegerKey = true,
+                    IsRealKey = false,
+                    IsTextKey = false,
+                    TextValue = null
+                });
+                continue;
+            }
+
+            if (TryGetLegacyRealValue(filter.Value, out double realValue))
+            {
+                // Legacy SharcFilter equality on floating values uses tolerance semantics.
+                // Keep table-scan behavior for Eq to avoid false negatives from exact seeks.
+                if (mappedOp == Intent.IntentOp.Eq)
+                    continue;
+
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = mappedOp,
+                    RealValue = realValue,
+                    RealHighValue = 0,
+                    IsIntegerKey = false,
+                    IsRealKey = true,
+                    IsTextKey = false,
+                    TextValue = null
+                });
+                continue;
+            }
+
+            if (filter.Value is string textValue && mappedOp == Intent.IntentOp.Eq)
+            {
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = Intent.IntentOp.Eq,
+                    IntegerValue = 0,
+                    HighValue = 0,
+                    IsIntegerKey = false,
+                    IsRealKey = false,
+                    IsTextKey = true,
+                    TextValue = textValue
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryMapLegacyOperator(SharcOperator op, out Intent.IntentOp mappedOp)
+    {
+        mappedOp = op switch
+        {
+            SharcOperator.Equal => Intent.IntentOp.Eq,
+            SharcOperator.GreaterThan => Intent.IntentOp.Gt,
+            SharcOperator.GreaterOrEqual => Intent.IntentOp.Gte,
+            SharcOperator.LessThan => Intent.IntentOp.Lt,
+            SharcOperator.LessOrEqual => Intent.IntentOp.Lte,
+            _ => default
+        };
+
+        return op is SharcOperator.Equal or SharcOperator.GreaterThan or SharcOperator.GreaterOrEqual
+            or SharcOperator.LessThan or SharcOperator.LessOrEqual;
+    }
+
+    private static bool TryGetLegacyIntegerValue(object? value, out long integerValue)
+    {
+        switch (value)
+        {
+            case sbyte s8:
+                integerValue = s8;
+                return true;
+            case byte u8:
+                integerValue = u8;
+                return true;
+            case short s16:
+                integerValue = s16;
+                return true;
+            case ushort u16:
+                integerValue = u16;
+                return true;
+            case int s32:
+                integerValue = s32;
+                return true;
+            case uint u32:
+                integerValue = u32;
+                return true;
+            case long s64:
+                integerValue = s64;
+                return true;
+            case ulong u64 when u64 <= long.MaxValue:
+                integerValue = (long)u64;
+                return true;
+            default:
+                integerValue = 0;
+                return false;
+        }
+    }
+
+    private static bool TryGetLegacyRealValue(object? value, out double realValue)
+    {
+        switch (value)
+        {
+            case double d when !double.IsNaN(d) && !double.IsInfinity(d):
+                realValue = d;
+                return true;
+            case float f when !float.IsNaN(f) && !float.IsInfinity(f):
+                realValue = f;
+                return true;
+            default:
+                realValue = 0;
+                return false;
+        }
     }
 
     private IBTreeCursor? TryCreateIndexSeekCursor(
