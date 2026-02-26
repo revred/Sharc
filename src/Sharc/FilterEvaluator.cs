@@ -41,6 +41,12 @@ internal static class FilterEvaluator
         if (filterValue is null)
             return false;
 
+        if (op is SharcOperator.Equal or SharcOperator.NotEqual &&
+            TryMatchNumericEquality(column, filterValue, out bool numericEqual))
+        {
+            return op == SharcOperator.Equal ? numericEqual : !numericEqual;
+        }
+
         int? cmp = CompareColumnValue(column, filterValue);
         if (cmp is null)
             return false;
@@ -87,7 +93,65 @@ internal static class FilterEvaluator
                 string s => string.Compare(column.AsString(), s, StringComparison.Ordinal),
                 _ => null
             },
+            ColumnStorageClass.Blob => filterValue switch
+            {
+                decimal d
+                    when column.AsBytes().Length == Sharc.Core.Primitives.DecimalCodec.ByteCount
+                    && Sharc.Core.Primitives.DecimalCodec.TryDecode(column.AsBytes().Span, out decimal colDecimal)
+                    => colDecimal.CompareTo(Sharc.Core.Primitives.DecimalCodec.Normalize(d)),
+                _ => null
+            },
             _ => null
         };
+    }
+
+    private static bool TryMatchNumericEquality(ColumnValue column, object filterValue, out bool isEqual)
+    {
+        switch (column.StorageClass)
+        {
+            case ColumnStorageClass.Integral:
+            {
+                long integral = column.AsInt64();
+                switch (filterValue)
+                {
+                    case long l:
+                        isEqual = integral == l;
+                        return true;
+                    case int i:
+                        isEqual = integral == i;
+                        return true;
+                    case double d:
+                        isEqual = RawByteComparer.AreClose(integral, d);
+                        return true;
+                    case float f:
+                        isEqual = RawByteComparer.AreClose(integral, f);
+                        return true;
+                }
+                break;
+            }
+            case ColumnStorageClass.Real:
+            {
+                double real = column.AsDouble();
+                switch (filterValue)
+                {
+                    case double d:
+                        isEqual = RawByteComparer.AreClose(real, d);
+                        return true;
+                    case float f:
+                        isEqual = RawByteComparer.AreClose(real, f);
+                        return true;
+                    case long l:
+                        isEqual = RawByteComparer.AreClose(real, l);
+                        return true;
+                    case int i:
+                        isEqual = RawByteComparer.AreClose(real, i);
+                        return true;
+                }
+                break;
+            }
+        }
+
+        isEqual = false;
+        return false;
     }
 }

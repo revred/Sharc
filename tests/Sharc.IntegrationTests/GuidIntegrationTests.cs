@@ -37,7 +37,7 @@ public class GuidIntegrationTests
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TABLE items (id INTEGER PRIMARY KEY, owner_id BLOB)";
+            cmd.CommandText = "CREATE TABLE items (id INTEGER PRIMARY KEY, owner_id GUID)";
             cmd.ExecuteNonQuery();
 
             cmd.CommandText = "INSERT INTO items (owner_id) VALUES ($guid)";
@@ -62,7 +62,7 @@ public class GuidIntegrationTests
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TABLE refs (id INTEGER PRIMARY KEY, ref_id BLOB)";
+            cmd.CommandText = "CREATE TABLE refs (id INTEGER PRIMARY KEY, ref_id GUID)";
             cmd.ExecuteNonQuery();
 
             foreach (var guid in guids)
@@ -95,7 +95,7 @@ public class GuidIntegrationTests
         var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TABLE t (id INTEGER PRIMARY KEY, g BLOB)";
+            cmd.CommandText = "CREATE TABLE t (id INTEGER PRIMARY KEY, g GUID)";
             cmd.ExecuteNonQuery();
 
             cmd.CommandText = "INSERT INTO t (g) VALUES ($g)";
@@ -159,5 +159,51 @@ public class GuidIntegrationTests
         using var reader = db.CreateReader("docs");
         Assert.True(reader.Read());
         Assert.Equal(expectedGuid, reader.GetGuid(1));
+    }
+
+    [Fact]
+    public void GetDecimal_OnGuidColumn_ThrowsInvalidOperation()
+    {
+        var guidBytes = new byte[16];
+        GuidCodec.Encode(Guid.NewGuid(), guidBytes);
+
+        var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE docs (id INTEGER PRIMARY KEY, doc_guid GUID)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "INSERT INTO docs (doc_guid) VALUES ($g)";
+            cmd.Parameters.AddWithValue("$g", guidBytes);
+            cmd.ExecuteNonQuery();
+        });
+
+        using var db = SharcDatabase.OpenMemory(data);
+        using var reader = db.CreateReader("docs");
+        Assert.True(reader.Read());
+        Assert.Throws<InvalidOperationException>(() => reader.GetDecimal(1));
+    }
+
+    [Fact]
+    public void GetGuid_OnBlobDeclaredColumn_ThrowsInvalidOperation()
+    {
+        var guidBytes = new byte[16];
+        GuidCodec.Encode(Guid.NewGuid(), guidBytes);
+
+        var data = TestDatabaseFactory.CreateDatabaseWith(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE docs (id INTEGER PRIMARY KEY, doc_guid BLOB)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "INSERT INTO docs (doc_guid) VALUES ($g)";
+            cmd.Parameters.AddWithValue("$g", guidBytes);
+            cmd.ExecuteNonQuery();
+        });
+
+        using var db = SharcDatabase.OpenMemory(data);
+        using var reader = db.CreateReader("docs");
+        Assert.True(reader.Read());
+        Assert.Throws<InvalidOperationException>(() => reader.GetGuid(1));
     }
 }

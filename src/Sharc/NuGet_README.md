@@ -14,6 +14,8 @@ Sharc is a high-performance, zero-allocation SQLite format reader and writer wit
 - **~250 KB Footprint**: 40x smaller than the standard SQLite bundle.
 - **Cryptographic Trust**: ECDSA agent attestation and tamper-evident audit ledgers (via `Sharc.Graph`).
 - **Encryption**: AES-256-GCM + Argon2id support (via `Sharc.Crypto`).
+- **Native 128-bit Types**: `GUID`/`UUID` and `FIX128`/`DECIMAL128` (`decimal`, 28-29 significant digits).
+- **Strict Typed Accessors**: `GetGuid()` only for `GUID`/`UUID`; `GetDecimal()` only for `FIX128`/`DECIMAL*`.
 
 ## Quick Start
 
@@ -37,6 +39,14 @@ using var results = db.Query(
     "SELECT dept, COUNT(*) FROM users WHERE age > 25 GROUP BY dept ORDER BY dept");
 while (results.Read())
     Console.WriteLine($"{results.GetString(0)}: {results.GetInt64(1)}");
+
+// Typed 128-bit values
+using var typed = db.CreateReader("accounts");
+while (typed.Read())
+{
+    Guid accountId = typed.GetGuid(1);   // GUID/UUID column
+    decimal balance = typed.GetDecimal(2); // FIX128/DECIMAL* column
+}
 ```
 
 ## When to Use Sharc

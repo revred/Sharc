@@ -113,8 +113,16 @@ foreach (var table in schema.Tables)
 | `GetUtf8Span(i)` | `ReadOnlySpan<byte>` | 0 B |
 | `GetBlob(i)` | `byte[]` | 1 alloc |
 | `GetBlobSpan(i)` | `ReadOnlySpan<byte>` | 0 B |
-| `GetGuid(i)` | `Guid` | 0 B (merged path) |
+| `GetGuid(i)` | `Guid` | 0 B (merged path, strict `GUID`/`UUID` declaration) |
+| `GetDecimal(i)` | `decimal` | 0 B (merged path, strict `FIX128`/`DECIMAL128`/`DECIMAL` declaration) |
 | `IsNull(i)` | `bool` | 0 B |
+
+## 128-bit Typed Columns
+
+| Declared Type | Accessor | Notes |
+|------|---------|-------|
+| `GUID`, `UUID` | `GetGuid(i)` | Supports BLOB(16) and merged `__hi`/`__lo` logical columns |
+| `FIX128`, `DECIMAL128`, `DECIMAL` | `GetDecimal(i)` | Exact 28-29 significant digits, supports canonical 16-byte payload and merged `__dhi`/`__dlo` |
 
 ## Key Types
 

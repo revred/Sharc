@@ -7,6 +7,7 @@ using Sharc.Core;
 using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
+using Sharc.Core.Primitives;
 using Sharc.Core.Records;
 using Sharc.Core.Schema;
 using Sharc.Core.Trust;
@@ -338,6 +339,7 @@ public sealed class SharcWriter : IDisposable
 
         // Insert into B-tree
         uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
+        tx.TrackRowMutation(tableName, rowId);
 
         if (newRoot != rootPage)
         {
@@ -370,6 +372,7 @@ public sealed class SharcWriter : IDisposable
 
         var mutator = tx.FetchMutator(usableSize);
         uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
+        tx.TrackRowMutation(tableName, rowId);
 
         if (newRoot != rootPage)
         {
@@ -395,6 +398,9 @@ public sealed class SharcWriter : IDisposable
 
         var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Delete(rootPage, rowId);
+
+        if (found)
+            tx.TrackRowMutation(tableName, rowId);
 
         if (found && newRoot != rootPage)
         {
@@ -428,6 +434,9 @@ public sealed class SharcWriter : IDisposable
 
         var mutator = tx.FetchMutator(usableSize);
         var (found, newRoot) = mutator.Update(rootPage, rowId, recordBuf);
+
+        if (found)
+            tx.TrackRowMutation(tableName, rowId);
 
         if (found && newRoot != rootPage)
         {
@@ -560,7 +569,7 @@ public sealed class SharcWriter : IDisposable
 
     /// <summary>
     /// Expands logical column values into physical column values for tables with merged columns.
-    /// GUID values at merged column positions are split into hi/lo Int64 pairs.
+    /// FIX128 values at merged column positions are split into hi/lo Int64 pairs.
     /// Returns the same array unchanged if the table has no merged columns (fast path).
     /// </summary>
     internal static ColumnValue[] ExpandMergedColumns(ColumnValue[] logical, TableInfo table)
@@ -573,7 +582,7 @@ public sealed class SharcWriter : IDisposable
         for (int i = 0; i < columns.Count && i < logical.Length; i++)
         {
             var col = columns[i];
-            if (col.IsMergedGuidColumn)
+            if (col.IsMergedFix128Column)
             {
                 var mergedOrdinals = col.MergedPhysicalOrdinals!;
                 if (logical[i].IsNull)
@@ -583,8 +592,7 @@ public sealed class SharcWriter : IDisposable
                 }
                 else
                 {
-                    var guid = logical[i].AsGuid();
-                    var (hi, lo) = ColumnValue.SplitGuidForMerge(guid);
+                    var (hi, lo) = SplitFix128ForMerge(logical[i], col);
                     physical[mergedOrdinals[0]] = hi;
                     physical[mergedOrdinals[1]] = lo;
                 }
@@ -597,6 +605,53 @@ public sealed class SharcWriter : IDisposable
         }
 
         return physical;
+    }
+
+    /// <summary>
+    /// Splits a logical 128-bit value into hi/lo Int64 physical values for merged columns.
+    /// Supports GUID and 16-byte BLOB payloads (including DecimalCodec output).
+    /// </summary>
+    private static (ColumnValue Hi, ColumnValue Lo) SplitFix128ForMerge(ColumnValue value, ColumnInfo column)
+    {
+        if (column.IsGuidColumn)
+        {
+            if (value.StorageClass == ColumnStorageClass.UniqueId)
+                return ColumnValue.SplitGuidForMerge(value.AsGuid());
+
+            if (value.StorageClass == ColumnStorageClass.Blob)
+            {
+                var bytes = value.AsBytes().Span;
+                if (bytes.Length == 16)
+                {
+                    long hi = BinaryPrimitives.ReadInt64BigEndian(bytes[..8]);
+                    long lo = BinaryPrimitives.ReadInt64BigEndian(bytes.Slice(8, 8));
+                    return (ColumnValue.FromInt64(6, hi), ColumnValue.FromInt64(6, lo));
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Merged GUID column '{column.Name}' requires GUID/UUID or a 16-byte payload.");
+        }
+
+        if (column.IsDecimalColumn)
+        {
+            if (value.StorageClass == ColumnStorageClass.Blob)
+            {
+                var bytes = value.AsBytes().Span;
+                if (bytes.Length == DecimalCodec.ByteCount && DecimalCodec.TryDecode(bytes, out _))
+                {
+                    long hi = BinaryPrimitives.ReadInt64BigEndian(bytes[..8]);
+                    long lo = BinaryPrimitives.ReadInt64BigEndian(bytes.Slice(8, 8));
+                    return (ColumnValue.FromInt64(6, hi), ColumnValue.FromInt64(6, lo));
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Merged decimal column '{column.Name}' requires a valid decimal FIX128 payload.");
+        }
+
+        throw new InvalidOperationException(
+            $"Merged FIX128 column '{column.Name}' must be declared as GUID/UUID or FIX128.");
     }
 
     /// <summary>

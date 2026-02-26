@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Buffers.Binary;
 using Sharc.Core.Primitives;
 using Sharc.Core.Schema;
 
@@ -82,6 +83,7 @@ internal static class JitPredicateBuilder
             TypedFilterValue.Tag.Int64 => BuildInt64Comparison(ordinal, pred.Operator, pred.Value.AsInt64()),
             TypedFilterValue.Tag.Double => BuildDoubleComparison(ordinal, pred.Operator, pred.Value.AsDouble()),
             TypedFilterValue.Tag.Utf8 => BuildUtf8Comparison(ordinal, pred.Operator, pred.Value.AsUtf8().ToArray()),
+            TypedFilterValue.Tag.Decimal => BuildDecimalComparison(ordinal, pred.Operator, pred.Value.AsDecimalBytes().ToArray()),
             _ => static (_, _, _, _) => false
         };
     }
@@ -103,6 +105,11 @@ internal static class JitPredicateBuilder
             if (SerialTypeCodec.IsReal(serialType))
             {
                 var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                if (op is FilterOp.Eq or FilterOp.Neq)
+                {
+                    bool isEqual = RawByteComparer.AreClose(RawByteComparer.DecodeDouble(data), doubleFilterValue);
+                    return op == FilterOp.Eq ? isEqual : !isEqual;
+                }
                 return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareDouble(data, doubleFilterValue));
             }
             return false;
@@ -120,11 +127,21 @@ internal static class JitPredicateBuilder
             if (SerialTypeCodec.IsReal(serialType))
             {
                 var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                if (op is FilterOp.Eq or FilterOp.Neq)
+                {
+                    bool isEqual = RawByteComparer.AreClose(RawByteComparer.DecodeDouble(data), filterValue);
+                    return op == FilterOp.Eq ? isEqual : !isEqual;
+                }
                 return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareDouble(data, filterValue));
             }
             if (SerialTypeCodec.IsIntegral(serialType))
             {
                 var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+                if (op is FilterOp.Eq or FilterOp.Neq)
+                {
+                    bool isEqual = RawByteComparer.AreClose((double)RawByteComparer.DecodeInt64(data, serialType), filterValue);
+                    return op == FilterOp.Eq ? isEqual : !isEqual;
+                }
                 return FilterStarCompiler.CompareOp(op, RawByteComparer.CompareIntAsDouble(data, serialType, filterValue));
             }
             return false;
@@ -144,6 +161,24 @@ internal static class JitPredicateBuilder
                 return FilterStarCompiler.CompareOp(op, RawByteComparer.Utf8Compare(data, utf8Bytes));
             }
             return false;
+        };
+    }
+
+    private static BakedDelegate BuildDecimalComparison(int ordinal, FilterOp op, byte[] decimalBytes)
+    {
+        decimal filterValue = DecimalCodec.Decode(decimalBytes);
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            long serialType = FilterStarCompiler.GetSerialType(serialTypes, ordinal);
+            if (serialType != DecimalCodec.DecimalSerialType)
+                return false;
+
+            var data = FilterStarCompiler.GetColumnData(payload, offsets, ordinal, serialType);
+            if (!DecimalCodec.TryDecode(data, out decimal columnValue))
+                return false;
+
+            int cmp = columnValue.CompareTo(filterValue);
+            return FilterStarCompiler.CompareOp(op, cmp);
         };
     }
 
@@ -316,6 +351,41 @@ internal static class JitPredicateBuilder
             }
 
             return false;
+        };
+    }
+
+    public static BakedDelegate BuildMergedDecimalComparison(
+        int hiOrdinal, int loOrdinal, FilterOp op, TypedFilterValue value)
+    {
+        if (op is not (FilterOp.Eq or FilterOp.Neq or FilterOp.Lt or FilterOp.Lte or FilterOp.Gt or FilterOp.Gte))
+            return static (_, _, _, _) => false;
+
+        decimal filterValue = DecimalCodec.Decode(value.AsDecimalBytes());
+
+        return (payload, serialTypes, offsets, rowId) =>
+        {
+            if (hiOrdinal >= serialTypes.Length || loOrdinal >= serialTypes.Length)
+                return false;
+
+            long hiSerialType = FilterStarCompiler.GetSerialType(serialTypes, hiOrdinal);
+            long loSerialType = FilterStarCompiler.GetSerialType(serialTypes, loOrdinal);
+            if (!SerialTypeCodec.IsIntegral(hiSerialType) || !SerialTypeCodec.IsIntegral(loSerialType))
+                return false;
+
+            var hiData = FilterStarCompiler.GetColumnData(payload, offsets, hiOrdinal, hiSerialType);
+            var loData = FilterStarCompiler.GetColumnData(payload, offsets, loOrdinal, loSerialType);
+
+            long hi = RawByteComparer.DecodeInt64(hiData, hiSerialType);
+            long lo = RawByteComparer.DecodeInt64(loData, loSerialType);
+
+            Span<byte> fix128 = stackalloc byte[DecimalCodec.ByteCount];
+            BinaryPrimitives.WriteInt64BigEndian(fix128[..8], hi);
+            BinaryPrimitives.WriteInt64BigEndian(fix128.Slice(8, 8), lo);
+            if (!DecimalCodec.TryDecode(fix128, out decimal rowValue))
+                return false;
+
+            int cmp = rowValue.CompareTo(filterValue);
+            return FilterStarCompiler.CompareOp(op, cmp);
         };
     }
 }

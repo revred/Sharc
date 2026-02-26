@@ -77,19 +77,25 @@ public sealed class VectorQuery : IDisposable
     private HnswIndex? _hnswIndex;
     private const int PostFilterSelectivityMultiplier = 2;
     private const int PostFilterMinCandidateThreshold = 8;
+    private const int WithinDistanceInitialCandidateCount = 32;
+    private const int WithinDistanceMaxCandidateCount = 512;
+    private const int WithinDistanceNoGrowthStopRounds = 2;
+    private const int WithinDistanceSelectiveAllowListThreshold = 16;
+    private const int WithinDistanceFilterMinSeenCandidates = 32;
+    private const double WithinDistanceFilterCoverageRatio = 0.20;
 
     /// <summary>
     /// Execution diagnostics for the most recent
-    /// <see cref="NearestTo(ReadOnlySpan{float}, int, VectorSearchOptions, string[])"/> call.
+    /// vector query call.
     /// Useful for benchmark instrumentation and planner validation.
     /// </summary>
     public VectorExecutionInfo LastExecutionInfo { get; private set; } = VectorExecutionInfo.None;
 
     /// <summary>
     /// Attaches an HNSW index for approximate nearest neighbor search.
-    /// When set, <see cref="NearestTo(ReadOnlySpan{float}, int, VectorSearchOptions, string[])"/> dispatches to the index when no active
-    /// filters are present. Falls back to flat scan transparently when filters
-    /// are active (HNSW doesn't support pre-filtering).
+    /// When set, nearest/radius queries can use ANN widening paths.
+    /// Direct index search is used for unfiltered nearest-neighbor lookups;
+    /// filtered/radius paths widen ANN candidates and may fall back to exact scan.
     /// </summary>
     /// <param name="index">The HNSW index to use, or null to detach.</param>
     public VectorQuery UseIndex(HnswIndex? index)
@@ -403,10 +409,54 @@ public sealed class VectorQuery : IDisposable
     /// </param>
     /// <param name="columnNames">Optional list of column names to retrieve as metadata.</param>
     public VectorSearchResult WithinDistance(ReadOnlySpan<float> queryVector, float maxDistance, params string[] columnNames)
+        => WithinDistance(queryVector, maxDistance, VectorSearchOptions.Default, columnNames);
+
+    /// <summary>
+    /// Returns all rows within the specified distance threshold using explicit execution options.
+    /// </summary>
+    /// <param name="queryVector">The query vector.</param>
+    /// <param name="maxDistance">
+    /// Maximum distance threshold. For DotProduct, this is a minimum similarity threshold.
+    /// </param>
+    /// <param name="options">Execution controls (flat-scan forcing, ef override).</param>
+    /// <param name="columnNames">Optional list of column names to retrieve as metadata.</param>
+    public VectorSearchResult WithinDistance(
+        ReadOnlySpan<float> queryVector, float maxDistance, VectorSearchOptions options, params string[] columnNames)
     {
         ThrowIfDisposed();
         ValidateDimensions(queryVector);
         EnforceAgentAccess(columnNames);
+
+        if (options.ForceFlatScan)
+        {
+            var forcedFlat = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int forcedScannedRows);
+            LastExecutionInfo = new VectorExecutionInfo(
+                Strategy: VectorExecutionStrategy.FlatScan,
+                CandidateCount: forcedScannedRows,
+                RequestedK: 0,
+                ReturnedCount: forcedFlat.Count,
+                UsedFallbackScan: false);
+            return forcedFlat;
+        }
+
+        if (_hnswIndex != null && !_innerJit.HasRowAccessEvaluator)
+            return IndexedWithinDistance(queryVector, maxDistance, options, columnNames);
+
+        var flat = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int scannedRows);
+        LastExecutionInfo = new VectorExecutionInfo(
+            Strategy: VectorExecutionStrategy.FlatScan,
+            CandidateCount: scannedRows,
+            RequestedK: 0,
+            ReturnedCount: flat.Count,
+            UsedFallbackScan: false);
+        return flat;
+    }
+
+    /// <summary>Flat brute-force scan for WithinDistance.</summary>
+    private VectorSearchResult FlatScanWithinDistance(
+        ReadOnlySpan<float> queryVector, float maxDistance, string[] columnNames, out int scannedRows)
+    {
+        scannedRows = 0;
 
         string[] projection = new string[1 + columnNames.Length];
         projection[0] = _vectorColumnName;
@@ -418,16 +468,13 @@ public sealed class VectorQuery : IDisposable
 
         while (reader.Read())
         {
+            scannedRows++;
+
             ReadOnlySpan<byte> blobBytes = reader.GetBlobSpan(0);
             ReadOnlySpan<float> storedVector = BlobVectorCodec.Decode(blobBytes);
 
             float distance = _distanceFn(queryVector, storedVector);
-
-            bool withinThreshold = _metric == DistanceMetric.DotProduct
-                ? distance >= maxDistance  // DotProduct: higher = more similar
-                : distance <= maxDistance; // Cosine/Euclidean: lower = more similar
-
-            if (withinThreshold)
+            if (IsWithinThreshold(distance, maxDistance))
             {
                 IReadOnlyDictionary<string, object?>? metadata = null;
                 if (columnNames.Length > 0)
@@ -437,12 +484,157 @@ public sealed class VectorQuery : IDisposable
             }
         }
 
-        // Sort by distance
+        SortMatchesByMetric(results);
+        return new VectorSearchResult(results);
+    }
+
+    private VectorSearchResult IndexedWithinDistance(
+        ReadOnlySpan<float> queryVector, float maxDistance, VectorSearchOptions options, string[] columnNames)
+    {
+        var index = _hnswIndex!;
+        HashSet<long>? allowList = null;
+        int candidateUniverse = index.Count;
+
+        if (_innerJit.HasActiveFilters)
+        {
+            allowList = BuildFilterAllowList();
+            candidateUniverse = allowList.Count;
+
+            if (candidateUniverse == 0)
+            {
+                LastExecutionInfo = new VectorExecutionInfo(
+                    Strategy: VectorExecutionStrategy.HnswWithinDistanceWidening,
+                    CandidateCount: 0,
+                    RequestedK: 0,
+                    ReturnedCount: 0,
+                    UsedFallbackScan: false);
+                return new VectorSearchResult(new List<VectorMatch>());
+            }
+
+            if (candidateUniverse <= WithinDistanceSelectiveAllowListThreshold)
+            {
+                var selectiveFlat = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int scannedRows);
+                LastExecutionInfo = new VectorExecutionInfo(
+                    Strategy: VectorExecutionStrategy.FlatScan,
+                    CandidateCount: scannedRows,
+                    RequestedK: 0,
+                    ReturnedCount: selectiveFlat.Count,
+                    UsedFallbackScan: false);
+                return selectiveFlat;
+            }
+        }
+
+        var annMatches = new List<VectorMatch>();
+        var acceptedIds = new HashSet<long>();
+        var seenCandidateIds = new HashSet<long>();
+        int eligibleSeenCount = 0;
+        int roundsWithoutGrowth = 0;
+        bool observedOutsideThreshold = false;
+
+        int searchK = Math.Min(index.Count, WithinDistanceInitialCandidateCount);
+        int maxSearchK = Math.Min(index.Count, WithinDistanceMaxCandidateCount);
+
+        while (searchK > 0)
+        {
+            var candidateBatch = index.Search(queryVector, searchK, options.EfSearch);
+            int acceptedBefore = annMatches.Count;
+
+            for (int i = 0; i < candidateBatch.Count; i++)
+            {
+                var match = candidateBatch[i];
+                if (!seenCandidateIds.Add(match.RowId))
+                    continue;
+
+                if (allowList != null && !allowList.Contains(match.RowId))
+                    continue;
+
+                eligibleSeenCount++;
+
+                if (IsOutsideThreshold(match.Distance, maxDistance))
+                    observedOutsideThreshold = true;
+
+                if (IsWithinThreshold(match.Distance, maxDistance) && acceptedIds.Add(match.RowId))
+                    annMatches.Add(match);
+            }
+
+            if (annMatches.Count == acceptedBefore)
+                roundsWithoutGrowth++;
+            else
+                roundsWithoutGrowth = 0;
+
+            bool filterCoverageReached = allowList == null
+                || eligibleSeenCount >= GetWithinDistanceFilterCoverageTarget(allowList.Count);
+
+            if (observedOutsideThreshold && filterCoverageReached && roundsWithoutGrowth >= WithinDistanceNoGrowthStopRounds)
+                break;
+
+            if (searchK >= maxSearchK || searchK >= index.Count)
+                break;
+
+            int next = Math.Min(Math.Min(index.Count, maxSearchK), searchK * 2);
+            if (next <= searchK)
+                break;
+            searchK = next;
+        }
+
+        bool shouldFallback = !observedOutsideThreshold
+            || (allowList != null && eligibleSeenCount < GetWithinDistanceFilterCoverageTarget(allowList.Count));
+
+        if (shouldFallback)
+        {
+            var fallback = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int scannedRows);
+            LastExecutionInfo = new VectorExecutionInfo(
+                Strategy: VectorExecutionStrategy.HnswWithinDistanceWidening,
+                CandidateCount: scannedRows,
+                RequestedK: 0,
+                ReturnedCount: fallback.Count,
+                UsedFallbackScan: true);
+            return fallback;
+        }
+
+        SortMatchesByMetric(annMatches);
+        var indexed = new VectorSearchResult(annMatches);
+        if (columnNames.Length > 0)
+            indexed = EnrichWithMetadata(indexed, columnNames);
+
+        LastExecutionInfo = new VectorExecutionInfo(
+            Strategy: VectorExecutionStrategy.HnswWithinDistanceWidening,
+            CandidateCount: Math.Min(candidateUniverse, eligibleSeenCount),
+            RequestedK: 0,
+            ReturnedCount: indexed.Count,
+            UsedFallbackScan: false);
+        return indexed;
+    }
+
+    private static int GetWithinDistanceFilterCoverageTarget(int allowListCount)
+    {
+        if (allowListCount <= 0)
+            return 0;
+
+        int ratioTarget = (int)Math.Ceiling(allowListCount * WithinDistanceFilterCoverageRatio);
+        return Math.Min(allowListCount, Math.Max(WithinDistanceFilterMinSeenCandidates, ratioTarget));
+    }
+
+    private bool IsWithinThreshold(float distance, float maxDistance)
+    {
+        // DotProduct uses similarity (higher is better); distance metrics use lower-is-better.
+        return _metric == DistanceMetric.DotProduct
+            ? distance >= maxDistance
+            : distance <= maxDistance;
+    }
+
+    private bool IsOutsideThreshold(float distance, float maxDistance)
+    {
+        return _metric == DistanceMetric.DotProduct
+            ? distance < maxDistance
+            : distance > maxDistance;
+    }
+
+    private void SortMatchesByMetric(List<VectorMatch> results)
+    {
         results.Sort((a, b) => _metric == DistanceMetric.DotProduct
             ? b.Distance.CompareTo(a.Distance)
             : a.Distance.CompareTo(b.Distance));
-
-        return new VectorSearchResult(results);
     }
 
     /// <inheritdoc />

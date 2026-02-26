@@ -200,6 +200,56 @@ internal static class TestDatabaseFactory
     }
 
     /// <summary>
+    /// Creates a table with an indexed REAL column.
+    /// </summary>
+    public static byte[] CreateIndexedRealDatabase()
+    {
+        return CreateDatabase(conn =>
+        {
+            Execute(conn, "CREATE TABLE points (id INTEGER PRIMARY KEY, x REAL, label TEXT)");
+            Execute(conn, "CREATE INDEX idx_points_x ON points (x)");
+
+            for (int i = 0; i < 20; i++)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "INSERT INTO points (x, label) VALUES ($x, $label)";
+                cmd.Parameters.AddWithValue("$x", i * 0.5); // 0.0, 0.5, ..., 9.5
+                cmd.Parameters.AddWithValue("$label", $"P{i}");
+                cmd.ExecuteNonQuery();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Creates a 2D points table with REAL x/y coordinates and indexes suitable for
+    /// composite-range and rowid-intersection planner tests.
+    /// </summary>
+    public static byte[] CreateIndexedReal2dDatabase(bool withCompositeIndex)
+    {
+        return CreateDatabase(conn =>
+        {
+            Execute(conn, "CREATE TABLE points2d (id INTEGER PRIMARY KEY, x REAL, y REAL, label TEXT)");
+            Execute(conn, "CREATE INDEX idx_points2d_x ON points2d (x)");
+            Execute(conn, "CREATE INDEX idx_points2d_y ON points2d (y)");
+            if (withCompositeIndex)
+                Execute(conn, "CREATE INDEX idx_points2d_xy ON points2d (x, y)");
+
+            for (int x = 0; x <= 9; x++)
+            {
+                for (int y = 0; y <= 9; y++)
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "INSERT INTO points2d (x, y, label) VALUES ($x, $y, $label)";
+                    cmd.Parameters.AddWithValue("$x", (double)x);
+                    cmd.Parameters.AddWithValue("$y", y * 0.5);
+                    cmd.Parameters.AddWithValue("$label", $"P{x}_{y}");
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        });
+    }
+
+    /// <summary>
     /// Creates a table with a large number of rows to test multi-page b-trees.
     /// </summary>
     public static byte[] CreateLargeDatabase(int rowCount = 1000)
