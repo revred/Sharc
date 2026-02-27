@@ -388,8 +388,29 @@ internal sealed class BTreeMutator : IDisposable
             // Root split with retention:
             uint newLeftPage = AllocateNewPage();
 
-            var leftContent = ReadPageBuffer(pageNum);
-            WritePageBuffer(newLeftPage, leftContent);
+            if (pageNum == 1)
+            {
+                // Page 1 has a 100-byte database header before the B-tree data.
+                // The left page was built at hdrOff=100, so cell pointers and the
+                // B-tree header sit at offset 100+.  A naive byte copy would carry
+                // the DB header into newLeftPage, but newLeftPage is NOT page 1 —
+                // the cursor will read it at offset 0 and hit the magic string 0x53.
+                // Fix: rebuild the left page at offset 0 for newLeftPage.
+                var newLeftBuf = RentPageBuffer();
+                if (isLeaf)
+                    _rewriter.BuildLeafPage(newLeftBuf, 0, cellBuf, cells[..(splitIdx + 1)]);
+                else
+                {
+                    CellParser.ParseTableInteriorCell(medianSpan, out uint mlc, out _);
+                    _rewriter.BuildInteriorPage(newLeftBuf, 0, cellBuf, cells[..splitIdx], mlc);
+                }
+                WritePageBuffer(newLeftPage, newLeftBuf);
+            }
+            else
+            {
+                var leftContent = ReadPageBuffer(pageNum);
+                WritePageBuffer(newLeftPage, leftContent);
+            }
 
             var rootBuf = RentPageBuffer();
 
@@ -507,7 +528,12 @@ internal sealed class BTreeMutator : IDisposable
     /// <summary>
     /// Allocates a new page, first trying the freelist, then extending the file.
     /// </summary>
-    internal uint AllocateNewPage()
+    internal uint AllocateNewPage() => AllocateNewPage(BTreePageType.LeafTable);
+
+    /// <summary>
+    /// Allocates a new page with the specified B-tree page type.
+    /// </summary>
+    internal uint AllocateNewPage(BTreePageType pageType)
     {
         uint page = _freePageAllocator?.Invoke() ?? 0;
 
@@ -516,7 +542,7 @@ internal sealed class BTreeMutator : IDisposable
 
         var buf = RentPageBuffer();
         var hdr = new BTreePageHeader(
-            BTreePageType.LeafTable, 0, 0,
+            pageType, 0, 0,
             (ushort)_usablePageSize, 0, 0
         );
         BTreePageHeader.Write(buf, hdr);

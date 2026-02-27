@@ -33,6 +33,11 @@ internal static class SharcSchemaWriter
         {
             ExecuteCreateTable(db, tx, span, sql);
         }
+        else if (span.StartsWith("CREATE UNIQUE INDEX", StringComparison.OrdinalIgnoreCase)
+              || span.StartsWith("CREATE INDEX", StringComparison.OrdinalIgnoreCase))
+        {
+            ExecuteCreateIndex(db, tx, span, sql);
+        }
         else if (span.StartsWith("CREATE VIEW", StringComparison.OrdinalIgnoreCase))
         {
             ExecuteCreateView(db, tx, span, sql);
@@ -121,6 +126,83 @@ internal static class SharcSchemaWriter
         {
             CreateTextValue("table"),
             CreateTextValue(tableName),
+            CreateTextValue(tableName),
+            CreateIntValue(rootPage),
+            CreateTextValue(originalSql)
+        };
+
+        WriteMasterRecord(db, tx, record, rowId, isInsert: true);
+    }
+
+    private static void ExecuteCreateIndex(SharcDatabase db, Transaction tx, ReadOnlySpan<char> span, string originalSql)
+    {
+        // Format: CREATE [UNIQUE] INDEX [IF NOT EXISTS] IndexName ON TableName ( columns )
+        int pos = 6; // Length of "CREATE"
+        SkipWhitespace(span, ref pos);
+
+        if (StartsWith(span.Slice(pos), "UNIQUE"))
+        {
+            pos += 6;
+            SkipWhitespace(span, ref pos);
+        }
+
+        // Skip "INDEX"
+        pos += 5; // Length of "INDEX"
+        SkipWhitespace(span, ref pos);
+
+        bool ifNotExists = false;
+        if (StartsWith(span.Slice(pos), "IF NOT EXISTS"))
+        {
+            ifNotExists = true;
+            pos += 13;
+            SkipWhitespace(span, ref pos);
+        }
+
+        string indexName = ReadIdentifier(span, ref pos);
+        if (string.IsNullOrEmpty(indexName))
+            throw new ArgumentException("Invalid index name in CREATE INDEX statement.");
+
+        // Check if index already exists
+        if (db.Schema.Indexes.Any(ix => ix.Name.Equals(indexName, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (ifNotExists) return;
+            throw new InvalidOperationException($"Index '{indexName}' already exists.");
+        }
+
+        // Parse "ON TableName"
+        SkipWhitespace(span, ref pos);
+        if (!StartsWith(span.Slice(pos), "ON"))
+            throw new ArgumentException("Expected 'ON' keyword after index name.");
+        pos += 2;
+        SkipWhitespace(span, ref pos);
+
+        string tableName = ReadIdentifier(span, ref pos);
+        if (string.IsNullOrEmpty(tableName))
+            throw new ArgumentException("Invalid table name in CREATE INDEX statement.");
+
+        // Verify the table exists
+        if (!db.Schema.Tables.Any(t => t.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase)))
+            throw new KeyNotFoundException($"Table '{tableName}' not found.");
+
+        // Validate that column list is present
+        SkipWhitespace(span, ref pos);
+        if (pos >= span.Length || span[pos] != '(')
+            throw new ArgumentException("Expected '(' after table name in CREATE INDEX.");
+
+        var indexCols = SchemaParser.ParseIndexColumns(span);
+        if (indexCols.Count == 0)
+            throw new ArgumentException("Index must have at least one column.");
+
+        // Allocate root page for the index (LeafIndex B-tree)
+        uint rootPage = tx.AllocateIndexRoot(db.UsablePageSize);
+
+        // Insert into sqlite_master: type="index", name=indexName, tbl_name=tableName
+        long rowId = tx.FetchMutator(db.UsablePageSize).GetMaxRowId((uint)SqliteMasterRootPage) + 1;
+
+        var record = new ColumnValue[]
+        {
+            CreateTextValue("index"),
+            CreateTextValue(indexName),
             CreateTextValue(tableName),
             CreateIntValue(rootPage),
             CreateTextValue(originalSql)

@@ -313,6 +313,8 @@ public sealed class SharcWriter : IDisposable
 
     /// <summary>
     /// Core insert: encode record → insert into B-tree via the transaction's shadow source.
+    /// For tables with an INTEGER PRIMARY KEY column, the caller's explicit value is used
+    /// as the B-tree rowid and NULL is stored at that position in the record (matching SQLite).
     /// </summary>
     internal static long InsertCore(Transaction tx, string tableName, ColumnValue[] values,
         TableInfo? tableInfo = null, Dictionary<string, uint>? rootCache = null)
@@ -329,8 +331,21 @@ public sealed class SharcWriter : IDisposable
         if (rootPage == 0)
             throw new InvalidOperationException($"Table '{tableName}' not found.");
 
-        var mutator = tx.FetchMutator(usableSize);
-        long rowId = mutator.GetMaxRowId(rootPage) + 1;
+        // Detect INTEGER PRIMARY KEY (rowid alias):
+        // Use caller's explicit value as rowid; store NULL at IPK position in record.
+        int ipkOrdinal = FindIpkOrdinal(tableInfo, values.Length);
+        long rowId;
+        if (ipkOrdinal >= 0 && !values[ipkOrdinal].IsNull)
+        {
+            rowId = values[ipkOrdinal].AsInt64();
+            values[ipkOrdinal] = ColumnValue.Null();
+        }
+        else
+        {
+            rowId = tx.FetchMutator(usableSize).GetMaxRowId(rootPage) + 1;
+            if (ipkOrdinal >= 0)
+                values[ipkOrdinal] = ColumnValue.Null();
+        }
 
         // Encode the record
         int encodedSize = RecordEncoder.ComputeEncodedSize(values);
@@ -338,6 +353,7 @@ public sealed class SharcWriter : IDisposable
         RecordEncoder.EncodeRecord(values, recordBuf);
 
         // Insert into B-tree
+        var mutator = tx.FetchMutator(usableSize);
         uint newRoot = mutator.Insert(rootPage, rowId, recordBuf);
         tx.TrackRowMutation(tableName, rowId);
 
@@ -361,6 +377,11 @@ public sealed class SharcWriter : IDisposable
 
         if (tableInfo != null)
             values = ExpandMergedColumns(values, tableInfo);
+
+        // Nullify IPK column — rowid is already passed explicitly
+        int ipkOrdinal = FindIpkOrdinal(tableInfo, values.Length);
+        if (ipkOrdinal >= 0)
+            values[ipkOrdinal] = ColumnValue.Null();
 
         uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
         if (rootPage == 0)
@@ -413,6 +434,8 @@ public sealed class SharcWriter : IDisposable
 
     /// <summary>
     /// Core update: find table root → encode record → mutator.Update → update root if changed.
+    /// For tables with an INTEGER PRIMARY KEY column, NULL is stored at that position
+    /// in the record (the real value is the B-tree rowid, matching SQLite).
     /// </summary>
     internal static bool UpdateCore(Transaction tx, string tableName, long rowId, ColumnValue[] values,
         TableInfo? tableInfo = null, Dictionary<string, uint>? rootCache = null)
@@ -423,6 +446,11 @@ public sealed class SharcWriter : IDisposable
         // Expand merged GUID columns to physical hi/lo Int64 pairs
         if (tableInfo != null)
             values = ExpandMergedColumns(values, tableInfo);
+
+        // Nullify IPK column — rowid is already passed explicitly
+        int ipkOrdinal = FindIpkOrdinal(tableInfo, values.Length);
+        if (ipkOrdinal >= 0)
+            values[ipkOrdinal] = ColumnValue.Null();
 
         uint rootPage = FindTableRootPageCached(shadow, tableName, usableSize, rootCache);
         if (rootPage == 0)
@@ -469,6 +497,30 @@ public sealed class SharcWriter : IDisposable
         for (int i = 0; i < cols.Length; i++)
             cols[i] = table.Columns[i].Name;
         return cols;
+    }
+
+    /// <summary>
+    /// Finds the ordinal of the INTEGER PRIMARY KEY column (rowid alias), or -1 if none.
+    /// SQLite treats INTEGER PRIMARY KEY as an alias for the B-tree rowid: the caller's
+    /// explicit value becomes the rowid and NULL is stored at that position in the record.
+    /// Only returns a valid ordinal when the caller provides values for ALL columns
+    /// (including the IPK column). When the caller omits the IPK column (passes N-1
+    /// values for an N-column table), returns -1 to fall back to auto-rowid.
+    /// </summary>
+    private static int FindIpkOrdinal(TableInfo? tableInfo, int valueCount)
+    {
+        if (tableInfo == null) return -1;
+        var columns = tableInfo.Columns;
+        // Only apply IPK handling when the caller passes all columns.
+        // If they pass fewer values, they're omitting the IPK column (auto-rowid).
+        if (valueCount < columns.Count) return -1;
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].IsPrimaryKey &&
+                columns[i].DeclaredType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase))
+                return columns[i].Ordinal;
+        }
+        return -1;
     }
 
     /// <summary>
