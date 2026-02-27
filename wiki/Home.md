@@ -26,17 +26,18 @@ while (reader.Read())
 |------|-------------|
 | [Opening Databases](Opening-Databases) | `SharcDatabase.Open`, `OpenMemory`, `Create`, options |
 | [Reading Data](Reading-Data) | `SharcDataReader`, typed accessors, seek, projection |
-| [Querying Data](Querying-Data) | Sharq query language, parameterized queries, filters |
-| [Writing Data](Writing-Data) | `SharcWriter`, insert/update/delete, transactions |
+| [Querying Data](Querying-Data) | SQL queries, JOINs, UNION, GROUP BY, CTEs, prepared queries |
+| [Writing Data](Writing-Data) | `SharcWriter`, insert/update/delete/upsert, `PreparedWriter`, transactions |
 | [Schema Inspection](Schema-Inspection) | `SharcSchema`, `TableInfo`, `ColumnInfo`, `IndexInfo` |
-| [Graph Traversal](Graph-Traversal) | `SharcContextGraph`, BFS, edge cursors, `TraversalPolicy` |
+| [Graph Traversal](Graph-Traversal) | `SharcContextGraph`, BFS, Cypher, `GraphWriter`, algorithms |
 | [Encryption](Encryption) | AES-256-GCM, Argon2id KDF, encrypted databases |
 | [Trust Layer](Trust-Layer) | Agent registry, ledger, ECDSA attestation, entitlements |
 | [Views](Views) | Programmatic views, SubViews, SQLite view auto-promotion, SQL integration |
 | [JitSQL & Prepared](JitSQL-and-Prepared) | JitQuery, PreparedReader, execution hints, FilterStar |
-| [Vector Search](Vector-Search) | Embedding storage, similarity search, distance metrics |
+| [Vector Search](Vector-Search) | `HnswIndex`, `VectorQuery`, `HybridQuery`, SIMD distance |
 | [Performance Guide](Performance-Guide) | Zero-allocation patterns, benchmarks, best practices |
 | [AI Agent Reference](AI-Agent-Reference) | Complete copy-paste patterns for LLM coding assistants |
+| [Release History](Release-History) | NuGet versions, changelogs (1.0.0-beta → 1.2.80) |
 
 ## Installation
 

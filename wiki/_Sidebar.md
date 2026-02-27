@@ -20,3 +20,6 @@
 - [JitSQL & Prepared](JitSQL-and-Prepared)
 - [Performance Guide](Performance-Guide)
 - [AI Agent Reference](AI-Agent-Reference)
+
+**Project**
+- [Release History](Release-History)
