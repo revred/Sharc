@@ -3,13 +3,40 @@
 
 
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Sharc.Core.IO;
 
 /// <summary>
-/// LRU-cached wrapper around any <see cref="IPageSource"/>.
+/// CLOCK-based cached wrapper around any <see cref="IPageSource"/>.
 /// Rents buffers from <see cref="ArrayPool{T}.Shared"/> and returns them on eviction or dispose.
 /// </summary>
+/// <remarks>
+/// <para><b>Why CLOCK instead of LRU:</b>
+/// A traditional LRU cache uses a doubly-linked list and calls MoveToHead() on every cache hit,
+/// which mutates shared state. This forces an exclusive lock on every read — even pure cache hits —
+/// serializing all page access through a single contention point. ReaderWriterLockSlim doesn't help
+/// because every "read" is secretly a write (the linked list mutation).</para>
+///
+/// <para><b>CLOCK algorithm (second-chance eviction):</b>
+/// Each slot has a reference bit. On cache hit, we atomically set refBit=1 (Volatile.Write) with
+/// no lock at all. On cache miss, we take a lock and sweep a clock hand around the circular buffer:
+/// if refBit==1, clear it (second chance) and advance; if refBit==0, evict that slot.
+/// This gives near-LRU eviction quality — Linux and FreeBSD use CLOCK for their page caches.</para>
+///
+/// <para><b>Concurrency model:</b></para>
+/// <list type="bullet">
+///   <item>Cache hit (read): Lock-free — ConcurrentDictionary.TryGetValue + Volatile.Write of refBit</item>
+///   <item>Cache miss (load): Exclusive lock (_syncRoot) — clock sweep, evict, load from inner source</item>
+///   <item>Invalidate/WritePage: Exclusive lock (_syncRoot)</item>
+/// </list>
+///
+/// <para><b>New pages start with refBit=0 (unprotected):</b>
+/// A freshly loaded page must be accessed again (hit) to earn refBit=1 protection. This ensures
+/// pages that are accessed repeatedly survive eviction over pages that were loaded once and never
+/// revisited — matching the behavioral intent of LRU without linked list mutation.</para>
+/// </remarks>
 public sealed class CachedPageSource : IWritablePageSource
 {
     private readonly IPageSource _inner;
@@ -17,38 +44,35 @@ public sealed class CachedPageSource : IWritablePageSource
     private readonly PrefetchOptions? _prefetchOptions;
     private uint _lastAccessedPage;
     private int _sequentialCount;
-    private bool _disposed;
+    private volatile bool _disposed;
 
-    // Zero-allocation LRU Implementation
-    // We use a fixed-size array of entries and intrusive double-linked list using item indices.
-    // _entries[i] holds the data and metadata for slot i.
-    // _pageLookup maps PageNumber -> SlotIndex.
-    
+    // --- CLOCK data structures ---
+    // Fixed-size circular buffer. The clock hand sweeps slots during eviction.
+    // _refBits: 1 = recently accessed (survives one sweep), 0 = eviction candidate.
+    // _occupied: whether the slot currently holds a valid cached page.
     private readonly CacheSlot[] _slots;
-    
-    // Intrusive list pointers (indices)
-    private readonly int[] _prev;
-    private readonly int[] _next;
-    
-    // Dictionary for fast lookup. 
-    // Note: Dictionary<uint, int> does not allocate on Add/Remove if capacity is sufficient 
-    // and we reuse the same keys (page numbers). Effectively it stabilizes.
-    // For absolute zero-alloc, we could use a specialized IntMap, but standard Dictionary is usually fine
-    // after warm-up. Given we only store int, it's efficient.
-    private readonly Dictionary<uint, int> _lookup;
-    
-    // List head/tail identifiers
-    private int _head;
-    private int _tail;
-    private int _count;
-    private readonly Stack<int> _freeSlots; // Stores indices of unused slots
+    private readonly byte[] _refBits;
+    private readonly bool[] _occupied;
+    private int _clockHand;                 // current position in the circular sweep
+    private int _slotCount;                 // number of occupied slots (≤ _capacity)
+
+    // ConcurrentDictionary enables lock-free TryGetValue on the hit path.
+    // Mutations (TryAdd/TryRemove) only happen under _syncRoot during miss/evict/invalidate.
+    private readonly ConcurrentDictionary<uint, int> _lookup;
+
+    // Only the miss path, invalidation, and writes acquire this lock.
+    // The hot path (cache hit) never touches it.
     private readonly object _syncRoot = new();
 
+    // Interlocked counters — hit counting happens outside the lock on the hit path.
+    private int _cacheHitCount;
+    private int _cacheMissCount;
+
     /// <summary>Number of cache hits since creation.</summary>
-    public int CacheHitCount { get; private set; }
+    public int CacheHitCount => Volatile.Read(ref _cacheHitCount);
 
     /// <summary>Number of cache misses since creation.</summary>
-    public int CacheMissCount { get; private set; }
+    public int CacheMissCount => Volatile.Read(ref _cacheMissCount);
 
     /// <summary>Number of slots that have had a buffer rented (demand-driven). For test observability.</summary>
     internal int AllocatedSlotCount { get; private set; }
@@ -63,7 +87,7 @@ public sealed class CachedPageSource : IWritablePageSource
     public long DataVersion => (_inner as IWritablePageSource)?.DataVersion ?? 0;
 
     /// <summary>
-    /// Wraps an inner page source with an LRU cache of the given capacity.
+    /// Wraps an inner page source with a CLOCK cache of the given capacity.
     /// </summary>
     /// <param name="inner">The underlying page source.</param>
     /// <param name="capacity">Maximum number of pages to cache. 0 disables caching.</param>
@@ -73,7 +97,7 @@ public sealed class CachedPageSource : IWritablePageSource
     }
 
     /// <summary>
-    /// Wraps an inner page source with an LRU cache and optional sequential read-ahead prefetch.
+    /// Wraps an inner page source with a CLOCK cache and optional sequential read-ahead prefetch.
     /// </summary>
     /// <param name="inner">The underlying page source.</param>
     /// <param name="capacity">Maximum number of pages to cache. 0 disables caching.</param>
@@ -86,33 +110,22 @@ public sealed class CachedPageSource : IWritablePageSource
         _inner = inner;
         _capacity = capacity;
         _prefetchOptions = prefetchOptions;
-        
+
         if (capacity > 0)
         {
             _slots = new CacheSlot[capacity];
-            _prev = new int[capacity];
-            _next = new int[capacity];
-            _lookup = new Dictionary<uint, int>(capacity);
-            _freeSlots = new Stack<int>(capacity);
-            
-            // Demand-driven: only slot metadata is pre-allocated.
-            // Capacity is a maximum, not a reservation.
-            // Page buffers (byte[]) are rented on first use in AllocateSlot().
-            for (int i = 0; i < capacity; i++)
-            {
-                _freeSlots.Push(i);
-            }
-            
-            _head = -1;
-            _tail = -1;
+            _refBits = new byte[capacity];
+            _occupied = new bool[capacity];
+            _lookup = new ConcurrentDictionary<uint, int>(Environment.ProcessorCount, capacity);
+            _clockHand = 0;
+            _slotCount = 0;
         }
         else
         {
             _slots = Array.Empty<CacheSlot>();
-            _prev = Array.Empty<int>();
-            _next = Array.Empty<int>();
-            _lookup = new Dictionary<uint, int>();
-            _freeSlots = new Stack<int>();
+            _refBits = Array.Empty<byte>();
+            _occupied = Array.Empty<bool>();
+            _lookup = new ConcurrentDictionary<uint, int>();
         }
     }
 
@@ -124,30 +137,44 @@ public sealed class CachedPageSource : IWritablePageSource
         if (_capacity == 0)
             return _inner.GetPage(pageNumber);
 
+        // --- Lock-free hit path ---
+        // ConcurrentDictionary.TryGetValue is lock-free. If the page is cached,
+        // we just mark its reference bit (earning eviction protection) and return.
+        // No linked list mutation, no lock, no contention — this is the critical
+        // improvement over the previous LRU design.
+        if (_lookup.TryGetValue(pageNumber, out int slotIndex))
+        {
+            Volatile.Write(ref _refBits[slotIndex], 1); // earn eviction protection
+            Interlocked.Increment(ref _cacheHitCount);
+            return _slots[slotIndex].Data.AsSpan(0, PageSize);
+        }
+
+        // --- Miss path — exclusive lock required for eviction + I/O ---
         lock (_syncRoot)
         {
-            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
+            // Double-check: another thread may have loaded this page while we waited for the lock.
+            if (_lookup.TryGetValue(pageNumber, out slotIndex))
             {
-                // Hit
-                MoveToHead(slotIndex);
-                CacheHitCount++;
+                Volatile.Write(ref _refBits[slotIndex], 1);
+                Interlocked.Increment(ref _cacheHitCount);
                 UpdateSequentialTracking(pageNumber);
                 return _slots[slotIndex].Data.AsSpan(0, PageSize);
             }
 
-            // Miss
-            CacheMissCount++;
+            Interlocked.Increment(ref _cacheMissCount);
             int slot = AllocateSlot();
 
-            // Load data
             _inner.ReadPage(pageNumber, _slots[slot].Data);
             _slots[slot].PageNumber = pageNumber;
+            _occupied[slot] = true;
 
-            // Add to head and lookup
-            AddFirst(slot);
+            // New pages start with refBit=0 (unprotected). They must be accessed again
+            // (cache hit) to earn refBit=1 and survive the next clock sweep. This ensures
+            // pages accessed repeatedly are retained over pages loaded once and never revisited.
+            _refBits[slot] = 0;
+
             _lookup[pageNumber] = slot;
 
-            // Sequential access detection and prefetch
             TryPrefetch(pageNumber);
 
             return _slots[slot].Data.AsSpan(0, PageSize);
@@ -157,7 +184,7 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <summary>
     /// Returns a <see cref="ReadOnlyMemory{T}"/> over the cached page buffer.
     /// Unlike the default interface method, this does not allocate — it wraps the existing cache buffer.
-    /// The memory is valid as long as the page remains in the LRU cache.
+    /// The memory is valid as long as the page remains in the cache.
     /// </summary>
     public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
     {
@@ -166,25 +193,35 @@ public sealed class CachedPageSource : IWritablePageSource
         if (_capacity == 0)
             return _inner.GetPageMemory(pageNumber);
 
+        // Lock-free hit path (see GetPage for detailed explanation)
+        if (_lookup.TryGetValue(pageNumber, out int slotIndex))
+        {
+            Volatile.Write(ref _refBits[slotIndex], 1);
+            Interlocked.Increment(ref _cacheHitCount);
+            return _slots[slotIndex].Data.AsMemory(0, PageSize);
+        }
+
+        // Miss path — exclusive lock for eviction + I/O
         lock (_syncRoot)
         {
-            int slotIndex;
+            // Double-check after acquiring lock
             if (_lookup.TryGetValue(pageNumber, out slotIndex))
             {
-                MoveToHead(slotIndex);
-                CacheHitCount++;
+                Volatile.Write(ref _refBits[slotIndex], 1);
+                Interlocked.Increment(ref _cacheHitCount);
                 UpdateSequentialTracking(pageNumber);
+                return _slots[slotIndex].Data.AsMemory(0, PageSize);
             }
-            else
-            {
-                CacheMissCount++;
-                slotIndex = AllocateSlot();
-                _inner.ReadPage(pageNumber, _slots[slotIndex].Data);
-                _slots[slotIndex].PageNumber = pageNumber;
-                AddFirst(slotIndex);
-                _lookup[pageNumber] = slotIndex;
-                TryPrefetch(pageNumber);
-            }
+
+            Interlocked.Increment(ref _cacheMissCount);
+            slotIndex = AllocateSlot();
+            _inner.ReadPage(pageNumber, _slots[slotIndex].Data);
+            _slots[slotIndex].PageNumber = pageNumber;
+            _occupied[slotIndex] = true;
+            _refBits[slotIndex] = 0; // unprotected until next hit (see GetPage comments)
+
+            _lookup[pageNumber] = slotIndex;
+            TryPrefetch(pageNumber);
 
             return _slots[slotIndex].Data.AsMemory(0, PageSize);
         }
@@ -204,11 +241,11 @@ public sealed class CachedPageSource : IWritablePageSource
 
         lock (_syncRoot)
         {
-            if (_lookup.TryGetValue(pageNumber, out int slot))
+            if (_lookup.TryRemove(pageNumber, out int slot))
             {
-                _lookup.Remove(pageNumber);
-                RemoveNode(slot);
-                
+                _occupied[slot] = false;
+                _refBits[slot] = 0;
+
                 // Return buffer to pool
                 if (_slots[slot].Data != null)
                 {
@@ -216,11 +253,10 @@ public sealed class CachedPageSource : IWritablePageSource
                     _slots[slot].Data = null!;
                     AllocatedSlotCount--;
                 }
-                
-                _freeSlots.Push(slot);
-                _count--;
+
+                _slotCount--;
             }
-            
+
             _inner.Invalidate(pageNumber);
         }
     }
@@ -236,7 +272,7 @@ public sealed class CachedPageSource : IWritablePageSource
             if (_capacity > 0 && _lookup.TryGetValue(pageNumber, out int slot))
             {
                 source.CopyTo(_slots[slot].Data);
-                MoveToHead(slot);
+                Volatile.Write(ref _refBits[slot], 1);
             }
 
             // A write breaks sequential read-ahead patterns.
@@ -278,80 +314,77 @@ public sealed class CachedPageSource : IWritablePageSource
                 }
             }
         }
-        
+
         _inner.Dispose();
     }
 
-    // --- Linked List Helpers ---
+    // --- CLOCK Eviction ---
+    //
+    // The CLOCK algorithm treats _slots as a circular buffer with a sweeping hand.
+    // It approximates LRU with O(1) amortized eviction and no per-access mutation:
+    //
+    //   [slot 0] [slot 1] [slot 2] ... [slot N-1]
+    //       ^
+    //       |__ _clockHand
+    //
+    // Eviction sweep:
+    //   1. Look at the slot under the clock hand
+    //   2. If refBit == 1: clear it to 0 (give a "second chance"), advance hand
+    //   3. If refBit == 0: evict this slot, reuse its buffer, advance hand
+    //   4. Repeat until a victim is found
+    //
+    // Pages that are accessed frequently keep getting their refBit reset to 1,
+    // surviving multiple sweeps. Pages accessed once (refBit stays 0) are evicted first.
 
-    private void MoveToHead(int slot)
+    /// <summary>
+    /// Allocates a cache slot. If the cache is not full, uses the next empty slot (demand-driven).
+    /// If full, sweeps the clock hand to find an eviction victim.
+    /// Must be called under _syncRoot.
+    /// </summary>
+    private int AllocateSlot()
     {
-        if (slot == _head) return;
-        RemoveNode(slot);
-        AddFirst(slot);
-    }
-
-    private void AddFirst(int slot)
-    {
-        if (_head == -1)
+        if (_slotCount < _capacity)
         {
-            _head = slot;
-            _tail = slot;
-            _prev[slot] = -1;
-            _next[slot] = -1;
+            // Cache not yet full — find an unoccupied slot.
+            // Buffers are rented on first use (demand-driven), not pre-allocated at construction.
+            for (int i = 0; i < _capacity; i++)
+            {
+                int candidate = (_clockHand + i) % _capacity;
+                if (!_occupied[candidate])
+                {
+                    _slotCount++;
+                    if (_slots[candidate].Data is null)
+                    {
+                        _slots[candidate].Data = ArrayPool<byte>.Shared.Rent(_inner.PageSize);
+                        AllocatedSlotCount++;
+                    }
+                    return candidate;
+                }
+            }
         }
-        else
+
+        // Cache is full — CLOCK sweep to find eviction victim.
+        while (true)
         {
-            _prev[slot] = -1;
-            _next[slot] = _head;
-            _prev[_head] = slot;
-            _head = slot;
+            int hand = _clockHand;
+            _clockHand = (hand + 1) % _capacity;
+
+            if (Volatile.Read(ref _refBits[hand]) == 0)
+            {
+                // refBit == 0: this page wasn't accessed since the last sweep — evict it.
+                var victimPage = _slots[hand].PageNumber;
+                _lookup.TryRemove(victimPage, out _);
+                // Buffer is reused in-place (no dealloc/realloc).
+                return hand;
+            }
+
+            // refBit == 1: page was accessed recently — give it a second chance.
+            // Clear the bit so it will be evicted on the next sweep unless accessed again.
+            _refBits[hand] = 0;
         }
-    }
-
-    private void RemoveNode(int slot)
-    {
-        int p = _prev[slot];
-        int n = _next[slot];
-
-        if (p != -1) _next[p] = n;
-        else _head = n;
-
-        if (n != -1) _prev[n] = p;
-        else _tail = p;
-        
-        _prev[slot] = -1;
-        _next[slot] = -1;
     }
 
     // --- Prefetch Helpers ---
-
-    /// <summary>Allocates a cache slot, evicting LRU if full. Must be called under _syncRoot.</summary>
-    private int AllocateSlot()
-    {
-        if (_count < _capacity)
-        {
-            int slot = _freeSlots.Pop();
-            _count++;
-            // Demand-driven: rent buffer on first use.
-            // Capacity is a maximum, not a reservation.
-            if (_slots[slot].Data is null)
-            {
-                _slots[slot].Data = ArrayPool<byte>.Shared.Rent(_inner.PageSize);
-                AllocatedSlotCount++;
-            }
-            return slot;
-        }
-        else
-        {
-            // Eviction: reuse the existing buffer from the LRU tail (already rented).
-            int slot = _tail;
-            var victimPage = _slots[slot].PageNumber;
-            _lookup.Remove(victimPage);
-            RemoveNode(slot);
-            return slot;
-        }
-    }
 
     /// <summary>Updates sequential access tracking. Must be called under _syncRoot.</summary>
     private void UpdateSequentialTracking(uint pageNumber)
@@ -387,13 +420,18 @@ public sealed class CachedPageSource : IWritablePageSource
             if (_lookup.ContainsKey(prefetchPage))
                 continue;
 
-            CacheMissCount++;
+            Interlocked.Increment(ref _cacheMissCount);
             int slot = AllocateSlot();
 
             _inner.ReadPage(prefetchPage, _slots[slot].Data);
             _slots[slot].PageNumber = prefetchPage;
+            _occupied[slot] = true;
+            // Prefetched pages start unprotected (refBit=0). If the caller actually reads
+            // them, the hit path sets refBit=1 and they earn eviction protection. If never
+            // accessed, they're first to be evicted — prefetch speculation shouldn't displace
+            // actively-used pages.
+            _refBits[slot] = 0;
 
-            AddFirst(slot);
             _lookup[prefetchPage] = slot;
         }
     }
