@@ -62,8 +62,9 @@ internal static class HnswGraphBuilder
 
     /// <summary>
     /// Inserts a single node into the graph (Algorithm 1).
+    /// Used during initial build and for incremental post-build insertion.
     /// </summary>
-    private static void InsertNode(
+    internal static void InsertNode(
         HnswGraph graph,
         int newNode,
         IVectorResolver resolver,

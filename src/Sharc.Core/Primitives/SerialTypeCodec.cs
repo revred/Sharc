@@ -33,9 +33,17 @@ public static class SerialTypeCodec
         if ((ulong)serialType <= 9)
             return FixedSizes[(int)serialType];
 
-        // Variable-length BLOB (even >=12) or TEXT (odd >=13) — same formula
+        // Variable-length BLOB (even >=12) or TEXT (odd >=13) — same formula.
+        // Guard against overflow: the unchecked (int) cast of a huge serial type
+        // would produce a negative or nonsensical content size.
         if (serialType >= 12)
-            return (int)((serialType - 12) / 2);
+        {
+            long size = (serialType - 12) / 2;
+            if (size > int.MaxValue)
+                throw new ArgumentOutOfRangeException(nameof(serialType),
+                    serialType, $"Serial type implies content size {size} which exceeds int.MaxValue.");
+            return (int)size;
+        }
 
         throw new ArgumentOutOfRangeException(nameof(serialType),
             serialType, "Reserved serial types 10 and 11 are not used.");

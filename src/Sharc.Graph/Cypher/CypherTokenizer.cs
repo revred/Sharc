@@ -115,7 +115,10 @@ internal ref struct CypherTokenizer
         long value = 0;
         while (_pos < _input.Length && char.IsAsciiDigit(_input[_pos]))
         {
-            value = value * 10 + (_input[_pos] - '0');
+            long next = value * 10 + (_input[_pos] - '0');
+            if (next < value) // overflow: wrapped negative
+                throw new FormatException($"Integer literal at position {start} overflows Int64.");
+            value = next;
             _pos++;
         }
         return new CypherToken(CypherTokenKind.Integer, start, _pos - start, value);

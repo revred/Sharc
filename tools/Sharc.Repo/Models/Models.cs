@@ -32,3 +32,24 @@ public sealed record GitCommitRecord(
 
 public sealed record GitFileChangeRecord(
     long CommitId, string Path, int LinesAdded, int LinesDeleted);
+
+// ── Knowledge Graph records ──────────────────────────────────────
+
+public sealed record FeatureRecord(
+    string Name, string? Description, string Layer,
+    string Status, long CreatedAt,
+    IDictionary<string, object?>? Metadata);
+
+public sealed record FeatureEdgeRecord(
+    string FeatureName, string TargetPath, string TargetKind,
+    string? Role, bool AutoDetected, long CreatedAt,
+    IDictionary<string, object?>? Metadata);
+
+public sealed record FilePurposeRecord(
+    string Path, string Purpose, string Project,
+    string? Namespace, string? Layer, bool AutoDetected,
+    long CreatedAt, IDictionary<string, object?>? Metadata);
+
+public sealed record FileDepRecord(
+    string SourcePath, string TargetPath, string DepKind,
+    bool AutoDetected, long CreatedAt);

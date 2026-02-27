@@ -72,48 +72,61 @@ internal sealed class BTreeMutator : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Build the cell bytes
+        // Build the cell bytes — stackalloc for typical small cells, ArrayPool for large ones.
         int cellSize = CellBuilder.ComputeTableLeafCellSize(rowId, recordPayload.Length, _usablePageSize);
-        byte[] cellArray = new byte[cellSize];
-        CellBuilder.BuildTableLeafCell(rowId, recordPayload, cellArray, _usablePageSize);
-
-        // If the record overflows, write overflow pages and patch the cell's pointer
-        int inlineSize = CellParser.CalculateInlinePayloadSize(recordPayload.Length, _usablePageSize);
-        if (inlineSize < recordPayload.Length)
+        byte[]? rentedCell = cellSize > 512
+            ? ArrayPool<byte>.Shared.Rent(cellSize)
+            : null;
+        try
         {
-            _overflowWriter.WriteOverflowChain(cellArray.AsSpan(0, cellSize), recordPayload, inlineSize);
-        }
+            Span<byte> cellBuf = rentedCell != null
+                ? rentedCell.AsSpan(0, cellSize)
+                : stackalloc byte[cellSize];
 
-        ReadOnlySpan<byte> cellBytes = cellArray.AsSpan(0, cellSize);
-
-        // Navigate from root to the correct leaf, collecting the ancestor path.
-        // Max B-tree depth for SQLite is ~20 (4096-byte pages, min 2 keys per interior page).
-        Span<InsertPathEntry> path = stackalloc InsertPathEntry[20];
-        int pathCount = 0;
-        uint currentPage = rootPage;
-
-        while (true)
-        {
-            var page = ReadPageBuffer(currentPage);
-            int hdrOff = currentPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
-            var hdr = BTreePageHeader.Parse(page.AsSpan(hdrOff));
-
-            if (hdr.IsLeaf)
+            // If the record overflows, write overflow pages and patch the cell's pointer
+            CellBuilder.BuildTableLeafCell(rowId, recordPayload, cellBuf, _usablePageSize);
+            int inlineSize = CellParser.CalculateInlinePayloadSize(recordPayload.Length, _usablePageSize);
+            if (inlineSize < recordPayload.Length)
             {
-                // Binary search for insertion point
-                int insertIdx = FindLeafInsertionPoint(page, hdrOff, hdr, rowId);
-                path[pathCount++] = new InsertPathEntry(currentPage, insertIdx);
-                break;
+                _overflowWriter.WriteOverflowChain(cellBuf, recordPayload, inlineSize);
             }
 
-            // Interior page — binary search for child
-            int childIdx = FindInteriorChild(page, hdrOff, hdr, rowId, out uint childPage);
-            path[pathCount++] = new InsertPathEntry(currentPage, childIdx);
-            currentPage = childPage;
-        }
+            ReadOnlySpan<byte> cellBytes = cellBuf;
 
-        // Insert into the leaf (last element in path). Splits propagate upward.
-        return InsertCellAndSplit(path[..pathCount], pathCount - 1, cellBytes, rowId, rootPage);
+            // Navigate from root to the correct leaf, collecting the ancestor path.
+            // Max B-tree depth for SQLite is ~20 (4096-byte pages, min 2 keys per interior page).
+            Span<InsertPathEntry> path = stackalloc InsertPathEntry[20];
+            int pathCount = 0;
+            uint currentPage = rootPage;
+
+            while (true)
+            {
+                var page = ReadPageBuffer(currentPage);
+                int hdrOff = currentPage == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+                var hdr = BTreePageHeader.Parse(page.AsSpan(hdrOff));
+
+                if (hdr.IsLeaf)
+                {
+                    // Binary search for insertion point
+                    int insertIdx = FindLeafInsertionPoint(page, hdrOff, hdr, rowId);
+                    path[pathCount++] = new InsertPathEntry(currentPage, insertIdx);
+                    break;
+                }
+
+                // Interior page — binary search for child
+                int childIdx = FindInteriorChild(page, hdrOff, hdr, rowId, out uint childPage);
+                path[pathCount++] = new InsertPathEntry(currentPage, childIdx);
+                currentPage = childPage;
+            }
+
+            // Insert into the leaf (last element in path). Splits propagate upward.
+            return InsertCellAndSplit(path[..pathCount], pathCount - 1, cellBytes, rowId, rootPage);
+        }
+        finally
+        {
+            if (rentedCell != null)
+                ArrayPool<byte>.Shared.Return(rentedCell);
+        }
     }
 
     /// <summary>
@@ -388,8 +401,28 @@ internal sealed class BTreeMutator : IDisposable
             // Root split with retention:
             uint newLeftPage = AllocateNewPage();
 
-            var leftContent = ReadPageBuffer(pageNum);
-            WritePageBuffer(newLeftPage, leftContent);
+            // CRITICAL: When splitting root on page 1, the left content contains the
+            // 100-byte database header at offset 0. The B-tree data starts at offset 100.
+            // The new left page is a normal page (not page 1), so its B-tree data must
+            // start at offset 0. Rebuild it rather than copying verbatim.
+            if (pageNum == 1 && isLeaf)
+            {
+                var leftBuf = RentPageBuffer();
+                _rewriter.BuildLeafPage(leftBuf, 0, cellBuf, cells[..(splitIdx + 1)]);
+                WritePageBuffer(newLeftPage, leftBuf);
+            }
+            else if (pageNum == 1 && !isLeaf)
+            {
+                CellParser.ParseTableInteriorCell(medianSpan, out uint leftChild, out _);
+                var leftBuf = RentPageBuffer();
+                _rewriter.BuildInteriorPage(leftBuf, 0, cellBuf, cells[..splitIdx], leftChild);
+                WritePageBuffer(newLeftPage, leftBuf);
+            }
+            else
+            {
+                var leftContent = ReadPageBuffer(pageNum);
+                WritePageBuffer(newLeftPage, leftContent);
+            }
 
             var rootBuf = RentPageBuffer();
 
@@ -505,9 +538,14 @@ internal sealed class BTreeMutator : IDisposable
     }
 
     /// <summary>
-    /// Allocates a new page, first trying the freelist, then extending the file.
+    /// Allocates a new page initialized as a leaf table page.
     /// </summary>
-    internal uint AllocateNewPage()
+    internal uint AllocateNewPage() => AllocateNewPage(BTreePageType.LeafTable);
+
+    /// <summary>
+    /// Allocates a new page with the specified B-tree page type, first trying the freelist, then extending the file.
+    /// </summary>
+    internal uint AllocateNewPage(BTreePageType pageType)
     {
         uint page = _freePageAllocator?.Invoke() ?? 0;
 
@@ -516,7 +554,7 @@ internal sealed class BTreeMutator : IDisposable
 
         var buf = RentPageBuffer();
         var hdr = new BTreePageHeader(
-            BTreePageType.LeafTable, 0, 0,
+            pageType, 0, 0,
             (ushort)_usablePageSize, 0, 0
         );
         BTreePageHeader.Write(buf, hdr);

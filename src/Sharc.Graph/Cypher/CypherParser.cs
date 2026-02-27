@@ -165,7 +165,7 @@ internal ref struct CypherParser
             }
             else if (_current.Kind == CypherTokenKind.Integer)
             {
-                rel.Kind = (int)_current.IntegerValue;
+                rel.Kind = SafeCastToInt(_current.IntegerValue, "kind");
                 Advance();
             }
         }
@@ -181,14 +181,14 @@ internal ref struct CypherParser
                 Advance();
                 if (_current.Kind == CypherTokenKind.Integer)
                 {
-                    rel.MaxHops = (int)_current.IntegerValue;
+                    rel.MaxHops = SafeCastToInt(_current.IntegerValue, "max hops");
                     Advance();
                 }
             }
             else if (_current.Kind == CypherTokenKind.Integer)
             {
                 // *N shorthand
-                rel.MaxHops = (int)_current.IntegerValue;
+                rel.MaxHops = SafeCastToInt(_current.IntegerValue, "max hops");
                 Advance();
             }
         }
@@ -271,6 +271,16 @@ internal ref struct CypherParser
     {
         Advance();
         return true;
+    }
+
+    /// <summary>
+    /// Safely casts a long integer value to int, throwing FormatException on overflow.
+    /// </summary>
+    private static int SafeCastToInt(long value, string context)
+    {
+        if (value < int.MinValue || value > int.MaxValue)
+            throw new FormatException($"Value {value} for {context} exceeds Int32 range.");
+        return (int)value;
     }
 
     /// <summary>

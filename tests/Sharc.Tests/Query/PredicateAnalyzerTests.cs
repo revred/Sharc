@@ -368,7 +368,7 @@ public class PredicateAnalyzerTests
         Assert.Equal(1.5, conditions[0].RealHighValue);
     }
 
-    private static IReadOnlyList<ColumnInfo> MakeColumns(params string[] names)
+    private static ColumnInfo[] MakeColumns(params string[] names)
     {
         var columns = new ColumnInfo[names.Length];
         for (int i = 0; i < names.Length; i++)

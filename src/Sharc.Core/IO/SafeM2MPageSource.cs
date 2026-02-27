@@ -88,7 +88,7 @@ public sealed class SafeM2MPageSource : IPageSource
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ValidatePageNumber(pageNumber);
-        int offset = (int)(pageNumber - 1) * PageSize;
+        int offset = checked((int)(pageNumber - 1) * PageSize);
         return _memory.Span.Slice(offset, PageSize);
     }
 
@@ -97,7 +97,7 @@ public sealed class SafeM2MPageSource : IPageSource
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ValidatePageNumber(pageNumber);
-        int offset = (int)(pageNumber - 1) * PageSize;
+        int offset = checked((int)(pageNumber - 1) * PageSize);
         return _memory.Slice(offset, PageSize);
     }
 

@@ -17,18 +17,22 @@ public enum VectorExecutionStrategy
     /// <summary>Filter-aware HNSW widening over a precomputed allow-list.</summary>
     HnswPostFilterWidening = 3,
     /// <summary>Radius search via HNSW widening with optional exact fallback.</summary>
-    HnswWithinDistanceWidening = 4
+    HnswWithinDistanceWidening = 4,
+    /// <summary>HNSW candidate generation followed by exact reranking via custom scorer.</summary>
+    HnswReranked = 5
 }
 
 /// <summary>
 /// Lightweight execution diagnostics for vector query planning and benchmarking.
+/// <see cref="ElapsedMs"/> captures wall-clock elapsed time in milliseconds (0 if not measured).
 /// </summary>
 public readonly record struct VectorExecutionInfo(
     VectorExecutionStrategy Strategy,
     int CandidateCount,
     int RequestedK,
     int ReturnedCount,
-    bool UsedFallbackScan)
+    bool UsedFallbackScan,
+    double ElapsedMs = 0)
 {
     /// <summary>Default diagnostics before any search is executed.</summary>
     public static VectorExecutionInfo None => new(
@@ -36,5 +40,6 @@ public readonly record struct VectorExecutionInfo(
         CandidateCount: 0,
         RequestedK: 0,
         ReturnedCount: 0,
-        UsedFallbackScan: false);
+        UsedFallbackScan: false,
+        ElapsedMs: 0);
 }

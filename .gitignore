@@ -24,3 +24,5 @@ Certificates/
 # 3rdparty build artifacts (db rebuild infra [C/C++] + build output)
 3rdParty/arangodb/src
 3rdParty/arangodb/out
+
+.sharc/

@@ -1,9 +1,11 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using Sharc.Core.Trust;
 using Sharc.Trust;
 using Sharc.Vector.Hnsw;
+using Sharc.Views;
 
 namespace Sharc.Vector;
 
@@ -24,6 +26,7 @@ public sealed class VectorQuery : IDisposable
 {
     private SharcDatabase? _db;
     private readonly JitQuery _innerJit;
+    private readonly string _tableName;
     private readonly string _vectorColumnName;
     private readonly int _dimensions;
     private readonly DistanceMetric _metric;
@@ -32,12 +35,14 @@ public sealed class VectorQuery : IDisposable
     internal VectorQuery(
         SharcDatabase db,
         JitQuery innerJit,
+        string tableName,
         string vectorColumnName,
         int dimensions,
         DistanceMetric metric)
     {
         _db = db;
         _innerJit = innerJit;
+        _tableName = tableName;
         _vectorColumnName = vectorColumnName;
         _dimensions = dimensions;
         _metric = metric;
@@ -163,6 +168,8 @@ public sealed class VectorQuery : IDisposable
         ValidateDimensions(queryVector);
         EnforceAgentAccess(columnNames);
 
+        long startTimestamp = Stopwatch.GetTimestamp();
+
         if (options.ForceFlatScan)
         {
             var forcedFlat = FlatScanNearestTo(queryVector, k, columnNames, out int forcedScannedRows);
@@ -171,7 +178,8 @@ public sealed class VectorQuery : IDisposable
                 CandidateCount: forcedScannedRows,
                 RequestedK: k,
                 ReturnedCount: forcedFlat.Count,
-                UsedFallbackScan: false);
+                UsedFallbackScan: false,
+                ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             return forcedFlat;
         }
 
@@ -186,7 +194,8 @@ public sealed class VectorQuery : IDisposable
                 CandidateCount: _hnswIndex.Count,
                 RequestedK: k,
                 ReturnedCount: result.Count,
-                UsedFallbackScan: false);
+                UsedFallbackScan: false,
+                ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             return result;
         }
 
@@ -200,14 +209,17 @@ public sealed class VectorQuery : IDisposable
                 CandidateCount: _hnswIndex.Count,
                 RequestedK: k,
                 ReturnedCount: enriched.Count,
-                UsedFallbackScan: false);
+                UsedFallbackScan: false,
+                ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             return enriched;
         }
 
         // Filter-aware HNSW path: build filtered allow-list then widen ANN candidates.
         if (_hnswIndex != null && _innerJit.HasActiveFilters && !_innerJit.HasRowAccessEvaluator)
         {
-            return IndexedPostFilterNearestTo(queryVector, k, options, columnNames);
+            var indexed = IndexedPostFilterNearestTo(queryVector, k, options, columnNames);
+            StampElapsed(startTimestamp);
+            return indexed;
         }
 
         // Flat scan path (no HNSW index or row evaluator active).
@@ -217,8 +229,182 @@ public sealed class VectorQuery : IDisposable
             CandidateCount: scannedRows,
             RequestedK: k,
             ReturnedCount: flat.Count,
-            UsedFallbackScan: false);
+            UsedFallbackScan: false,
+            ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         return flat;
+    }
+
+    /// <summary>
+    /// Returns the K nearest neighbors using ANN candidate generation from HNSW,
+    /// then reranks candidates using a custom scorer for exact results.
+    /// Falls back to flat scan with scorer when no HNSW index is attached.
+    /// </summary>
+    /// <param name="queryVector">The query vector (must match configured dimensions).</param>
+    /// <param name="k">Number of nearest neighbors to return.</param>
+    /// <param name="rerankScorer">Custom scorer applied to ANN candidates. Lower scores are better.</param>
+    /// <param name="oversampleFactor">Multiplier for HNSW candidate count (default: 4). More candidates = better recall.</param>
+    /// <param name="columnNames">Column names to project for the scorer and returned metadata.</param>
+    public VectorSearchResult NearestTo(
+        ReadOnlySpan<float> queryVector, int k,
+        Func<IRowAccessor, double> rerankScorer,
+        int oversampleFactor = 4,
+        params string[] columnNames)
+    {
+        ThrowIfDisposed();
+        ValidateDimensions(queryVector);
+        EnforceAgentAccess(columnNames);
+        ArgumentNullException.ThrowIfNull(rerankScorer);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(k, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(oversampleFactor, 0);
+
+        long startTimestamp = Stopwatch.GetTimestamp();
+
+        // Guard against integer overflow: k * oversampleFactor must fit in int
+        long candidateKLong = (long)k * oversampleFactor;
+        int candidateK = candidateKLong > int.MaxValue
+            ? int.MaxValue
+            : (int)candidateKLong;
+
+        if (_hnswIndex == null)
+        {
+            // No index — flat scan with custom scorer
+            var flat = FlatScanWithRerank(k, rerankScorer, columnNames, out int scannedRows);
+            LastExecutionInfo = new VectorExecutionInfo(
+                Strategy: VectorExecutionStrategy.FlatScan,
+                CandidateCount: scannedRows,
+                RequestedK: k,
+                ReturnedCount: flat.Count,
+                UsedFallbackScan: true,
+                ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            return flat;
+        }
+
+        // Phase 1: Get ANN candidates (oversampled)
+        var annCandidates = _hnswIndex.Search(queryVector, candidateK);
+
+        // Phase 2: Rerank via custom scorer — seek each candidate and score
+        var reranked = new List<(long RowId, double Score, IReadOnlyDictionary<string, object?>? Meta)>(
+            annCandidates.Count);
+
+        string[] allColumns = columnNames.Length > 0 ? columnNames : Array.Empty<string>();
+
+        using (var jit = _db!.Jit(_tableName))
+        {
+            using var reader = jit.Query(allColumns);
+            for (int i = 0; i < annCandidates.Count; i++)
+            {
+                long rowId = annCandidates[i].RowId;
+                if (!reader.Seek(rowId))
+                    continue;
+
+                double score = rerankScorer(reader);
+                IReadOnlyDictionary<string, object?>? meta = null;
+                if (columnNames.Length > 0)
+                    meta = ExtractMetadataDirectProjection(reader, columnNames);
+                reranked.Add((rowId, score, meta));
+            }
+        }
+
+        // Phase 3: Select top-K from reranked candidates (lower score = better)
+        reranked.Sort((a, b) => a.Score.CompareTo(b.Score));
+        int resultCount = Math.Min(k, reranked.Count);
+        var matches = new List<VectorMatch>(resultCount);
+        for (int i = 0; i < resultCount; i++)
+        {
+            var (rowId, score, meta) = reranked[i];
+            matches.Add(new VectorMatch(rowId, (float)score, meta));
+        }
+
+        LastExecutionInfo = new VectorExecutionInfo(
+            Strategy: VectorExecutionStrategy.HnswReranked,
+            CandidateCount: annCandidates.Count,
+            RequestedK: k,
+            ReturnedCount: matches.Count,
+            UsedFallbackScan: false,
+            ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+
+        return new VectorSearchResult(matches);
+    }
+
+    /// <summary>Flat scan reranking fallback when no HNSW index is available.</summary>
+    private VectorSearchResult FlatScanWithRerank(
+        int k, Func<IRowAccessor, double> scorer, string[] columnNames, out int scannedRows)
+    {
+        scannedRows = 0;
+        var heap = new (long RowId, double Score, IReadOnlyDictionary<string, object?>? Meta)[k];
+        int count = 0;
+
+        using var reader = _innerJit.Query(columnNames);
+        while (reader.Read())
+        {
+            scannedRows++;
+            double score = scorer(reader);
+
+            if (count < k)
+            {
+                IReadOnlyDictionary<string, object?>? meta = columnNames.Length > 0
+                    ? ExtractMetadataDirectProjection(reader, columnNames) : null;
+                heap[count] = (reader.RowId, score, meta);
+                count++;
+                SiftUpRerank(heap, count - 1);
+            }
+            else if (score < heap[0].Score)
+            {
+                IReadOnlyDictionary<string, object?>? meta = columnNames.Length > 0
+                    ? ExtractMetadataDirectProjection(reader, columnNames) : null;
+                heap[0] = (reader.RowId, score, meta);
+                SiftDownRerank(heap, 0, count);
+            }
+        }
+
+        // Extract sorted ascending by score
+        var results = new VectorMatch[count];
+        int remaining = count;
+        int writeIdx = remaining - 1;
+        while (remaining > 0)
+        {
+            var (rowId, score, meta) = heap[0];
+            results[writeIdx--] = new VectorMatch(rowId, (float)score, meta);
+            remaining--;
+            if (remaining > 0)
+            {
+                heap[0] = heap[remaining];
+                SiftDownRerank(heap, 0, remaining);
+            }
+        }
+
+        return new VectorSearchResult(new List<VectorMatch>(results));
+    }
+
+    private static void SiftUpRerank(
+        (long RowId, double Score, IReadOnlyDictionary<string, object?>? Meta)[] heap, int index)
+    {
+        while (index > 0)
+        {
+            int parent = (index - 1) / 2;
+            if (heap[index].Score > heap[parent].Score)
+            {
+                (heap[index], heap[parent]) = (heap[parent], heap[index]);
+                index = parent;
+            }
+            else break;
+        }
+    }
+
+    private static void SiftDownRerank(
+        (long RowId, double Score, IReadOnlyDictionary<string, object?>? Meta)[] heap, int index, int count)
+    {
+        while (true)
+        {
+            int left = index * 2 + 1;
+            int right = left + 1;
+            int worst = index;
+            if (left < count && heap[left].Score > heap[worst].Score) worst = left;
+            if (right < count && heap[right].Score > heap[worst].Score) worst = right;
+            if (worst == index) break;
+            (heap[index], heap[worst]) = (heap[worst], heap[index]);
+            index = worst;
+        }
     }
 
     /// <summary>Flat brute-force scan for NearestTo.</summary>
@@ -427,6 +613,8 @@ public sealed class VectorQuery : IDisposable
         ValidateDimensions(queryVector);
         EnforceAgentAccess(columnNames);
 
+        long startTimestamp = Stopwatch.GetTimestamp();
+
         if (options.ForceFlatScan)
         {
             var forcedFlat = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int forcedScannedRows);
@@ -435,12 +623,17 @@ public sealed class VectorQuery : IDisposable
                 CandidateCount: forcedScannedRows,
                 RequestedK: 0,
                 ReturnedCount: forcedFlat.Count,
-                UsedFallbackScan: false);
+                UsedFallbackScan: false,
+                ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             return forcedFlat;
         }
 
         if (_hnswIndex != null && !_innerJit.HasRowAccessEvaluator)
-            return IndexedWithinDistance(queryVector, maxDistance, options, columnNames);
+        {
+            var indexed = IndexedWithinDistance(queryVector, maxDistance, options, columnNames);
+            StampElapsed(startTimestamp);
+            return indexed;
+        }
 
         var flat = FlatScanWithinDistance(queryVector, maxDistance, columnNames, out int scannedRows);
         LastExecutionInfo = new VectorExecutionInfo(
@@ -448,7 +641,8 @@ public sealed class VectorQuery : IDisposable
             CandidateCount: scannedRows,
             RequestedK: 0,
             ReturnedCount: flat.Count,
-            UsedFallbackScan: false);
+            UsedFallbackScan: false,
+            ElapsedMs: Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         return flat;
     }
 
@@ -644,6 +838,19 @@ public sealed class VectorQuery : IDisposable
         _db = null;
     }
 
+    /// <summary>
+    /// Updates the elapsed time on the already-assigned <see cref="LastExecutionInfo"/>.
+    /// Used when the info was set by a sub-method (e.g. IndexedPostFilter paths).
+    /// </summary>
+    private void StampElapsed(long startTimestamp)
+    {
+        var info = LastExecutionInfo;
+        LastExecutionInfo = info with
+        {
+            ElapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds
+        };
+    }
+
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_db is null, this);
@@ -673,6 +880,21 @@ public sealed class VectorQuery : IDisposable
         for (int i = 0; i < columnNames.Length; i++)
         {
             dict[columnNames[i]] = reader.GetValue(i + 1);
+        }
+        return dict;
+    }
+
+    /// <summary>
+    /// Extracts metadata from a reader where all projected columns are metadata
+    /// (no vector column at index 0). Used by the rerank flat-scan path.
+    /// </summary>
+    private static Dictionary<string, object?> ExtractMetadataDirectProjection(
+        SharcDataReader reader, string[] columnNames)
+    {
+        var dict = new Dictionary<string, object?>(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columnNames.Length; i++)
+        {
+            dict[columnNames[i]] = reader.GetValue(i);
         }
         return dict;
     }

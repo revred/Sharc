@@ -33,6 +33,7 @@ public sealed class GraphTraversalLayer : ILayer
     public GraphTraversalLayer(string name, SharcContextGraph graph, NodeKey startKey, TraversalPolicy policy)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
+        ArgumentNullException.ThrowIfNull(graph);
         _graph = graph;
         _startKey = startKey;
         _policy = policy;
@@ -41,8 +42,6 @@ public sealed class GraphTraversalLayer : ILayer
     /// <inheritdoc/>
     public IViewCursor Open(SharcDatabase db)
     {
-        if (_graph == null)
-            throw new InvalidOperationException("Graph context was not provided.");
         var result = _graph.Traverse(_startKey, _policy);
         return new GraphTraversalCursor(result.Nodes);
     }

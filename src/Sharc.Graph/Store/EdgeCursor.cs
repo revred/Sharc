@@ -41,9 +41,16 @@ internal abstract class EdgeCursorBase : IEdgeCursor
         }
     }
 
+    /// <summary>Maximum supported column count for ArrayPool rentals to prevent excessive memory allocation.</summary>
+    private const int MaxColumnCount = 1024;
+
     protected EdgeCursorBase(RecordDecoder decoder, int columnCount, long matchKey, int? matchKind, bool matchIsOrigin,
         int colOrigin, int colTarget, int colKind, int colData, int colCvn, int colLvn, int colSync, int colWeight)
     {
+        ArgumentNullException.ThrowIfNull(decoder);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(columnCount);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(columnCount, MaxColumnCount);
+
         Decoder = decoder;
         ColumnCount = columnCount;
         MatchKey = matchKey;

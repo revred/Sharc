@@ -99,4 +99,69 @@ public class WorkspaceSchemaBuilderTests : IDisposable
         Assert.Equal("status", table.Columns[4].Name);
         Assert.Equal("metadata", table.Columns[7].Name);
     }
+
+    // ── Knowledge Graph tables ────────────────────────────────────────
+
+    [Fact]
+    public void CreateSchema_FeaturesTable_Exists()
+    {
+        using var db = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+
+        var table = db.Schema.GetTable("features");
+        Assert.Equal(7, table.Columns.Count);
+        Assert.Equal("name", table.Columns[1].Name);
+        Assert.Equal("layer", table.Columns[3].Name);
+    }
+
+    [Fact]
+    public void CreateSchema_FeatureEdgesTable_Exists()
+    {
+        using var db = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+
+        var table = db.Schema.GetTable("feature_edges");
+        Assert.Equal(8, table.Columns.Count);
+        Assert.Equal("feature_name", table.Columns[1].Name);
+        Assert.Equal("target_kind", table.Columns[3].Name);
+    }
+
+    // ── Knowledge Graph indexes ──────────────────────────────────────
+
+    [Fact]
+    public void CreateSchema_HasKnowledgeGraphIndexes()
+    {
+        using var db = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+
+        var indexNames = db.Schema.Indexes.Select(i => i.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("idx_features_name", indexNames);
+        Assert.Contains("idx_file_purposes_path", indexNames);
+        Assert.Contains("idx_feature_edges_feature", indexNames);
+        Assert.Contains("idx_feature_edges_target", indexNames);
+        Assert.Contains("idx_file_deps_source", indexNames);
+        Assert.Contains("idx_file_deps_target", indexNames);
+        Assert.Contains("idx_file_deps_kind", indexNames);
+    }
+
+    [Fact]
+    public void CreateSchema_FeaturesIndex_IsUnique()
+    {
+        using var db = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+
+        var idx = db.Schema.Indexes.First(i => i.Name == "idx_features_name");
+        Assert.True(idx.IsUnique);
+        Assert.Equal("features", idx.TableName);
+    }
+
+    [Fact]
+    public void CreateSchema_ExistingDatabase_IndexesAreIdempotent()
+    {
+        using var db1 = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+        int indexCount1 = db1.Schema.Indexes.Count;
+        db1.Dispose();
+
+        using var db2 = WorkspaceSchemaBuilder.CreateSchema(_arcPath);
+        int indexCount2 = db2.Schema.Indexes.Count;
+
+        Assert.Equal(indexCount1, indexCount2);
+    }
 }

@@ -37,7 +37,7 @@ public static class StatusCommand
             Console.WriteLine("| Table | Rows |");
             Console.WriteLine("|-------|------|");
 
-            var tables = new[] { "commits", "file_changes", "notes", "file_annotations", "decisions", "context", "conversations" };
+            var tables = new[] { "commits", "file_changes", "notes", "file_annotations", "decisions", "context", "conversations", "features", "feature_edges", "file_purposes", "file_deps" };
             foreach (var table in tables)
             {
                 try
