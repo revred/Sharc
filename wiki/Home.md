@@ -1,6 +1,6 @@
 # Sharc API Documentation
 
-Sharc is a high-performance, pure managed C# library that reads and writes SQLite database files from disk and in-memory buffers. Zero native dependencies. 2-56x faster than Microsoft.Data.Sqlite.
+Sharc is a high-performance, pure managed C# library that reads and writes SQLite database files from disk and in-memory buffers. Zero native dependencies. 2-609x faster than Microsoft.Data.Sqlite.
 It includes strict typed 128-bit column support for `GUID`/`UUID` and `FIX128` (`decimal`, 28-29 significant digits).
 
 ## Quick Start
@@ -44,6 +44,7 @@ while (reader.Read())
 dotnet add package Sharc          # Core: read + write + query
 dotnet add package Sharc.Crypto   # AES-256-GCM encryption
 dotnet add package Sharc.Graph    # Graph traversal engine
+dotnet add package Sharc.Vector   # HNSW similarity search
 ```
 
 ## Architecture

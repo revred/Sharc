@@ -223,7 +223,7 @@ sharc/
 
 ## Current Status
 
-3,467 tests passing across 11 test projects (unit + integration + query + graph + vector + arc + archive + repo + index + context + graph-perf). Run `dotnet test` for current count.
+3,682 tests passing across 11 test projects (unit + integration + query + graph + vector + arc + archive + repo + index + context + graph-perf). Run `dotnet test` for current count.
 
 All layers implemented and benchmarked: Primitives, Page I/O (File, Memory, Mmap), B-Tree (with Seek + Index reads, generic specialization for JIT devirtualization — 95x faster point lookups), Records, Schema, Table Scans, Graph Storage (two-phase BFS, zero-alloc cursor, TraversalPolicy enforcement — 31x faster than SQLite), WHERE Filtering (SharcFilter + FilterStar JIT), WAL Read Support, AES-256-GCM Encryption (Argon2id KDF), Write Engine (full CRUD: INSERT/UPDATE/DELETE with B-tree splits, ACID transactions, freelist recycling, vacuum), Agent Trust Layer (ECDSA attestation, hash-chain ledger, co-signatures, governance, reputation scoring), Row-Level Entitlements (table/column/wildcard enforcement with zero-cost opt-in), Multi-Agent Access (DataVersion/IsStale passive change detection on IWritablePageSource), Cross-Arc Sync (ArcDiffer, FragmentSyncProtocol, FusedArcContext), SIMD Vector Search, SQL Pipeline (JOIN/UNION/INTERSECT/EXCEPT/Cote/GROUP BY/ORDER BY). See README.md for benchmark results.
 
