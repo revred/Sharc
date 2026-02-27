@@ -3,10 +3,13 @@
     <RootNamespace>Sharc.Core</RootNamespace>
     <AssemblyName>Sharc.Core</AssemblyName>
     <IsPackable>true</IsPackable>
-    <PackageReadmeFile></PackageReadmeFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- Only this project contains unsafe code (UnsafeBuffer, SafeM2MPageSource) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc" />
     <InternalsVisibleTo Include="Sharc.Tests" />

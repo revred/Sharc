@@ -26,6 +26,12 @@ internal static class HnswLevelAssigner
     }
 
     /// <summary>
+    /// Assigns a single random level for one node.
+    /// </summary>
+    internal static int AssignSingleLevel(Random rng, double mL)
+        => RandomLevel(rng, mL);
+
+    /// <summary>
     /// Generates a random layer level using floor(-ln(uniform) * mL).
     /// </summary>
     private static int RandomLevel(Random rng, double mL)

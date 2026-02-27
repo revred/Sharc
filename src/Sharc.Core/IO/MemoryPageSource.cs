@@ -57,7 +57,7 @@ public sealed class MemoryPageSource : IWritablePageSource
     public ReadOnlySpan<byte> GetPage(uint pageNumber)
     {
         ValidatePageNumber(pageNumber);
-        int offset = (int)(pageNumber - 1) * PageSize;
+        int offset = checked((int)(pageNumber - 1) * PageSize);
         return _data.AsSpan(offset, PageSize);
     }
 
@@ -67,7 +67,7 @@ public sealed class MemoryPageSource : IWritablePageSource
     public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
     {
         ValidatePageNumber(pageNumber);
-        int offset = (int)(pageNumber - 1) * PageSize;
+        int offset = checked((int)(pageNumber - 1) * PageSize);
         return _data.AsMemory(offset, PageSize);
     }
 
@@ -91,8 +91,9 @@ public sealed class MemoryPageSource : IWritablePageSource
 
         if (pageNumber > (uint)_pageCount)
         {
-            // Grow the buffer to accommodate the new page
-            int requiredSize = (int)pageNumber * PageSize;
+            // Grow the buffer to accommodate the new page — use checked arithmetic
+            // to prevent silent overflow for very large page numbers.
+            int requiredSize = checked((int)pageNumber * PageSize);
             if (_data.Length < requiredSize)
             {
                 Array.Resize(ref _data, requiredSize);
@@ -100,7 +101,7 @@ public sealed class MemoryPageSource : IWritablePageSource
             _pageCount = (int)pageNumber;
         }
 
-        int offset = (int)(pageNumber - 1) * PageSize;
+        int offset = checked((int)(pageNumber - 1) * PageSize);
         source.CopyTo(_data.AsSpan(offset, PageSize));
         Interlocked.Increment(ref _dataVersion);
     }

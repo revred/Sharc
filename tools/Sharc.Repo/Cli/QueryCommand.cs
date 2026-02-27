@@ -11,7 +11,8 @@ public static class QueryCommand
     private static readonly HashSet<string> ValidTables = new(StringComparer.OrdinalIgnoreCase)
     {
         "commits", "file_changes", "notes", "file_annotations",
-        "decisions", "context", "conversations", "_workspace_meta"
+        "decisions", "context", "conversations", "_workspace_meta",
+        "features", "feature_edges", "file_purposes", "file_deps"
     };
 
     public static int Run(string[] args)
@@ -69,7 +70,13 @@ public static class QueryCommand
                 var parts = new string[fieldCount];
                 for (int c = 0; c < fieldCount; c++)
                 {
-                    parts[c] = reader.IsNull(c) ? "(null)" : reader.GetString(c);
+                    if (reader.IsNull(c))
+                        parts[c] = "(null)";
+                    else
+                    {
+                        var val = reader.GetValue(c);
+                        parts[c] = val?.ToString() ?? "(null)";
+                    }
                 }
                 Console.WriteLine(string.Join(" | ", parts));
                 rowCount++;
@@ -92,6 +99,7 @@ public static class QueryCommand
         Console.WriteLine("Usage: sharc query <table> [--limit N]");
         Console.WriteLine();
         Console.WriteLine("Tables: commits, file_changes, notes, file_annotations,");
-        Console.WriteLine("        decisions, context, conversations, _workspace_meta");
+        Console.WriteLine("        decisions, context, conversations, _workspace_meta,");
+        Console.WriteLine("        features, feature_edges, file_purposes, file_deps");
     }
 }

@@ -61,6 +61,7 @@ public sealed class SharcDatabase : IDisposable
     private readonly SharcExtensionRegistry _extensions = new();
     private readonly ISharcBufferPool _bufferPool = SharcBufferPool.Shared;
     private SharcSchema? _schema;
+    private readonly SchemaCache.SchemaCacheHandle? _schemaCacheHandle;
     private bool _disposed;
     private QueryPlanCache? _queryCache;
     private readonly ExecutionRouter _executionRouter = new();
@@ -163,7 +164,8 @@ public sealed class SharcDatabase : IDisposable
 
     internal SharcDatabase(ProxyPageSource proxySource, IPageSource rawSource, DatabaseHeader header,
         IBTreeReader bTreeReader, IRecordDecoder recordDecoder,
-        SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null)
+        SharcDatabaseInfo info, string? filePath = null, SharcKeyHandle? keyHandle = null,
+        SharcSchema? preloadedSchema = null, SchemaCache.SchemaCacheHandle? schemaCacheHandle = null)
     {
         _proxySource = proxySource;
         _rawSource = rawSource;
@@ -174,6 +176,8 @@ public sealed class SharcDatabase : IDisposable
         _info = info;
         FilePath = filePath;
         _keyHandle = keyHandle;
+        _schema = preloadedSchema;
+        _schemaCacheHandle = schemaCacheHandle;
         _viewResolver = new Views.ViewResolver(this);
 
         // Register default extensions
@@ -189,8 +193,16 @@ public sealed class SharcDatabase : IDisposable
     /// <c>OpenMemory()</c> when the caller only needs <see cref="Info"/> or <see cref="BTreeReader"/>.
     /// Enriches ViewInfo objects with structural metadata from CREATE VIEW SQL.
     /// </summary>
-    private SharcSchema GetSchema() =>
-        _schema ??= EnrichViewMetadata(new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema());
+    private SharcSchema GetSchema()
+    {
+        if (_schema != null)
+            return _schema;
+
+        var schema = EnrichViewMetadata(new SchemaReader(_bTreeReader, _recordDecoder).ReadSchema());
+        _schema = schema;
+        _schemaCacheHandle?.Store(schema);
+        return schema;
+    }
 
     /// <summary>
     /// Exposes the schema for internal consumers (e.g. <see cref="Views.ViewResolver"/>)
@@ -446,14 +458,15 @@ public sealed class SharcDatabase : IDisposable
             });
         }
 
-        var tableCursor = CreateTableCursor(table);
-        var reader = new SharcDataReader(tableCursor, _recordDecoder, new SharcDataReader.CursorReaderConfig
+        var resolvedFilters = ResolveFilters(table, filters);
+        var cursorForLegacyFilters = TryCreateIndexSeekCursor(filters, table) ?? CreateTableCursor(table);
+        var reader = new SharcDataReader(cursorForLegacyFilters, _recordDecoder, new SharcDataReader.CursorReaderConfig
         {
             Columns = table.Columns,
             Projection = projection,
             BTreeReader = _bTreeReader,
             TableIndexes = table.Indexes,
-            Filters = ResolveFilters(table, filters)
+            Filters = resolvedFilters
         });
 
         if (isPoolable)
@@ -1008,6 +1021,19 @@ public sealed class SharcDatabase : IDisposable
     }
 
     /// <summary>
+    /// Attempts to create an index-accelerated cursor for legacy <see cref="SharcFilter"/> arrays.
+    /// Returns null if no suitable index exists or conditions aren't sargable.
+    /// </summary>
+    private IBTreeCursor? TryCreateIndexSeekCursor(SharcFilter[]? filters, TableInfo table)
+    {
+        if (filters is not { Length: > 0 } || table.Indexes.Count == 0)
+            return null;
+
+        var conditions = ExtractLegacySargableConditions(filters, table.Columns);
+        return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    /// <summary>
     /// Attempts to create an index-accelerated cursor for the given query intent.
     /// Returns null if no suitable index exists or conditions aren't sargable.
     /// </summary>
@@ -1032,6 +1058,153 @@ public sealed class SharcDatabase : IDisposable
 
         var conditions = PredicateAnalyzer.ExtractSargableConditions(filter, table.Columns);
         return TryCreateIndexSeekCursor(conditions, table);
+    }
+
+    private static List<SargableCondition> ExtractLegacySargableConditions(
+        SharcFilter[] filters,
+        IReadOnlyList<ColumnInfo> columns)
+    {
+        var result = new List<SargableCondition>(filters.Length);
+
+        for (int i = 0; i < filters.Length; i++)
+        {
+            var filter = filters[i];
+            if (!TryMapLegacyOperator(filter.Operator, out var mappedOp))
+                continue;
+
+            ColumnInfo? column = null;
+            for (int c = 0; c < columns.Count; c++)
+            {
+                if (columns[c].Name.Equals(filter.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    column = columns[c];
+                    break;
+                }
+            }
+
+            if (column == null || column.IsMergedFix128Column)
+                continue;
+
+            if (TryGetLegacyIntegerValue(filter.Value, out long integerValue))
+            {
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = mappedOp,
+                    IntegerValue = integerValue,
+                    HighValue = 0,
+                    IsIntegerKey = true,
+                    IsRealKey = false,
+                    IsTextKey = false,
+                    TextValue = null
+                });
+                continue;
+            }
+
+            if (TryGetLegacyRealValue(filter.Value, out double realValue))
+            {
+                // Legacy SharcFilter equality on floating values uses tolerance semantics.
+                // Keep table-scan behavior for Eq to avoid false negatives from exact seeks.
+                if (mappedOp == Intent.IntentOp.Eq)
+                    continue;
+
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = mappedOp,
+                    RealValue = realValue,
+                    RealHighValue = 0,
+                    IsIntegerKey = false,
+                    IsRealKey = true,
+                    IsTextKey = false,
+                    TextValue = null
+                });
+                continue;
+            }
+
+            if (filter.Value is string textValue && mappedOp == Intent.IntentOp.Eq)
+            {
+                result.Add(new SargableCondition
+                {
+                    ColumnName = column.Name,
+                    Op = Intent.IntentOp.Eq,
+                    IntegerValue = 0,
+                    HighValue = 0,
+                    IsIntegerKey = false,
+                    IsRealKey = false,
+                    IsTextKey = true,
+                    TextValue = textValue
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryMapLegacyOperator(SharcOperator op, out Intent.IntentOp mappedOp)
+    {
+        mappedOp = op switch
+        {
+            SharcOperator.Equal => Intent.IntentOp.Eq,
+            SharcOperator.GreaterThan => Intent.IntentOp.Gt,
+            SharcOperator.GreaterOrEqual => Intent.IntentOp.Gte,
+            SharcOperator.LessThan => Intent.IntentOp.Lt,
+            SharcOperator.LessOrEqual => Intent.IntentOp.Lte,
+            _ => default
+        };
+
+        return op is SharcOperator.Equal or SharcOperator.GreaterThan or SharcOperator.GreaterOrEqual
+            or SharcOperator.LessThan or SharcOperator.LessOrEqual;
+    }
+
+    private static bool TryGetLegacyIntegerValue(object? value, out long integerValue)
+    {
+        switch (value)
+        {
+            case sbyte s8:
+                integerValue = s8;
+                return true;
+            case byte u8:
+                integerValue = u8;
+                return true;
+            case short s16:
+                integerValue = s16;
+                return true;
+            case ushort u16:
+                integerValue = u16;
+                return true;
+            case int s32:
+                integerValue = s32;
+                return true;
+            case uint u32:
+                integerValue = u32;
+                return true;
+            case long s64:
+                integerValue = s64;
+                return true;
+            case ulong u64 when u64 <= long.MaxValue:
+                integerValue = (long)u64;
+                return true;
+            default:
+                integerValue = 0;
+                return false;
+        }
+    }
+
+    private static bool TryGetLegacyRealValue(object? value, out double realValue)
+    {
+        switch (value)
+        {
+            case double d when !double.IsNaN(d) && !double.IsInfinity(d):
+                realValue = d;
+                return true;
+            case float f when !float.IsNaN(f) && !float.IsInfinity(f):
+                realValue = f;
+                return true;
+            default:
+                realValue = 0;
+                return false;
+        }
     }
 
     private IBTreeCursor? TryCreateIndexSeekCursor(
@@ -1254,6 +1427,56 @@ public sealed class SharcDatabase : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _proxySource.GetPage(pageNumber);
+    }
+
+    /// <summary>
+    /// Maximum database size (in bytes) that <see cref="CreateSnapshot"/> will copy into memory.
+    /// Defaults to 2 GB. Databases larger than this threshold should use file-backed reads
+    /// or a streaming approach instead of full in-memory snapshots.
+    /// </summary>
+    public static long MaxSnapshotBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Creates a read-only snapshot of the current database state.
+    /// The snapshot is a fully independent in-memory copy — changes to the original
+    /// database after this call are NOT reflected in the snapshot.
+    /// Useful for querying during active writes: the base page source is not
+    /// modified until a transaction commits, so a snapshot taken before commit
+    /// reflects the pre-transaction state.
+    /// </summary>
+    /// <returns>A new read-only <see cref="SharcDatabase"/> backed by a copy of the current pages.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the database exceeds <see cref="MaxSnapshotBytes"/> (default 2 GB).
+    /// </exception>
+    public SharcDatabase CreateSnapshot()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int pageSize = _header.PageSize;
+        int pageCount = PageSource.PageCount;
+        long totalBytes = (long)pageSize * pageCount;
+
+        if (totalBytes > MaxSnapshotBytes)
+            throw new InvalidOperationException(
+                $"Database size ({totalBytes:N0} bytes, {pageCount:N0} pages × {pageSize} bytes) " +
+                $"exceeds the maximum snapshot size ({MaxSnapshotBytes:N0} bytes). " +
+                $"Increase SharcDatabase.MaxSnapshotBytes or use file-backed reads instead.");
+
+        if (totalBytes > Array.MaxLength)
+            throw new InvalidOperationException(
+                $"Database size ({totalBytes:N0} bytes) exceeds the maximum .NET array length. " +
+                $"Use file-backed reads instead of in-memory snapshots for databases this large.");
+
+        var snapshotData = new byte[totalBytes];
+        var pageBuf = new byte[pageSize];
+
+        for (uint p = 1; p <= (uint)pageCount; p++)
+        {
+            PageSource.ReadPage(p, pageBuf);
+            pageBuf.CopyTo(snapshotData, pageSize * (int)(p - 1));
+        }
+
+        return OpenMemory(snapshotData);
     }
 
     /// <inheritdoc />

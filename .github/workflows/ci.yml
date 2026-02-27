@@ -10,8 +10,50 @@ permissions:
   contents: read
 
 jobs:
+  release-readiness:
+    name: Release Readiness
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce release docs and notes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "Changed files in PR:"
+          echo "$changed_files"
+
+          # Allow workflow/policy-only PRs to main without forcing release-note churn.
+          # Release notes are advisory (non-blocking) for other changes.
+          allowlist='^(README\.md|CHANGELOG\.md|CONTRIBUTING\.md|\.github/pull_request_template\.md|\.github/workflows/ci\.yml|\.github/workflows/publish\.yml)$'
+          non_allowlisted_changes="$(grep -Ev "$allowlist" <<<"$changed_files" || true)"
+          if [ -z "$non_allowlisted_changes" ]; then
+            echo "Only release policy/workflow files changed. Skipping release-note checks."
+            exit 0
+          fi
+
+          if ! grep -Fxq "CHANGELOG.md" <<<"$changed_files"; then
+            echo "::notice::CHANGELOG.md not updated in this PR."
+            exit 0
+          fi
+
+          if ! grep -Eq "^## \\[1\\.2\\.(${PR_NUMBER}|PR-NUM)\\]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md does not include heading '## [1.2.${PR_NUMBER}]' (or placeholder '## [1.2.PR-NUM]')."
+          else
+            echo "CHANGELOG heading check passed."
+          fi
+
   build-and-test:
     name: Build & Test
+    if: github.event_name != 'pull_request' || github.head_ref != 'dev'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +71,8 @@ jobs:
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
           if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "0" ]; then
-            echo "suffix=1.2.1.$PR_NUMBER" >> "$GITHUB_OUTPUT"
-            echo "Version: 1.2.1.$PR_NUMBER (PR #$PR_NUMBER)"
+            echo "suffix=1.2.$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "Version: 1.2.$PR_NUMBER (PR #$PR_NUMBER)"
           else
             echo "suffix=" >> "$GITHUB_OUTPUT"
             echo "Version: using default from Directory.Build.props"

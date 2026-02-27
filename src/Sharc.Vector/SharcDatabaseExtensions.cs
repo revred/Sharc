@@ -59,7 +59,7 @@ public static class SharcDatabaseExtensions
                 dimensions = BlobVectorCodec.GetDimensions(probe.GetBlobSpan(0).Length);
             }
 
-            return new VectorQuery(db, jit, vectorColumn, dimensions, metric);
+            return new VectorQuery(db, jit, tableName, vectorColumn, dimensions, metric);
         }
         catch
         {

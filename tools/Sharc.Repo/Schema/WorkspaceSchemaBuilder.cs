@@ -92,7 +92,66 @@ public static class WorkspaceSchemaBuilder
             key TEXT NOT NULL,
             value TEXT NOT NULL
         )
+        """,
+        // ── Knowledge Graph tables ───────────────────────────────────
         """
+        CREATE TABLE IF NOT EXISTS features (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            layer TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            metadata BLOB
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS feature_edges (
+            id INTEGER PRIMARY KEY,
+            feature_name TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            target_kind TEXT NOT NULL,
+            role TEXT,
+            auto_detected INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            metadata BLOB
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS file_purposes (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            project TEXT NOT NULL,
+            namespace TEXT,
+            layer TEXT,
+            auto_detected INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            metadata BLOB
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS file_deps (
+            id INTEGER PRIMARY KEY,
+            source_path TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            dep_kind TEXT NOT NULL,
+            auto_detected INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )
+        """
+    };
+
+    // ── Knowledge Graph indexes ────────────────────────────────────
+    private static readonly string[] IndexDdl =
+    {
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_features_name ON features(name)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_file_purposes_path ON file_purposes(path)",
+        "CREATE INDEX IF NOT EXISTS idx_feature_edges_feature ON feature_edges(feature_name)",
+        "CREATE INDEX IF NOT EXISTS idx_feature_edges_target ON feature_edges(target_path)",
+        "CREATE INDEX IF NOT EXISTS idx_file_deps_source ON file_deps(source_path)",
+        "CREATE INDEX IF NOT EXISTS idx_file_deps_target ON file_deps(target_path)",
+        "CREATE INDEX IF NOT EXISTS idx_file_deps_kind ON file_deps(dep_kind)",
     };
 
     /// <summary>
@@ -109,6 +168,8 @@ public static class WorkspaceSchemaBuilder
 
         using var tx = db.BeginTransaction();
         foreach (var ddl in TableDdl)
+            tx.Execute(ddl);
+        foreach (var ddl in IndexDdl)
             tx.Execute(ddl);
         tx.Commit();
 

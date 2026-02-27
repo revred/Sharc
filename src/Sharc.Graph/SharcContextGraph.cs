@@ -87,7 +87,9 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     public void Dispose()
     {
         _outgoingCursor?.Dispose();
+        _outgoingCursor = null;
         _incomingCursor?.Dispose();
+        _incomingCursor = null;
         _concepts.Dispose();
         // RelationStore does not hold persistent cursors — nothing to dispose.
     }
@@ -293,7 +295,9 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
         {
             int estimate = 1;
             for (int d = 0; d < policy.MaxDepth.Value && estimate < 4096; d++)
-                estimate *= policy.MaxFanOut.Value;
+            {
+                estimate = (int)Math.Min((long)estimate * policy.MaxFanOut.Value, 4096);
+            }
             return Math.Min(estimate, 4096);
         }
         return 128;
@@ -302,11 +306,15 @@ public sealed class SharcContextGraph : IContextGraph, IDisposable
     private static List<NodeKey> ReconstructPath(List<PathReconstructionNode> pathNodes, int index)
     {
         // Walk parent pointers to count depth, then fill in reverse
+        // Guard: bounds check + cycle cap to prevent infinite loops on corrupted parent pointers
         int count = 0;
         int walk = index;
-        while (walk >= 0)
+        int maxSteps = pathNodes.Count; // can't have more steps than nodes
+        while (walk >= 0 && walk < pathNodes.Count)
         {
             count++;
+            if (count > maxSteps)
+                throw new InvalidOperationException("Path reconstruction cycle detected — parent pointer chain exceeds node count.");
             walk = pathNodes[walk].ParentIndex;
         }
 

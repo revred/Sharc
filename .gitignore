@@ -7,6 +7,8 @@ obj/
 artifacts/
 BenchmarkDotNet.Artifacts/
 TestResults/
+nupkgs/
+dist/
 nul
 .claude/
 secrets/
@@ -22,3 +24,5 @@ Certificates/
 # 3rdparty build artifacts (db rebuild infra [C/C++] + build output)
 3rdParty/arangodb/src
 3rdParty/arangodb/out
+
+.sharc/

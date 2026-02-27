@@ -42,9 +42,9 @@ Console.WriteLine($"  Output: {Path.GetFullPath(outputPath)}");
 if (since != null)
     Console.WriteLine($"  Since:  {since}");
 
-// Step 1: Create schema
+// Step 1: Create schema (returns writable db — reuse it for writing)
 Console.Write("Creating schema... ");
-GcdSchemaBuilder.CreateSchema(outputPath);
+using var db = GcdSchemaBuilder.CreateSchema(outputPath);
 Console.WriteLine("done.");
 
 // Step 2: Walk git log
@@ -52,9 +52,6 @@ Console.Write("Reading git log... ");
 var walker = new GitLogWalker(repoPath);
 var commits = await walker.GetCommitsAsync(since);
 Console.WriteLine($"{commits.Count} commits found.");
-
-// Step 3: Write commits and file changes
-using var db = SharcDatabase.Open(outputPath);
 using var writer = new CommitWriter(db);
 
 Console.Write("Writing commits... ");

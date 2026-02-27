@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-3%2C467_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-3%2C686_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -429,12 +429,20 @@ dotnet run -c Release --project bench/Sharc.Comparisons -- --filter *FocusedPerf
 dotnet script ./samples/run-all.csx -- --build-only     # Validate all samples compile (requires dotnet-script)
 ```
 
+## Release Rule
+
+PRs into `main` are treated as release PRs and must include:
+
+- `README.md` updates for user-facing package/API changes
+- `CHANGELOG.md` release notes under `## [1.2.<PR_NUMBER>] - YYYY-MM-DD`
+- NuGet package staging in `artifacts/nuget` (ignored folder) before publish
+
 ## Project Structure
 
 ```text
 src/
   Sharc/                    Public API + Write Engine + Trust Layer
-  Sharc.Core/               B-Tree, Records, Page I/O, Primitives
+  Sharc.Core/             B-Tree, Records, Page I/O, Primitives
   Sharc.Query/              SQL pipeline: parser, compiler, executor
   Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF, HKDF-SHA256
   Sharc.Graph/              Graph engine: Cypher, PageRank, GraphWriter, algorithms
@@ -442,7 +450,7 @@ src/
   Sharc.Vector/             SIMD-accelerated vector similarity search
   Sharc.Arc/                Cross-arc: ArcUri, ArcResolver, ArcDiffer, fragment sync
   Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
-tests/                      3,467 tests across 11 projects
+tests/                      3,686 tests across 10 projects
   Sharc.Tests/              Core unit tests
   Sharc.IntegrationTests/   End-to-end tests
   Sharc.Query.Tests/        Query pipeline tests

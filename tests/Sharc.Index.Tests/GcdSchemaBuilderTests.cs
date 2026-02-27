@@ -226,6 +226,103 @@ public sealed class GcdSchemaBuilderTests : IDisposable
         Assert.NotNull(schema.GetTable("_index_state"));
     }
 
+    /// <summary>
+    /// Regression test: CreateSchema returns a writable db. Previously, Program.cs
+    /// discarded this db and reopened read-only, causing UnauthorizedAccessException.
+    /// </summary>
+    [Fact]
+    public void CreateSchema_ReturnedDb_IsWritableForInserts()
+    {
+        using var db = GcdSchemaBuilder.CreateSchema(_dbPath);
+
+        // The returned db should support writes without reopening
+        using var sw = SharcWriter.From(db);
+        var shaBytes = System.Text.Encoding.UTF8.GetBytes("sha_test");
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes("Author");
+        var emailBytes = System.Text.Encoding.UTF8.GetBytes("a@b.com");
+        var dateBytes = System.Text.Encoding.UTF8.GetBytes("2026-01-01");
+        var msgBytes = System.Text.Encoding.UTF8.GetBytes("Test commit");
+
+        sw.Insert("commits",
+            ColumnValue.Text(2 * shaBytes.Length + 13, shaBytes),
+            ColumnValue.Text(2 * nameBytes.Length + 13, nameBytes),
+            ColumnValue.Text(2 * emailBytes.Length + 13, emailBytes),
+            ColumnValue.Text(2 * dateBytes.Length + 13, dateBytes),
+            ColumnValue.Text(2 * msgBytes.Length + 13, msgBytes));
+
+        using var reader = db.CreateReader("commits");
+        Assert.True(reader.Read());
+        Assert.Equal("sha_test", reader.GetString(0));
+    }
+
+    /// <summary>
+    /// Regression test: writing to commits then file_changes on the same db instance
+    /// must work. Previously failed with CorruptPageException when db was reopened
+    /// read-only between schema creation and writing.
+    /// </summary>
+    [Fact]
+    public void CreateSchema_WriteCommitsThenFileChanges_BothTablesPopulated()
+    {
+        using var db = GcdSchemaBuilder.CreateSchema(_dbPath);
+        using var writer = new CommitWriter(db);
+
+        writer.WriteCommits([
+            new CommitRecord("abc123", "John", "john@example.com", "2026-01-01", "Initial commit")
+        ]);
+        writer.WriteFileChanges([
+            new FileChangeRecord("abc123", "src/file.cs", 10, 5)
+        ]);
+
+        int commitCount = 0;
+        using (var reader = db.CreateReader("commits"))
+            while (reader.Read()) commitCount++;
+
+        int changeCount = 0;
+        using (var reader = db.CreateReader("file_changes"))
+            while (reader.Read()) changeCount++;
+
+        Assert.Equal(1, commitCount);
+        Assert.Equal(1, changeCount);
+    }
+
+    /// <summary>
+    /// Verifies all 10 tables can be written to from the db returned by CreateSchema
+    /// (not just commits — the files table had root page issues before the fix).
+    /// </summary>
+    [Fact]
+    public void CreateSchema_AllTablesWritable_FromReturnedDb()
+    {
+        using var db = GcdSchemaBuilder.CreateSchema(_dbPath);
+        using var writer = new CommitWriter(db);
+
+        // Write to all writable tables
+        writer.WriteCommits([new CommitRecord("sha1", "A", "a@b.com", "2026-01-01", "Msg")]);
+        writer.WriteFileChanges([new FileChangeRecord("sha1", "f.cs", 1, 0)]);
+        writer.WriteAuthors([new AuthorRecord("A", "a@b.com", "sha1", 1)]);
+        writer.WriteCommitParents([new CommitParentRecord("sha1", "sha0", 0)]);
+        writer.WriteBranches([new BranchRecord("main", "sha1", 0, 1000)]);
+        writer.WriteTags([new TagRecord("v1", "sha1", null, null, null, 1000)]);
+        writer.SetIndexState("test_key", "test_value");
+
+        // Verify all inserts succeeded
+        Assert.True(CountRowsInTable(db, "commits") > 0);
+        Assert.True(CountRowsInTable(db, "file_changes") > 0);
+        Assert.True(CountRowsInTable(db, "files") > 0);
+        Assert.True(CountRowsInTable(db, "authors") > 0);
+        Assert.True(CountRowsInTable(db, "commit_parents") > 0);
+        Assert.True(CountRowsInTable(db, "branches") > 0);
+        Assert.True(CountRowsInTable(db, "tags") > 0);
+        Assert.True(CountRowsInTable(db, "_index_state") > 0);
+    }
+
+    private static int CountRowsInTable(SharcDatabase db, string tableName)
+    {
+        int count = 0;
+        using var reader = db.CreateReader(tableName);
+        while (reader.Read()) count++;
+        return count;
+    }
+
     [Fact]
     public void CreateSchema_AllTenTablesCreated()
     {

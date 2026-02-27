@@ -1,3 +1,7 @@
+// Copyright (c) Ram Revanur. All rights reserved.
+// Licensed under the MIT License.
+
+
 /*-------------------------------------------------------------------------------------------------!
   "Where the mind is free to imagine and the craft is guided by clarity, code awakens."            |
 

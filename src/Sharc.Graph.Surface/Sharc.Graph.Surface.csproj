@@ -1,8 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Sharc.Graph.Surface</RootNamespace>
+    <AssemblyName>Sharc.Graph.Surface</AssemblyName>
     <IsPackable>true</IsPackable>
-    <PackageReadmeFile></PackageReadmeFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Graph interfaces and models for Sharc: IContextGraph, IEdgeCursor, graph schema types, and traversal model definitions.</Description>
+    <PackageTags>sqlite;graph-database;graph-interfaces;graph-models;dotnet;csharp</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="NuGet_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Sharc.Graph" />
