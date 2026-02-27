@@ -23,8 +23,16 @@ public static class Program
             return args[0] switch
             {
                 "init" => InitCommand.Run(args[1..]),
+                "update" => UpdateCommand.Run(args[1..]),
                 "status" => StatusCommand.Run(args[1..]),
                 "config" => ConfigCommand.Run(args[1..]),
+                "note" => NoteCommand.Run(args[1..]),
+                "annotate" => AnnotateCommand.Run(args[1..]),
+                "decide" => DecideCommand.Run(args[1..]),
+                "set" => SetCommand.Run(args[1..]),
+                "get" => GetCommand.Run(args[1..]),
+                "query" => QueryCommand.Run(args[1..]),
+                "trace-seed" => TraceSeedCommand.Run(args[1..]),
                 "serve" => await RunServe(args[1..]),
                 _ => Error($"Unknown command: {args[0]}")
             };
@@ -80,8 +88,16 @@ public static class Program
         Console.WriteLine();
         Console.WriteLine("Commands:");
         Console.WriteLine("  init       Initialize .sharc/ at the git repo root");
+        Console.WriteLine("  update     Index git commits and file changes");
         Console.WriteLine("  status     Show workspace status");
         Console.WriteLine("  config     Read/write configuration");
+        Console.WriteLine("  note       Add a free-form note");
+        Console.WriteLine("  annotate   Add a file annotation");
+        Console.WriteLine("  decide     Record an architectural decision");
+        Console.WriteLine("  set        Set a context key-value");
+        Console.WriteLine("  get        Read context key-value entries");
+        Console.WriteLine("  query      Query workspace tables");
+        Console.WriteLine("  trace-seed Build .sharc/trace-seed.json for Sharc.Trace");
         Console.WriteLine("  serve      Launch MCP stdio server");
         Console.WriteLine("  --help     Show this help message");
     }
