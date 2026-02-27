@@ -2,7 +2,7 @@
 
 **Sharc reads SQLite files 2-609x faster than Managed Sqlite, in pure C#, with zero native dependencies.**
 
-[![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc/)
+[![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc.Open/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
 [![Tests](https://img.shields.io/badge/tests-3%2C467_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
@@ -386,7 +386,7 @@ ShortRun micro-benchmark note: sub-ns means are environment-sensitive; allocatio
 
 > **Takeaway:** Core engine read paths remain strong (2.1x to 609x faster, with hot paths at 0 B managed allocation). Query pipeline still has clear optimization targets (`GROUP BY`, `INTERSECT/EXCEPT`, `ORDER BY + LIMIT`, and CTE composition), while focused micro-optimizations materially reduced allocation and GC pressure.
 
-[**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc/)
+[**Full Benchmark Results**](docs/BENCHMARKS.md) | [**Run the Live Arena**](https://revred.github.io/Sharc.Open/)
 
 ---
 

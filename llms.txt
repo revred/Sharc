@@ -232,7 +232,7 @@ SELECT, FROM, WHERE, JOIN (INNER/LEFT/RIGHT/CROSS), ORDER BY, GROUP BY, HAVING, 
 
 - Repository: https://github.com/revred/sharc
 - NuGet: https://www.nuget.org/packages/Sharc/
-- Live Benchmarks: https://revred.github.io/Sharc/
+- Live Benchmarks: https://revred.github.io/Sharc.Open/
 - Full Docs: https://github.com/revred/sharc/tree/main/docs
 - API Wiki: https://github.com/revred/sharc/wiki
 - JitSQL Cross-Language Guide: https://github.com/revred/sharc/blob/main/docs/JITSQL_CROSS_LANGUAGE.md
