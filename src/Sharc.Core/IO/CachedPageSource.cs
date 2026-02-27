@@ -16,26 +16,37 @@ namespace Sharc.Core.IO;
 /// <para><b>Why CLOCK instead of LRU:</b>
 /// A traditional LRU cache uses a doubly-linked list and calls MoveToHead() on every cache hit,
 /// which mutates shared state. This forces an exclusive lock on every read — even pure cache hits —
-/// serializing all page access through a single contention point. ReaderWriterLockSlim doesn't help
-/// because every "read" is secretly a write (the linked list mutation).</para>
+/// serializing all page access through a single contention point. A simple ReaderWriterLockSlim
+/// doesn't help with LRU because every "read" is secretly a write (the linked list mutation).</para>
 ///
 /// <para><b>CLOCK algorithm (second-chance eviction):</b>
-/// Each slot has a reference bit. On cache hit, we atomically set refBit=1 (Volatile.Write) with
-/// no lock at all. On cache miss, we take a lock and sweep a clock hand around the circular buffer:
-/// if refBit==1, clear it (second chance) and advance; if refBit==0, evict that slot.
-/// This gives near-LRU eviction quality — Linux and FreeBSD use CLOCK for their page caches.</para>
+/// Each slot has a reference bit. On cache hit, we set refBit=1 (Volatile.Write) — no structural
+/// mutation. On cache miss, we sweep a clock hand around the circular buffer: if refBit==1, clear
+/// it (second chance) and advance; if refBit==0, evict that slot. This gives near-LRU eviction
+/// quality — Linux and FreeBSD use CLOCK for their page caches.</para>
 ///
-/// <para><b>Concurrency model:</b></para>
+/// <para><b>Concurrency model (CLOCK + ReaderWriterLockSlim):</b>
+/// Because CLOCK eliminates per-hit structural mutation, the hit path is a pure read: dictionary
+/// lookup + Volatile.Write of a reference bit + return a Span over an existing buffer. Multiple
+/// threads can do this concurrently under a shared read lock. Only miss/evict/invalidate/write
+/// operations require an exclusive write lock.</para>
 /// <list type="bullet">
-///   <item>Cache hit (read): Lock-free — ConcurrentDictionary.TryGetValue + Volatile.Write of refBit</item>
-///   <item>Cache miss (load): Exclusive lock (_syncRoot) — clock sweep, evict, load from inner source</item>
-///   <item>Invalidate/WritePage: Exclusive lock (_syncRoot)</item>
+///   <item>Cache hit: Read lock (concurrent) — lookup + set refBit + return Span</item>
+///   <item>Cache miss: Write lock (exclusive) — clock sweep, evict, load from inner source</item>
+///   <item>Invalidate/WritePage: Write lock (exclusive)</item>
 /// </list>
 ///
+/// <para><b>Why not fully lock-free:</b>
+/// A lock-free hit path (no read lock) has a race: between TryGetValue succeeding and the Span
+/// being constructed, a concurrent eviction can overwrite the buffer (silent data corruption) or
+/// an Invalidate can return the buffer to ArrayPool (NullReferenceException). The read lock
+/// prevents eviction/invalidation while any reader is active, closing this window. The cost is
+/// ~20-30ns per uncontended read lock — negligible compared to the B-tree traversal that follows.</para>
+///
 /// <para><b>New pages start with refBit=0 (unprotected):</b>
-/// A freshly loaded page must be accessed again (hit) to earn refBit=1 protection. This ensures
-/// pages that are accessed repeatedly survive eviction over pages that were loaded once and never
-/// revisited — matching the behavioral intent of LRU without linked list mutation.</para>
+/// A freshly loaded page must be accessed again (cache hit) to earn refBit=1 protection. This
+/// ensures pages accessed repeatedly survive eviction over pages loaded once and never revisited
+/// — matching the behavioral intent of LRU without linked list mutation.</para>
 /// </remarks>
 public sealed class CachedPageSource : IWritablePageSource
 {
@@ -56,15 +67,15 @@ public sealed class CachedPageSource : IWritablePageSource
     private int _clockHand;                 // current position in the circular sweep
     private int _slotCount;                 // number of occupied slots (≤ _capacity)
 
-    // ConcurrentDictionary enables lock-free TryGetValue on the hit path.
-    // Mutations (TryAdd/TryRemove) only happen under _syncRoot during miss/evict/invalidate.
+    // ConcurrentDictionary for safe concurrent reads under the shared read lock.
+    // Mutations (TryRemove, indexer set) only happen under the exclusive write lock.
     private readonly ConcurrentDictionary<uint, int> _lookup;
 
-    // Only the miss path, invalidation, and writes acquire this lock.
-    // The hot path (cache hit) never touches it.
-    private readonly object _syncRoot = new();
+    // Read lock: hit path (concurrent readers, no eviction possible while held).
+    // Write lock: miss/evict/invalidate/write (exclusive, waits for all readers to exit).
+    private readonly ReaderWriterLockSlim _rwLock = new(LockRecursionPolicy.NoRecursion);
 
-    // Interlocked counters — hit counting happens outside the lock on the hit path.
+    // Interlocked counters — safe under both read and write locks.
     private int _cacheHitCount;
     private int _cacheMissCount;
 
@@ -132,28 +143,41 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <inheritdoc />
     public ReadOnlySpan<byte> GetPage(uint pageNumber)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
         if (_capacity == 0)
-            return _inner.GetPage(pageNumber);
-
-        // --- Lock-free hit path ---
-        // ConcurrentDictionary.TryGetValue is lock-free. If the page is cached,
-        // we just mark its reference bit (earning eviction protection) and return.
-        // No linked list mutation, no lock, no contention — this is the critical
-        // improvement over the previous LRU design.
-        if (_lookup.TryGetValue(pageNumber, out int slotIndex))
         {
-            Volatile.Write(ref _refBits[slotIndex], 1); // earn eviction protection
-            Interlocked.Increment(ref _cacheHitCount);
-            return _slots[slotIndex].Data.AsSpan(0, PageSize);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _inner.GetPage(pageNumber);
         }
 
-        // --- Miss path — exclusive lock required for eviction + I/O ---
-        lock (_syncRoot)
+        // --- Read lock: concurrent hit path ---
+        // Multiple threads can hold a read lock simultaneously. While any read lock is held,
+        // no write lock (eviction/invalidation) can be acquired — the buffer is safe to return.
+        // With CLOCK, the hit path does no structural mutation (no MoveToHead), so concurrent
+        // readers don't conflict with each other.
+        // Dispose check is inside the lock to prevent TOCTOU: without it, Dispose() could
+        // return buffers to ArrayPool between the check and the Span construction.
+        _rwLock.EnterReadLock();
+        try
         {
-            // Double-check: another thread may have loaded this page while we waited for the lock.
-            if (_lookup.TryGetValue(pageNumber, out slotIndex))
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
+            {
+                Volatile.Write(ref _refBits[slotIndex], 1); // earn eviction protection
+                Interlocked.Increment(ref _cacheHitCount);
+                return _slots[slotIndex].Data.AsSpan(0, PageSize);
+            }
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+
+        // --- Write lock: miss path (exclusive — no concurrent reads or writes) ---
+        _rwLock.EnterWriteLock();
+        try
+        {
+            // Double-check: another thread may have loaded this page while we waited.
+            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
             {
                 Volatile.Write(ref _refBits[slotIndex], 1);
                 Interlocked.Increment(ref _cacheHitCount);
@@ -179,6 +203,10 @@ public sealed class CachedPageSource : IWritablePageSource
 
             return _slots[slot].Data.AsSpan(0, PageSize);
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -188,24 +216,35 @@ public sealed class CachedPageSource : IWritablePageSource
     /// </summary>
     public ReadOnlyMemory<byte> GetPageMemory(uint pageNumber)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
         if (_capacity == 0)
-            return _inner.GetPageMemory(pageNumber);
-
-        // Lock-free hit path (see GetPage for detailed explanation)
-        if (_lookup.TryGetValue(pageNumber, out int slotIndex))
         {
-            Volatile.Write(ref _refBits[slotIndex], 1);
-            Interlocked.Increment(ref _cacheHitCount);
-            return _slots[slotIndex].Data.AsMemory(0, PageSize);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _inner.GetPageMemory(pageNumber);
         }
 
-        // Miss path — exclusive lock for eviction + I/O
-        lock (_syncRoot)
+        // Read lock: concurrent hit path (see GetPage for detailed explanation)
+        _rwLock.EnterReadLock();
+        try
         {
-            // Double-check after acquiring lock
-            if (_lookup.TryGetValue(pageNumber, out slotIndex))
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
+            {
+                Volatile.Write(ref _refBits[slotIndex], 1);
+                Interlocked.Increment(ref _cacheHitCount);
+                return _slots[slotIndex].Data.AsMemory(0, PageSize);
+            }
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+
+        // Write lock: miss path
+        _rwLock.EnterWriteLock();
+        try
+        {
+            // Double-check after acquiring write lock
+            if (_lookup.TryGetValue(pageNumber, out int slotIndex))
             {
                 Volatile.Write(ref _refBits[slotIndex], 1);
                 Interlocked.Increment(ref _cacheHitCount);
@@ -225,6 +264,10 @@ public sealed class CachedPageSource : IWritablePageSource
 
             return _slots[slotIndex].Data.AsMemory(0, PageSize);
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <inheritdoc />
@@ -237,16 +280,18 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <inheritdoc />
     public void Invalidate(uint pageNumber)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        lock (_syncRoot)
+        // Write lock: exclusive — waits for all readers to exit before proceeding.
+        // This guarantees no reader is holding a Span over a slot we're about to return to ArrayPool.
+        _rwLock.EnterWriteLock();
+        try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_lookup.TryRemove(pageNumber, out int slot))
             {
                 _occupied[slot] = false;
                 _refBits[slot] = 0;
 
-                // Return buffer to pool
+                // Return buffer to pool — safe because write lock ensures no reader is active.
                 if (_slots[slot].Data != null)
                 {
                     ArrayPool<byte>.Shared.Return(_slots[slot].Data);
@@ -259,15 +304,20 @@ public sealed class CachedPageSource : IWritablePageSource
 
             _inner.Invalidate(pageNumber);
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <inheritdoc />
     public void WritePage(uint pageNumber, ReadOnlySpan<byte> source)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        lock (_syncRoot)
+        // Write lock: exclusive — prevents readers from seeing a partially-written page.
+        _rwLock.EnterWriteLock();
+        try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             // Update cache if present
             if (_capacity > 0 && _lookup.TryGetValue(pageNumber, out int slot))
             {
@@ -288,6 +338,10 @@ public sealed class CachedPageSource : IWritablePageSource
                 throw new NotSupportedException("Underlying page source does not support writes.");
             }
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <inheritdoc />
@@ -301,21 +355,36 @@ public sealed class CachedPageSource : IWritablePageSource
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
 
+        // Acquire write lock to ensure no readers are active before returning buffers to pool.
+        // Without this, a concurrent reader could hold a Span over a buffer we're about to return.
         if (_capacity > 0)
         {
-            for (int i = 0; i < _slots.Length; i++)
+            _rwLock.EnterWriteLock();
+            try
             {
-                if (_slots[i].Data != null)
+                _disposed = true;
+                for (int i = 0; i < _slots.Length; i++)
                 {
-                    ArrayPool<byte>.Shared.Return(_slots[i].Data);
-                    _slots[i].Data = null!;
+                    if (_slots[i].Data != null)
+                    {
+                        ArrayPool<byte>.Shared.Return(_slots[i].Data);
+                        _slots[i].Data = null!;
+                    }
                 }
             }
+            finally
+            {
+                _rwLock.ExitWriteLock();
+            }
+        }
+        else
+        {
+            _disposed = true;
         }
 
         _inner.Dispose();
+        _rwLock.Dispose();
     }
 
     // --- CLOCK Eviction ---
@@ -339,7 +408,7 @@ public sealed class CachedPageSource : IWritablePageSource
     /// <summary>
     /// Allocates a cache slot. If the cache is not full, uses the next empty slot (demand-driven).
     /// If full, sweeps the clock hand to find an eviction victim.
-    /// Must be called under _syncRoot.
+    /// Must be called under write lock.
     /// </summary>
     private int AllocateSlot()
     {
@@ -386,7 +455,7 @@ public sealed class CachedPageSource : IWritablePageSource
 
     // --- Prefetch Helpers ---
 
-    /// <summary>Updates sequential access tracking. Must be called under _syncRoot.</summary>
+    /// <summary>Updates sequential access tracking. Must be called under write lock.</summary>
     private void UpdateSequentialTracking(uint pageNumber)
     {
         if (pageNumber == _lastAccessedPage + 1)
@@ -398,7 +467,7 @@ public sealed class CachedPageSource : IWritablePageSource
     }
 
     /// <summary>
-    /// Detects sequential access patterns and prefetches ahead. Must be called under _syncRoot.
+    /// Detects sequential access patterns and prefetches ahead. Must be called under write lock.
     /// </summary>
     private void TryPrefetch(uint pageNumber)
     {

@@ -9,8 +9,11 @@ namespace Sharc.Vector.Hnsw;
 /// </summary>
 public sealed class HnswIndex : IDisposable
 {
-    private HnswGraph _graph;
-    private IVectorResolver _resolver;
+    // Volatile: these references are replaced wholesale during MergePendingMutations (under write lock).
+    // Search (under read lock) must see the latest reference — without volatile, a CPU core could cache
+    // a stale reference and search against an old graph/resolver after a merge completes.
+    private volatile HnswGraph _graph;
+    private volatile IVectorResolver _resolver;
     private readonly VectorDistanceFunction _distanceFn;
     private readonly DistanceMetric _metric;
     private readonly HnswConfig _config;
