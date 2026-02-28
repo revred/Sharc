@@ -87,4 +87,95 @@ internal static class CellBuilder
 
         return size;
     }
+
+    // ── Index B-tree cell builders ────────────────────────────────
+
+    /// <summary>
+    /// Builds an index leaf cell (page type 0x0A).
+    /// Format: payload-size varint + inline payload [+ 4-byte overflow page pointer].
+    /// The payload is a SQLite record containing [indexed columns..., table rowid].
+    /// </summary>
+    public static int BuildIndexLeafCell(ReadOnlySpan<byte> recordPayload,
+        Span<byte> destination, int usablePageSize)
+    {
+        int pos = 0;
+
+        // Write payload-size varint
+        pos += VarintDecoder.Write(destination, recordPayload.Length);
+
+        // Determine inline vs overflow using index-specific formula
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayload.Length, usablePageSize);
+
+        // Write inline payload
+        recordPayload[..inlineSize].CopyTo(destination[pos..]);
+        pos += inlineSize;
+
+        // If overflow, append a 4-byte overflow page pointer (0 = caller fills later)
+        if (inlineSize < recordPayload.Length)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(destination[pos..], 0);
+            pos += 4;
+        }
+
+        return pos;
+    }
+
+    /// <summary>
+    /// Builds an index interior cell (page type 0x02).
+    /// Format: 4-byte left child page (big-endian) + payload-size varint + inline payload [+ overflow pointer].
+    /// </summary>
+    public static int BuildIndexInteriorCell(uint leftChildPage, ReadOnlySpan<byte> recordPayload,
+        Span<byte> destination, int usablePageSize)
+    {
+        BinaryPrimitives.WriteUInt32BigEndian(destination, leftChildPage);
+        int pos = 4;
+
+        pos += VarintDecoder.Write(destination[pos..], recordPayload.Length);
+
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayload.Length, usablePageSize);
+
+        recordPayload[..inlineSize].CopyTo(destination[pos..]);
+        pos += inlineSize;
+
+        if (inlineSize < recordPayload.Length)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(destination[pos..], 0);
+            pos += 4;
+        }
+
+        return pos;
+    }
+
+    /// <summary>
+    /// Pre-computes the total cell size for an index leaf cell without writing it.
+    /// </summary>
+    public static int ComputeIndexLeafCellSize(int recordPayloadSize, int usablePageSize)
+    {
+        int size = VarintDecoder.GetEncodedLength(recordPayloadSize);
+
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayloadSize, usablePageSize);
+        size += inlineSize;
+
+        if (inlineSize < recordPayloadSize)
+            size += 4; // overflow page pointer
+
+        return size;
+    }
+
+    /// <summary>
+    /// Pre-computes the total cell size for an index interior cell without writing it.
+    /// </summary>
+    public static int ComputeIndexInteriorCellSize(int recordPayloadSize, int usablePageSize)
+    {
+        int size = 4; // left child page pointer
+        size += VarintDecoder.GetEncodedLength(recordPayloadSize);
+
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayloadSize, usablePageSize);
+        size += inlineSize;
+
+        if (inlineSize < recordPayloadSize)
+            size += 4; // overflow page pointer
+
+        return size;
+    }
 }

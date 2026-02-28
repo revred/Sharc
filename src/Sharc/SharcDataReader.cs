@@ -1336,6 +1336,9 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         if (_composite != null)
             return _composite.GetBlob(this, ordinal);
 
+        if (TryGetLazyPayloadBytes(ordinal, expectText: false, out ReadOnlySpan<byte> bytes))
+            return bytes.ToArray();
+
         return GetColumnValue(ordinal).AsBytes().ToArray();
     }
 
@@ -1348,7 +1351,47 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
         if (_composite != null)
             return _composite.GetBlobSpan(this, ordinal);
 
+        if (TryGetLazyPayloadBytes(ordinal, expectText: false, out ReadOnlySpan<byte> bytes))
+            return bytes;
+
         return GetColumnValue(ordinal).AsBytes().Span;
+    }
+
+    /// <summary>
+    /// Returns raw bytes directly from the current record payload for lazy rows,
+    /// avoiding per-column materialization when callers only need a span view.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryGetLazyPayloadBytes(int ordinal, bool expectText, out ReadOnlySpan<byte> bytes)
+    {
+        bytes = default;
+        if (!IsLazy || _currentRow == null)
+            return false;
+
+        int logicalOrdinal = _projection != null ? _projection[ordinal] : ordinal;
+        if (logicalOrdinal < 0 || logicalOrdinal >= _columnCount)
+            throw new ArgumentOutOfRangeException(nameof(ordinal), ordinal,
+                "Column ordinal is out of range.");
+
+        int actualOrdinal = _physicalOrdinals != null
+            ? _physicalOrdinals[logicalOrdinal]
+            : logicalOrdinal;
+
+        // INTEGER PRIMARY KEY aliases are virtual rowid values, not payload bytes.
+        if (actualOrdinal == _rowidAliasOrdinal)
+            return false;
+
+        long serialType = _serialTypes![actualOrdinal];
+        bool storageMatches = expectText
+            ? Core.Primitives.SerialTypeCodec.IsText(serialType)
+            : Core.Primitives.SerialTypeCodec.IsBlob(serialType);
+        if (!storageMatches)
+            return false;
+
+        int offset = _columnOffsets![actualOrdinal];
+        int length = Core.Primitives.SerialTypeCodec.GetContentSize(serialType);
+        bytes = _cursor!.Payload.Slice(offset, length);
+        return true;
     }
 
     /// <summary>
@@ -1483,6 +1526,9 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     {
         if (_composite != null)
             return _composite.GetUtf8Span(this, ordinal);
+
+        if (TryGetLazyPayloadBytes(ordinal, expectText: true, out ReadOnlySpan<byte> utf8))
+            return utf8;
 
         return GetColumnValue(ordinal).AsBytes().Span;
     }

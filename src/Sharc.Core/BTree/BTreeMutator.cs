@@ -517,8 +517,10 @@ internal sealed class BTreeMutator : IDisposable
     /// <summary>
     /// Provides the next auto-allocated page number for overflow/split operations.
     /// Called by <see cref="OverflowChainWriter"/> when the freelist is empty.
+    /// Also exposed to <see cref="IndexBTreeMutator"/> via delegate to prevent
+    /// double-allocation when both mutators extend the file within the same transaction.
     /// </summary>
-    private uint AllocateNextPage()
+    internal uint AllocateNextPage()
     {
         if (_nextAllocPage == 0)
             _nextAllocPage = (uint)_source.PageCount + 1;
