@@ -177,6 +177,46 @@ public class AntiPatternBenchmarks
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  RECOMMENDED: WriteScope — RAII auto-commit, zero boilerplate
+    //  Disposal is guaranteed, cannot forget 'using'.
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// BEST (Lambda): WriteScope guarantees disposal. Cannot leak scope.
+    /// Auto-commits on success, rolls back on exception.
+    /// </summary>
+    [Benchmark]
+    [BenchmarkCategory("WriteScope")]
+    public int BEST_WriteScope_Lambda()
+    {
+        return SharcWriter.WriteScope(_dbPath, scope =>
+        {
+            for (int i = 0; i < BatchSize; i++)
+                scope.Insert("events", MakeEventRow(i));
+            return BatchSize;
+        });
+    }
+
+    /// <summary>
+    /// BEST (using): WriteScope with explicit 'using' for multi-batch
+    /// ingestion with periodic Flush checkpoints.
+    /// </summary>
+    [Benchmark]
+    [BenchmarkCategory("WriteScope")]
+    public int BEST_WriteScope_Flush()
+    {
+        using var scope = SharcWriter.OpenScope(_dbPath);
+        for (int i = 0; i < BatchSize / 2; i++)
+            scope.Insert("events", MakeEventRow(i));
+        scope.Flush(); // first batch committed to disk
+
+        for (int i = BatchSize / 2; i < BatchSize; i++)
+            scope.Insert("events", MakeEventRow(i));
+        // second batch auto-commits on Dispose
+        return BatchSize;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Mixed: Update 100 rows — auto-commit vs batched
     // ═══════════════════════════════════════════════════════════════
 

@@ -50,6 +50,76 @@ public sealed class SharcWriter : IDisposable
         return new SharcWriter(db, ownsDb: false);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  WriteScope APIs — disposal-safe write operations
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <b>Recommended API.</b> Executes a write action within a guaranteed-disposal scope.
+    /// The scope auto-commits on success and rolls back on exception.
+    /// Disposal is automatic — the caller cannot forget <c>using</c>.
+    /// <code>
+    /// SharcWriter.WriteScope("data.arc", scope =>
+    /// {
+    ///     scope.Insert("events", values1);
+    ///     scope.Insert("events", values2);
+    /// });
+    /// // auto-committed — no way to leak the scope
+    /// </code>
+    /// </summary>
+    public static void WriteScope(string path, Action<WriteScope> action)
+    {
+        using var scope = OpenScope(path);
+        action(scope);
+    }
+
+    /// <summary>
+    /// <b>Recommended API.</b> Executes a write function within a guaranteed-disposal scope
+    /// and returns a result.
+    /// <code>
+    /// long id = SharcWriter.WriteScope("data.arc", scope =>
+    /// {
+    ///     return scope.Insert("events", values);
+    /// });
+    /// </code>
+    /// </summary>
+    public static TResult WriteScope<TResult>(string path, Func<WriteScope, TResult> action)
+    {
+        using var scope = OpenScope(path);
+        return action(scope);
+    }
+
+    /// <summary>
+    /// Opens a database and returns an RAII-style <see cref="Sharc.WriteScope"/> that
+    /// auto-commits on Dispose. Prefer <see cref="WriteScope(string, Action{WriteScope})"/>
+    /// which guarantees disposal. Use this only when you need the scope to span
+    /// multiple statements or control Flush/Finalize timing.
+    /// <para><b>Important:</b> Always use a <c>using</c> statement or <c>using var</c>
+    /// declaration. Without <c>using</c>, pending writes are lost and the file lock
+    /// leaks until GC finalization (which fires a <c>Debug.Fail</c> to catch the bug).</para>
+    /// <code>
+    /// using var scope = SharcWriter.OpenScope("data.arc");
+    /// scope.Insert("events", values);
+    /// // auto-commits when scope is disposed
+    /// </code>
+    /// </summary>
+    public static WriteScope OpenScope(string path)
+    {
+        var db = SharcDatabase.Open(path, new SharcOpenOptions { Writable = true, PageCacheSize = 16 });
+        return new WriteScope(db, ownsDb: true);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="Sharc.WriteScope"/> over an existing database.
+    /// The caller retains ownership of the database.
+    /// <para><b>Important:</b> Always use a <c>using</c> statement or <c>using var</c>
+    /// declaration.</para>
+    /// </summary>
+    public static WriteScope Scope(SharcDatabase db)
+    {
+        return new WriteScope(db, ownsDb: false);
+    }
+
     private SharcWriter(SharcDatabase db, bool ownsDb)
     {
         _db = db;
