@@ -223,7 +223,7 @@ public sealed class Transaction : IDisposable
     }
 
     /// <summary>
-    /// Allocates a new root page for an index (LeafIndex B-tree page type).
+    /// Allocates a new root page for an index (LeafIndex 0x0A).
     /// </summary>
     internal uint AllocateIndexRoot(int usablePageSize)
     {

@@ -63,7 +63,7 @@ public static class SharcDatabaseExtensions
                 dimensions = decoded.Length;
             }
 
-            return new VectorQuery(db, jit, vectorColumn, dimensions, metric);
+            return new VectorQuery(db, jit, tableName, vectorColumn, dimensions, metric);
         }
         catch
         {

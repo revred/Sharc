@@ -4,7 +4,7 @@
 
 [![Live Arena](https://img.shields.io/badge/Live_Arena-Run_Benchmarks-blue?style=for-the-badge)](https://revred.github.io/Sharc.Open/)
 [![NuGet](https://img.shields.io/nuget/v/Sharc.svg?style=for-the-badge)](https://www.nuget.org/packages/Sharc/)
-[![Tests](https://img.shields.io/badge/tests-3%2C682_passing-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/tests-3%2C686_passing-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -175,6 +175,58 @@ PRs into `main` are treated as release PRs and must include:
 - `README.md` updates for user-facing package/API changes
 - `CHANGELOG.md` release notes under `## [1.2.<PR_NUMBER>] - YYYY-MM-DD`
 - NuGet package staging in `artifacts/nuget` (ignored folder) before publish
+
+## Project Structure
+
+```text
+src/
+  Sharc/                    Public API + Write Engine + Trust Layer
+  Sharc.Core/             B-Tree, Records, Page I/O, Primitives
+  Sharc.Query/              SQL pipeline: parser, compiler, executor
+  Sharc.Crypto/             AES-256-GCM encryption, Argon2id KDF, HKDF-SHA256
+  Sharc.Graph/              Graph engine: Cypher, PageRank, GraphWriter, algorithms
+  Sharc.Graph.Surface/      Graph interfaces and models
+  Sharc.Vector/             SIMD-accelerated vector similarity search
+  Sharc.Arc/                Cross-arc: ArcUri, ArcResolver, ArcDiffer, fragment sync
+  Sharc.Arena.Wasm/         Live benchmark arena (Blazor WASM)
+tests/                      3,686 tests across 10 projects
+  Sharc.Tests/              Core unit tests
+  Sharc.IntegrationTests/   End-to-end tests
+  Sharc.Query.Tests/        Query pipeline tests
+  Sharc.Graph.Tests.Unit/   Graph + Cypher + algorithm tests
+  Sharc.Graph.Tests.Perf/   Graph performance benchmarks
+  Sharc.Arc.Tests/          Cross-arc diff + sync tests
+  Sharc.Archive.Tests/      Archive tool tests
+  Sharc.Vector.Tests/       Vector similarity tests
+  Sharc.Repo.Tests/         Repository + MCP tool tests
+  Sharc.Index.Tests/        Index CLI tests
+  Sharc.Context.Tests/      MCP context tests
+bench/
+  Sharc.Benchmarks/         BenchmarkDotNet suite (Sharc vs SQLite)
+  Sharc.Comparisons/        Graph + query benchmarks
+samples/
+  ApiComparison/            Sharc vs SQLite end-to-end timing comparison
+  BasicRead/                Minimal read example
+  BrowserOpfs/              Browser OPFS interop and storage portability patterns
+  BulkInsert/               Transactional batch insert
+  UpsertDeleteWhere/        Upsert and predicate delete workflows
+  FilterAndProject/         Column projection + filtering
+  PointLookup/              B-tree Seek performance demo
+  VectorSearch/             Embedding storage and nearest-neighbor lookup
+  EncryptedRead/            AES-256-GCM encrypted database read
+  ContextGraph/             Graph traversal example
+  TrustComplex/             Agent trust layer demo
+  README.md                 Sample index and run instructions
+  run-all.csx               C# script to build/run all samples
+tools/
+  Sharc.Archive/            Conversation archiver (schema + sync protocol)
+  Sharc.Repo/               AI agent repository (annotations + decisions + MCP)
+  Sharc.Context/            MCP Context Server
+  Sharc.Index/              Git history → SQLite CLI
+  Sharc.Debug/              Debug utilities
+docs/                       Architecture, benchmarks, cookbook, FAQ, migration guides
+PRC/                        Architecture decisions, specs, execution plans
+```
 
 ## Current Limitations
 

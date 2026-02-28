@@ -380,8 +380,10 @@ public sealed class HnswIndex : IDisposable
     }
 
     /// <summary>
-    /// Rebuilds the base HNSW graph by compacting all pending upserts/deletes.
-    /// This clears the mutable delta/tombstone layers.
+    /// Incrementally merges pending mutations into the base graph.
+    /// Updated vectors are patched in-place in the resolver (topology preserved).
+    /// New vectors are inserted into the graph using the HNSW insertion algorithm.
+    /// Tombstones remain as-is — use <see cref="Compact"/> to remove them.
     /// </summary>
     public void MergePendingMutations()
     {
@@ -391,54 +393,141 @@ public sealed class HnswIndex : IDisposable
         try
         {
             ThrowIfDisposed();
-            if (_deltaVectors.Count == 0 && _tombstones.Count == 0)
+
+            // When tombstones exist, nodes must be removed from graph topology —
+            // this requires a full rebuild since we can't incrementally remove HNSW nodes.
+            // Check inside the lock to avoid TOCTOU race with concurrent Delete().
+            if (_tombstones.Count > 0)
+            {
+                CompactNoLock();
+                return;
+            }
+
+            if (_deltaVectors.Count == 0)
                 return;
 
-            var vectors = new List<float[]>(_graph.NodeCount + _deltaVectors.Count);
-            var rowIds = new List<long>(_graph.NodeCount + _deltaVectors.Count);
-
-            for (int i = 0; i < _graph.NodeCount; i++)
+            var memResolver = _resolver as MemoryVectorResolver;
+            if (memResolver == null)
             {
-                long rowId = _graph.GetRowId(i);
-                if (_tombstones.Contains(rowId))
+                // Non-memory resolvers cannot do incremental merge — fall back to full rebuild.
+                CompactNoLock();
+                return;
+            }
+
+            // Phase 1: Update existing vectors in-place (no topology change).
+            foreach (var pair in _deltaVectors)
+            {
+                if (_tombstones.Contains(pair.Key))
                     continue;
 
-                if (_deltaVectors.TryGetValue(rowId, out var updated))
-                    vectors.Add(updated);
-                else
-                    vectors.Add(_resolver.GetVector(i).ToArray());
-
-                rowIds.Add(rowId);
+                if (_graph.TryGetNodeIndex(pair.Key, out int nodeIndex))
+                {
+                    memResolver.UpdateVector(nodeIndex, pair.Value);
+                }
             }
+
+            // Phase 2: Insert new vectors into the graph topology.
+            var rawDistanceFn = VectorDistanceFunctions.Resolve(_metric);
+            bool isDotProduct = _metric == DistanceMetric.DotProduct;
+            VectorDistanceFunction distanceFn = isDotProduct
+                ? (a, b) => -rawDistanceFn(a, b)
+                : rawDistanceFn;
+
+            var rng = _config.Seed != 0 ? new Random(_config.Seed) : new Random();
 
             foreach (var pair in _deltaVectors)
             {
                 if (_tombstones.Contains(pair.Key))
                     continue;
                 if (_graph.TryGetNodeIndex(pair.Key, out _))
-                    continue; // already included as update
+                    continue; // Already updated in phase 1
 
-                rowIds.Add(pair.Key);
-                vectors.Add(pair.Value);
+                // Assign a random level and add the node to the graph.
+                int level = HnswLevelAssigner.AssignSingleLevel(rng, _config.ML);
+                memResolver.AppendVector(pair.Value);
+                int newNodeIndex = _graph.AddNode(pair.Key, level);
+
+                // Insert into graph topology using Algorithm 1.
+                // InsertNode handles entry point / max level updates internally.
+                HnswGraphBuilder.InsertNode(_graph, newNodeIndex, memResolver, distanceFn, _config);
             }
 
-            if (vectors.Count == 0)
-                throw new InvalidOperationException(
-                    "Cannot merge mutations because it would produce an empty index.");
-
-            var resolver = new MemoryVectorResolver(vectors.ToArray());
-            var graph = HnswGraphBuilder.Build(resolver, rowIds.ToArray(), _metric, _config);
-
-            _resolver = resolver;
-            _graph = graph;
             _deltaVectors.Clear();
-            _tombstones.Clear();
+            // Tombstones are kept — they filter search results until Compact().
             _version++;
         }
         finally
         {
             _stateLock.ExitWriteLock();
         }
+    }
+
+    /// <summary>
+    /// Fully rebuilds the base graph from scratch, removing all tombstoned nodes
+    /// and reclaiming space. Use this when delete/tombstone count is high.
+    /// This is the legacy behavior of MergePendingMutations before incremental merge.
+    /// </summary>
+    public void Compact()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        _stateLock.EnterWriteLock();
+        try
+        {
+            ThrowIfDisposed();
+            CompactNoLock();
+        }
+        finally
+        {
+            _stateLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Core compaction logic. Caller must hold the write lock.
+    /// </summary>
+    private void CompactNoLock()
+    {
+        var vectors = new List<float[]>(_graph.NodeCount + _deltaVectors.Count);
+        var rowIds = new List<long>(_graph.NodeCount + _deltaVectors.Count);
+
+        for (int i = 0; i < _graph.NodeCount; i++)
+        {
+            long rowId = _graph.GetRowId(i);
+            if (_tombstones.Contains(rowId))
+                continue;
+
+            if (_deltaVectors.TryGetValue(rowId, out var updated))
+                vectors.Add(updated);
+            else
+                vectors.Add(_resolver.GetVector(i).ToArray());
+
+            rowIds.Add(rowId);
+        }
+
+        foreach (var pair in _deltaVectors)
+        {
+            if (_tombstones.Contains(pair.Key))
+                continue;
+            if (_graph.TryGetNodeIndex(pair.Key, out _))
+                continue; // already included as update
+
+            rowIds.Add(pair.Key);
+            vectors.Add(pair.Value);
+        }
+
+        if (vectors.Count == 0)
+            throw new InvalidOperationException(
+                "Cannot compact because it would produce an empty index.");
+
+        var resolver = new MemoryVectorResolver(vectors.ToArray());
+        var graph = HnswGraphBuilder.Build(resolver, rowIds.ToArray(), _metric, _config);
+
+        _resolver = resolver;
+        _graph = graph;
+        _deltaVectors.Clear();
+        _tombstones.Clear();
+        _version++;
     }
 
     /// <summary>

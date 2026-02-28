@@ -314,14 +314,14 @@ internal sealed class BTreePageRewriter
         BTreePageHeader.Write(span[hdrOff..], hdr);
     }
 
-    /// <summary>Builds a leaf index page from a span of cell descriptors in a contiguous buffer.</summary>
+    /// <summary>Builds an index leaf page (page type 0x0A) from a span of cell descriptors.</summary>
     public void BuildIndexLeafPage(byte[] pageBuf, int hdrOff, byte[] cellBuf, ReadOnlySpan<CellRef> cells)
     {
         var span = pageBuf.AsSpan(0, _source.PageSize);
         span[hdrOff..].Clear();
 
         int contentEnd = _usablePageSize;
-        int ptrBase = hdrOff + SQLiteLayout.IndexLeafHeaderSize;
+        int ptrBase = hdrOff + LeafHeaderSize;
 
         for (int i = 0; i < cells.Length; i++)
         {
@@ -340,7 +340,7 @@ internal sealed class BTreePageRewriter
         BTreePageHeader.Write(span[hdrOff..], hdr);
     }
 
-    /// <summary>Builds an interior index page from a span of cell descriptors in a contiguous buffer.</summary>
+    /// <summary>Builds an index interior page (page type 0x02) from a span of cell descriptors.</summary>
     public void BuildIndexInteriorPage(byte[] pageBuf, int hdrOff, byte[] cellBuf,
         ReadOnlySpan<CellRef> cells, uint rightChildPage)
     {
@@ -348,7 +348,7 @@ internal sealed class BTreePageRewriter
         span[hdrOff..].Clear();
 
         int contentEnd = _usablePageSize;
-        int ptrBase = hdrOff + SQLiteLayout.IndexInteriorHeaderSize;
+        int ptrBase = hdrOff + InteriorHeaderSize;
 
         for (int i = 0; i < cells.Length; i++)
         {

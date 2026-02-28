@@ -80,6 +80,10 @@ public readonly struct BTreePageHeader
     /// <exception cref="CorruptPageException">Invalid page type flag.</exception>
     public static BTreePageHeader Parse(ReadOnlySpan<byte> data)
     {
+        if (data.Length < SQLiteLayout.TableInteriorHeaderSize)
+            throw new CorruptPageException(0,
+                $"Page data too small for b-tree header: {data.Length} bytes (minimum 12 required).");
+
         byte typeFlag = data[0];
         if (typeFlag is not (0x02 or 0x05 or 0x0A or 0x0D))
             throw new CorruptPageException(0, $"Invalid b-tree page type flag: 0x{typeFlag:X2}");
@@ -108,10 +112,15 @@ public readonly struct BTreePageHeader
     /// <param name="pageData">The full page bytes (starting at b-tree header offset).</param>
     /// <param name="cellIndex">0-based index into the cell pointer array.</param>
     /// <returns>The cell offset within the page.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="cellIndex"/> is negative or >= <see cref="CellCount"/>.</exception>
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public ushort GetCellPointer(ReadOnlySpan<byte> pageData, int cellIndex)
     {
+        if ((uint)cellIndex >= (uint)CellCount)
+            throw new ArgumentOutOfRangeException(nameof(cellIndex), cellIndex,
+                $"Cell index must be between 0 and {CellCount - 1}.");
+
         int offset = HeaderSize + cellIndex * 2;
         return BinaryPrimitives.ReadUInt16BigEndian(pageData[offset..]);
     }

@@ -33,6 +33,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     public void DecodeRecord(ReadOnlySpan<byte> payload, ColumnValue[] destination)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
+        if (headerSize < offset || headerSize > payload.Length)
+            throw new ArgumentException(
+                $"Record header size {headerSize} is out of range (payload is {payload.Length} bytes).");
+
         int headerEnd = (int)headerSize;
 
         // Single pass: read serial types from header and decode body simultaneously.
@@ -80,6 +84,9 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         {
             long st = serialTypes[i];
             int contentSize = SerialTypeCodec.GetContentSize(st);
+            if (bodyOffset + contentSize > payload.Length)
+                throw new ArgumentException(
+                    $"Record body overflows payload at column {i}: offset {bodyOffset} + size {contentSize} > {payload.Length}.");
             destination[i] = DecodeValue(payload.Slice(bodyOffset, contentSize), st);
             bodyOffset += contentSize;
         }
@@ -101,6 +108,9 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
         trailingRowId = 0;
 
         int offset = VarintDecoder.Read(payload, out long headerSize);
+        if (headerSize < offset || headerSize > payload.Length)
+            return false;
+
         int headerEnd = (int)headerSize;
 
         // Parse serial types — we need keyCount + at least 1 trailing rowid column
@@ -165,6 +175,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     public int GetColumnCount(ReadOnlySpan<byte> payload)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
+        if (headerSize < offset || headerSize > payload.Length)
+            throw new ArgumentException(
+                $"Record header size {headerSize} is out of range (payload is {payload.Length} bytes).");
+
         int headerEnd = (int)headerSize;
 
         int count = 0;
@@ -181,6 +195,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     public ColumnValue DecodeColumn(ReadOnlySpan<byte> payload, int columnIndex)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
+        if (headerSize < offset || headerSize > payload.Length)
+            throw new ArgumentException(
+                $"Record header size {headerSize} is out of range (payload is {payload.Length} bytes).");
+
         int headerEnd = (int)headerSize;
 
         // Skip to the target column's serial type and calculate body offset
@@ -250,6 +268,10 @@ internal sealed class RecordDecoder : IRecordDecoder, ISharcExtension
     public int ReadSerialTypes(ReadOnlySpan<byte> payload, Span<long> serialTypes, out int bodyOffset)
     {
         int offset = VarintDecoder.Read(payload, out long headerSize);
+        if (headerSize < offset || headerSize > payload.Length)
+            throw new ArgumentException(
+                $"Record header size {headerSize} is out of range (payload is {payload.Length} bytes).");
+
         bodyOffset = (int)headerSize;
         int headerEnd = bodyOffset;
 

@@ -1003,6 +1003,105 @@ public sealed class SharcWriter : IDisposable
     }
 
     /// <summary>
+    /// Inserts multiple records with auto-commit every <paramref name="commitInterval"/> rows.
+    /// Bounds memory usage to approximately <paramref name="commitInterval"/> rows worth of dirty pages.
+    /// Returns all assigned rowids.
+    /// </summary>
+    /// <param name="tableName">Target table name.</param>
+    /// <param name="records">Records to insert.</param>
+    /// <param name="commitInterval">Number of rows per transaction commit. Must be greater than zero.</param>
+    public long[] InsertBatch(string tableName, IEnumerable<ColumnValue[]> records, int commitInterval)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrEmpty(tableName);
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(commitInterval, 0);
+
+        var tableInfo = TryGetTableInfo(tableName);
+        var rowIds = records is ICollection<ColumnValue[]> coll ? new List<long>(coll.Count) : new List<long>();
+        int count = 0;
+        Transaction? tx = null;
+
+        try
+        {
+            foreach (var values in records)
+            {
+                tx ??= BeginAutoCommitTransaction();
+                rowIds.Add(InsertCore(tx, tableName, values, tableInfo, _tableRootCache));
+                count++;
+
+                if (count >= commitInterval)
+                {
+                    CapturePooledShadow(tx);
+                    tx.Commit();
+                    tx.Dispose();
+                    tx = null;
+                    count = 0;
+                }
+            }
+
+            // Commit remaining rows
+            if (tx != null && count > 0)
+            {
+                CapturePooledShadow(tx);
+                tx.Commit();
+            }
+        }
+        finally
+        {
+            tx?.Dispose();
+        }
+
+        return rowIds.ToArray();
+    }
+
+    /// <summary>
+    /// Returns the maximum rowid in the given table, or 0 if the table is empty.
+    /// This is an O(log N) operation that descends to the rightmost B-tree leaf.
+    /// Useful for resumable ingestion: after a restart, resume inserting from <c>GetMaxRowId(table) + 1</c>.
+    /// </summary>
+    public long GetMaxRowId(string tableName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrEmpty(tableName);
+
+        var source = _db.PageSource;
+        int usableSize = _db.UsablePageSize;
+        uint rootPage = FindTableRootPageCached(source, tableName, usableSize, _tableRootCache);
+        if (rootPage == 0)
+            throw new InvalidOperationException($"Table '{tableName}' not found.");
+
+        return GetMaxRowIdFromBTree(source, rootPage, usableSize);
+    }
+
+    /// <summary>
+    /// Reads the max rowid by descending to the rightmost leaf of the B-tree.
+    /// </summary>
+    private static long GetMaxRowIdFromBTree(IPageSource source, uint rootPage, int usableSize)
+    {
+        Span<byte> pageBuf = stackalloc byte[source.PageSize];
+        uint pageNum = rootPage;
+
+        while (true)
+        {
+            source.ReadPage(pageNum, pageBuf);
+            int hdrOff = pageNum == 1 ? SQLiteLayout.DatabaseHeaderSize : 0;
+            var hdr = BTreePageHeader.Parse(pageBuf[hdrOff..]);
+
+            if (hdr.IsLeaf)
+            {
+                if (hdr.CellCount == 0) return 0;
+                int cellPtr = hdr.GetCellPointer(pageBuf[hdrOff..], hdr.CellCount - 1);
+                CellParser.ParseTableLeafCell(pageBuf[cellPtr..], out _, out long maxRowId);
+                return maxRowId;
+            }
+
+            // Interior page: descend to rightmost child
+            pageNum = hdr.RightChildPage;
+        }
+    }
+
+    /// <summary>
     /// Compacts the database by rebuilding all tables, removing fragmentation and clearing the freelist.
     /// After vacuum, the database file size reflects only the pages actually in use.
     /// </summary>

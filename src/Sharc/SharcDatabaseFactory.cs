@@ -8,6 +8,7 @@ using Sharc.Core.BTree;
 using Sharc.Core.Format;
 using Sharc.Core.IO;
 using Sharc.Core.Records;
+using Sharc.Core.Schema;
 using Sharc.Crypto;
 using Sharc.Exceptions;
 
@@ -253,12 +254,24 @@ internal static class SharcDatabaseFactory
             throw new InvalidDatabaseException("Invalid SQLite magic string.");
 
         options ??= new SharcOpenOptions();
+        SharcSchema? cachedSchema = null;
+        SchemaCache.SchemaCacheHandle? schemaCacheHandle = null;
+
+        if (!options.Writable)
+        {
+            var header = DatabaseHeader.Parse(data.Span);
+            SchemaCache.TryGet(data, header, out cachedSchema, out schemaCacheHandle);
+        }
+
         IPageSource pageSource = new MemoryPageSource(data);
-        return CreateFromPageSource(pageSource, options);
+        return CreateFromPageSource(pageSource, options,
+            preloadedSchema: cachedSchema,
+            schemaCacheHandle: schemaCacheHandle);
     }
 
     public static SharcDatabase CreateFromPageSource(IPageSource rawSource, SharcOpenOptions options,
-        bool isEncrypted = false, string? filePath = null, SharcKeyHandle? keyHandle = null)
+        bool isEncrypted = false, string? filePath = null, SharcKeyHandle? keyHandle = null,
+        SharcSchema? preloadedSchema = null, SchemaCache.SchemaCacheHandle? schemaCacheHandle = null)
     {
         IPageSource pageSource = rawSource;
 
@@ -294,7 +307,8 @@ internal static class SharcDatabaseFactory
             IsEncrypted = isEncrypted
         };
 
-        return new SharcDatabase(proxySource, pageSource, header, bTreeReader, recordDecoder, info, filePath, keyHandle);
+        return new SharcDatabase(proxySource, pageSource, header, bTreeReader, recordDecoder,
+            info, filePath, keyHandle, preloadedSchema, schemaCacheHandle);
     }
 
     /// <summary>

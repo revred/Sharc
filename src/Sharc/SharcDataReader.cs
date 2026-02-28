@@ -257,6 +257,7 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     private int _returnedRowCount;
     private readonly int _decodeColumnCount;
     private readonly QueryExecutionStrategy _executionStrategy;
+    private QueryExecutionInfo? _executionInfoOverride;
 
     // F-7: Cursor-based pagination — skip rows with RowId <= this value (0 = disabled)
     private long _afterRowId;
@@ -646,6 +647,9 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
     {
         get
         {
+            if (_executionInfoOverride.HasValue)
+                return _executionInfoOverride.Value;
+
             int indexEntriesScanned = 0;
             int indexHits = 0;
 
@@ -663,6 +667,12 @@ public sealed partial class SharcDataReader : IRowAccessor, IDisposable
                 IndexHits: indexHits);
         }
     }
+
+    /// <summary>
+    /// Overrides the execution info for this reader. Used by terminal operations
+    /// (e.g. TopK) that produce a new reader and want to stamp timing/diagnostics.
+    /// </summary>
+    internal void SetExecutionInfo(QueryExecutionInfo info) => _executionInfoOverride = info;
 
     /// <summary>
     /// True when this reader can seek directly by table rowid.

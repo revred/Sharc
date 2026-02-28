@@ -24,6 +24,8 @@ internal static class CellParser
     public static int ParseTableLeafCell(ReadOnlySpan<byte> cellData, out int payloadSize, out long rowId)
     {
         int offset = VarintDecoder.Read(cellData, out long rawPayloadSize);
+        if (rawPayloadSize < 0 || rawPayloadSize > int.MaxValue)
+            throw new ArgumentException($"Invalid payload size: {rawPayloadSize}");
         payloadSize = (int)rawPayloadSize;
         offset += VarintDecoder.Read(cellData[offset..], out rowId);
         return offset;

@@ -88,13 +88,18 @@ internal static class CellBuilder
         return size;
     }
 
-    // ── Index B-tree cell builders ────────────────────────────────
+    // ── Index cell builders ────────────────────────────────────────
 
     /// <summary>
     /// Builds an index leaf cell (page type 0x0A).
     /// Format: payload-size varint + inline payload [+ 4-byte overflow page pointer].
-    /// The payload is a SQLite record containing [indexed columns..., table rowid].
+    /// Unlike table leaf cells, index cells have no separate rowid — the rowid is
+    /// embedded as the final column of the record payload.
     /// </summary>
+    /// <param name="recordPayload">The full index record payload (indexed columns + rowid).</param>
+    /// <param name="destination">Buffer to write the cell into.</param>
+    /// <param name="usablePageSize">Usable page size (PageSize - ReservedBytes).</param>
+    /// <returns>Total bytes written to destination.</returns>
     public static int BuildIndexLeafCell(ReadOnlySpan<byte> recordPayload,
         Span<byte> destination, int usablePageSize)
     {
@@ -103,8 +108,9 @@ internal static class CellBuilder
         // Write payload-size varint
         pos += VarintDecoder.Write(destination, recordPayload.Length);
 
-        // Determine inline vs overflow using index-specific formula
-        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayload.Length, usablePageSize);
+        // Determine inline vs overflow (index-specific threshold)
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(
+            recordPayload.Length, usablePageSize);
 
         // Write inline payload
         recordPayload[..inlineSize].CopyTo(destination[pos..]);
@@ -122,21 +128,33 @@ internal static class CellBuilder
 
     /// <summary>
     /// Builds an index interior cell (page type 0x02).
-    /// Format: 4-byte left child page (big-endian) + payload-size varint + inline payload [+ overflow pointer].
+    /// Format: 4-byte left child page (big-endian) + payload-size varint + inline payload [+ 4-byte overflow pointer].
+    /// Unlike table interior cells, index interior cells carry the full record payload.
     /// </summary>
+    /// <param name="leftChildPage">The left child page number.</param>
+    /// <param name="recordPayload">The full index record payload (indexed columns + rowid).</param>
+    /// <param name="destination">Buffer to write the cell into.</param>
+    /// <param name="usablePageSize">Usable page size (PageSize - ReservedBytes).</param>
+    /// <returns>Total bytes written to destination.</returns>
     public static int BuildIndexInteriorCell(uint leftChildPage, ReadOnlySpan<byte> recordPayload,
         Span<byte> destination, int usablePageSize)
     {
+        // Write left child page (4 bytes, big-endian)
         BinaryPrimitives.WriteUInt32BigEndian(destination, leftChildPage);
         int pos = 4;
 
+        // Write payload-size varint
         pos += VarintDecoder.Write(destination[pos..], recordPayload.Length);
 
-        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayload.Length, usablePageSize);
+        // Determine inline vs overflow (index-specific threshold)
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(
+            recordPayload.Length, usablePageSize);
 
+        // Write inline payload
         recordPayload[..inlineSize].CopyTo(destination[pos..]);
         pos += inlineSize;
 
+        // If overflow, append a 4-byte overflow page pointer (0 = caller fills later)
         if (inlineSize < recordPayload.Length)
         {
             BinaryPrimitives.WriteUInt32BigEndian(destination[pos..], 0);
@@ -149,11 +167,15 @@ internal static class CellBuilder
     /// <summary>
     /// Pre-computes the total cell size for an index leaf cell without writing it.
     /// </summary>
+    /// <param name="recordPayloadSize">Total index record payload size in bytes.</param>
+    /// <param name="usablePageSize">Usable page size.</param>
+    /// <returns>Total cell size in bytes.</returns>
     public static int ComputeIndexLeafCellSize(int recordPayloadSize, int usablePageSize)
     {
         int size = VarintDecoder.GetEncodedLength(recordPayloadSize);
 
-        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayloadSize, usablePageSize);
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(
+            recordPayloadSize, usablePageSize);
         size += inlineSize;
 
         if (inlineSize < recordPayloadSize)
@@ -165,12 +187,16 @@ internal static class CellBuilder
     /// <summary>
     /// Pre-computes the total cell size for an index interior cell without writing it.
     /// </summary>
+    /// <param name="recordPayloadSize">Total index record payload size in bytes.</param>
+    /// <param name="usablePageSize">Usable page size.</param>
+    /// <returns>Total cell size in bytes.</returns>
     public static int ComputeIndexInteriorCellSize(int recordPayloadSize, int usablePageSize)
     {
-        int size = 4; // left child page pointer
-        size += VarintDecoder.GetEncodedLength(recordPayloadSize);
+        int size = 4 // left child page pointer
+                 + VarintDecoder.GetEncodedLength(recordPayloadSize);
 
-        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(recordPayloadSize, usablePageSize);
+        int inlineSize = IndexCellParser.CalculateIndexInlinePayloadSize(
+            recordPayloadSize, usablePageSize);
         size += inlineSize;
 
         if (inlineSize < recordPayloadSize)

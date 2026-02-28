@@ -36,24 +36,34 @@ public static class VarintDecoder
             return 1;
         }
 
-        // Bytes 1Ã¢â‚¬â€œ8: high bit = continuation, low 7 bits = data
+        // Bytes 1-8: high bit = continuation, low 7 bits = data
         long result = b & 0x7F;
-        for (int i = 1; i < 8; i++)
+        int maxBytes = Math.Min(8, data.Length - 1);
+        for (int i = 1; i <= maxBytes; i++)
         {
             b = data[i];
-            result = (result << 7) | (b & 0x7FL);
-            if (b < 0x80)
+            if (i < 8)
             {
+                result = (result << 7) | (b & 0x7FL);
+                if (b < 0x80)
+                {
+                    value = result;
+                    return i + 1;
+                }
+            }
+            else
+            {
+                // 9th byte (i == 8): all 8 bits are data
+                result = (result << 8) | b;
                 value = result;
-                return i + 1;
+                return 9;
             }
         }
 
-        // 9th byte: all 8 bits are data
-        b = data[8];
-        result = (result << 8) | b;
+        // Truncated varint — span exhausted before termination byte.
+        // Return what we have (consistent with ReadFromRef behavior).
         value = result;
-        return 9;
+        return data.Length;
     }
 
     /// <summary>
@@ -67,6 +77,12 @@ public static class VarintDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int ReadFromRef(ref byte data, int available, out long value)
     {
+        if (available <= 0)
+        {
+            value = 0;
+            return 0;
+        }
+
         byte b = data;
         if (b < 0x80)
         {

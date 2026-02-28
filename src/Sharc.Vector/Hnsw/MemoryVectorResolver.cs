@@ -4,21 +4,24 @@
 namespace Sharc.Vector.Hnsw;
 
 /// <summary>
-/// In-memory vector resolver backed by a single contiguous float array.
-/// Vectors are packed at construction time for cache-friendly traversal
-/// during HNSW graph search.
+/// In-memory vector resolver backed by a jagged float array.
+/// Supports post-build growth via <see cref="AppendVector"/>
+/// and in-place updates via <see cref="UpdateVector"/>.
 /// </summary>
 internal sealed class MemoryVectorResolver : IVectorResolver
 {
-    private readonly float[] _packed;
     private readonly int _dimensions;
+    private float[][] _vectors;
+    private int _count;
 
     internal MemoryVectorResolver(float[][] vectors)
     {
         ArgumentNullException.ThrowIfNull(vectors);
+        _count = vectors.Length;
+
         if (vectors.Length == 0)
         {
-            _packed = [];
+            _vectors = [];
             _dimensions = 0;
             return;
         }
@@ -40,13 +43,55 @@ internal sealed class MemoryVectorResolver : IVectorResolver
             }
         }
 
-        _packed = new float[vectors.Length * _dimensions];
-        for (int i = 0; i < vectors.Length; i++)
-            vectors[i].CopyTo(_packed.AsSpan(i * _dimensions, _dimensions));
+        _vectors = vectors;
     }
 
     public ReadOnlySpan<float> GetVector(int nodeIndex)
-        => _packed.AsSpan(nodeIndex * _dimensions, _dimensions);
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(nodeIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(nodeIndex, _count);
+        return _vectors[nodeIndex];
+    }
 
     public int Dimensions => _dimensions;
+
+    /// <summary>
+    /// Appends a vector for a newly added graph node. Returns the node index.
+    /// The vector must match the configured <see cref="Dimensions"/>.
+    /// </summary>
+    internal int AppendVector(float[] vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        if (vector.Length != Dimensions)
+            throw new ArgumentException(
+                $"Vector has {vector.Length} dimensions, expected {Dimensions}.");
+
+        int index = _count;
+        if (index >= _vectors.Length)
+        {
+            int newCapacity = Math.Max(_vectors.Length * 2, 8);
+            var newVectors = new float[newCapacity][];
+            Array.Copy(_vectors, newVectors, _count);
+            _vectors = newVectors;
+        }
+
+        _vectors[index] = vector;
+        _count++;
+        return index;
+    }
+
+    /// <summary>
+    /// Updates an existing vector at the given node index in-place.
+    /// Used when a delta update changes a vector without altering graph topology.
+    /// </summary>
+    internal void UpdateVector(int nodeIndex, float[] vector)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(nodeIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(nodeIndex, _count);
+        ArgumentNullException.ThrowIfNull(vector);
+        if (vector.Length != Dimensions)
+            throw new ArgumentException(
+                $"Vector has {vector.Length} dimensions, expected {Dimensions}.");
+        _vectors[nodeIndex] = vector;
+    }
 }

@@ -1,6 +1,7 @@
 // Copyright (c) Ram Revanur. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using Sharc.Query;
 using Sharc.Views;
 
@@ -31,8 +32,13 @@ public sealed partial class JitQuery
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(k, 0);
         ArgumentNullException.ThrowIfNull(scorer);
 
+        long startTimestamp = Stopwatch.GetTimestamp();
         var reader = Query(columns);
-        return ScoredTopKProcessor.Apply(reader, k, scorer);
+        var result = ScoredTopKProcessor.Apply(reader, k, scorer);
+        double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        var info = result.ExecutionInfo;
+        result.SetExecutionInfo(info with { ElapsedMs = elapsedMs });
+        return result;
     }
 
     /// <summary>
