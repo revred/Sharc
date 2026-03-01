@@ -160,8 +160,8 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
     }
 
     /// <summary>
-    /// Reproduces the Ghost Graph scenario: creating 14 tables in a single transaction
-    /// on a file-created database. This mirrors the Ghost schema DDL.
+    /// Reproduces the Reference Graph scenario: creating 14 tables in a single transaction
+    /// on a file-created database. This mirrors the reference schema DDL.
     /// </summary>
     [Fact]
     public void CreateFile_ManyTablesInOneTx_ShouldWork()
@@ -198,8 +198,8 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
     }
 
     /// <summary>
-    /// CREATE INDEX DDL support is required for Ghost Graph schema.
-    /// The Ghost schema has 9 CREATE INDEX statements that currently throw NotSupportedException.
+    /// CREATE INDEX DDL support is required for Reference Graph schema.
+    /// The reference schema has 9 CREATE INDEX statements that currently throw NotSupportedException.
     /// </summary>
     [Fact]
     public void CreateFile_CreateIndex_ShouldWork()
@@ -236,7 +236,7 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
     [InlineData(8)]
     public void CreateFile_NVerboseTablesInOneTx_ShouldWork(int tableCount)
     {
-        // Long DDL strings (similar to Ghost schema) to trigger page split
+        // Long DDL strings (similar to reference schema) to trigger page split
         var ddls = new[]
         {
             "CREATE TABLE IF NOT EXISTS t1(id INTEGER PRIMARY KEY, fqn TEXT NOT NULL, file TEXT NOT NULL, line_start INTEGER NOT NULL, line_end INTEGER NOT NULL, kind_id INTEGER NOT NULL, in_degree INTEGER NOT NULL DEFAULT 0, out_degree INTEGER NOT NULL DEFAULT 0, blast_radius INTEGER NOT NULL DEFAULT 0, hash TEXT NOT NULL)",
@@ -259,31 +259,31 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
             Assert.NotNull(db.Schema.GetTable($"t{i}"));
     }
 
-    private static readonly string[] GhostDDLs =
+    private static readonly string[] ReferenceDdls =
     [
-        "CREATE TABLE IF NOT EXISTS ghost_node_kinds(kind_id INTEGER PRIMARY KEY, kind_name TEXT NOT NULL, tier TEXT NOT NULL DEFAULT 'scanner')",
-        "CREATE TABLE IF NOT EXISTS ghost_trait_defs(trait_id INTEGER PRIMARY KEY, trait_name TEXT NOT NULL, value_type TEXT NOT NULL, description TEXT)",
-        "CREATE TABLE IF NOT EXISTS ghost_edge_type_defs(edge_type_id INTEGER PRIMARY KEY, edge_name TEXT NOT NULL, direction TEXT NOT NULL DEFAULT 'directed', tier TEXT NOT NULL DEFAULT 'scanner')",
-        "CREATE TABLE IF NOT EXISTS ghost_intent_defs(intent_id INTEGER PRIMARY KEY, intent_name TEXT NOT NULL, description TEXT)",
-        "CREATE TABLE IF NOT EXISTS ghost_nodes(node_id INTEGER PRIMARY KEY, fqn TEXT NOT NULL, file TEXT NOT NULL, line_start INTEGER NOT NULL, line_end INTEGER NOT NULL, kind_id INTEGER NOT NULL, in_degree INTEGER NOT NULL DEFAULT 0, out_degree INTEGER NOT NULL DEFAULT 0, blast_radius INTEGER NOT NULL DEFAULT 0, hash TEXT NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS ghost_edges(edge_id INTEGER PRIMARY KEY, source_node INTEGER NOT NULL, target_node INTEGER NOT NULL, edge_type_id INTEGER NOT NULL, weight REAL NOT NULL DEFAULT 1.0, conditional TEXT, call_freq INTEGER, first_seen TEXT NOT NULL, last_seen TEXT, conf REAL NOT NULL DEFAULT 1.0, tier_src TEXT NOT NULL DEFAULT 'scanner')",
-        "CREATE TABLE IF NOT EXISTS ghost_node_traits(node_id INTEGER NOT NULL, trait_id INTEGER NOT NULL, value TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1.0, confidence REAL NOT NULL DEFAULT 1.0, tier_src TEXT NOT NULL DEFAULT 'scanner', valid_from_sha TEXT NOT NULL DEFAULT '', stale INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (node_id, trait_id))",
-        "CREATE TABLE IF NOT EXISTS ghost_timeline(event_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, event_kind TEXT NOT NULL, trait_name TEXT, old_value TEXT, new_value TEXT, commit_sha TEXT NOT NULL DEFAULT '', version_tag TEXT, timestamp TEXT NOT NULL, inference TEXT, inference_conf REAL, inference_cost INTEGER)",
-        "CREATE TABLE IF NOT EXISTS ghost_snapshots(snap_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, version_tag TEXT NOT NULL, timestamp TEXT NOT NULL, lines INTEGER NOT NULL, cyclomatic INTEGER NOT NULL DEFAULT 0, max_nesting INTEGER NOT NULL DEFAULT 0, in_degree INTEGER NOT NULL DEFAULT 0, out_degree INTEGER NOT NULL DEFAULT 0, blast_radius INTEGER NOT NULL DEFAULT 0, tok_traits INTEGER NOT NULL DEFAULT 0, tok_edges INTEGER NOT NULL DEFAULT 0, tok_source INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS ghost_lineage(child_node INTEGER NOT NULL, parent_node INTEGER NOT NULL, lineage_kind TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, inferred_by TEXT NOT NULL DEFAULT '', version_tag TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', PRIMARY KEY (child_node, parent_node))",
-        "CREATE TABLE IF NOT EXISTS ghost_inference_cache(cache_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, inference_kind TEXT NOT NULL, result_summary TEXT NOT NULL, tokens_spent INTEGER NOT NULL DEFAULT 0, model_used TEXT NOT NULL DEFAULT '', node_hash_at_inference TEXT NOT NULL, current_node_hash TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0, tokens_saved_to_date INTEGER NOT NULL DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS ghost_intent_weights(intent_id INTEGER NOT NULL, trait_id INTEGER NOT NULL, boost_weight REAL NOT NULL DEFAULT 0.0, direction TEXT NOT NULL DEFAULT 'neutral', PRIMARY KEY (intent_id, trait_id))",
-        "CREATE TABLE IF NOT EXISTS ghost_alloc_pairs(allocator_node INTEGER NOT NULL, deallocator_node INTEGER, status TEXT NOT NULL DEFAULT 'unmatched', confidence REAL NOT NULL DEFAULT 1.0, custom_allocator_macro TEXT, ownership_note TEXT NOT NULL DEFAULT '', PRIMARY KEY (allocator_node))",
-        "CREATE TABLE IF NOT EXISTS ghost_warnings(warning_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, severity TEXT NOT NULL, category TEXT NOT NULL, text TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, source TEXT NOT NULL DEFAULT 'scanner')",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_nodes_fqn ON ghost_nodes(fqn)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_nodes_file ON ghost_nodes(file, line_start)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_edges_source ON ghost_edges(source_node, edge_type_id)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_edges_target ON ghost_edges(target_node, edge_type_id)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_traits_node ON ghost_node_traits(node_id)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_timeline_node ON ghost_timeline(node_id, timestamp)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_snapshots_node ON ghost_snapshots(node_id, version_tag)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_warnings_node ON ghost_warnings(node_id)",
-        "CREATE INDEX IF NOT EXISTS idx_ghost_cache_node ON ghost_inference_cache(node_id, stale)",
+        "CREATE TABLE IF NOT EXISTS ref_node_kinds(kind_id INTEGER PRIMARY KEY, kind_name TEXT NOT NULL, tier TEXT NOT NULL DEFAULT 'scanner')",
+        "CREATE TABLE IF NOT EXISTS ref_trait_defs(trait_id INTEGER PRIMARY KEY, trait_name TEXT NOT NULL, value_type TEXT NOT NULL, description TEXT)",
+        "CREATE TABLE IF NOT EXISTS ref_edge_type_defs(edge_type_id INTEGER PRIMARY KEY, edge_name TEXT NOT NULL, direction TEXT NOT NULL DEFAULT 'directed', tier TEXT NOT NULL DEFAULT 'scanner')",
+        "CREATE TABLE IF NOT EXISTS ref_intent_defs(intent_id INTEGER PRIMARY KEY, intent_name TEXT NOT NULL, description TEXT)",
+        "CREATE TABLE IF NOT EXISTS ref_nodes(node_id INTEGER PRIMARY KEY, fqn TEXT NOT NULL, file TEXT NOT NULL, line_start INTEGER NOT NULL, line_end INTEGER NOT NULL, kind_id INTEGER NOT NULL, in_degree INTEGER NOT NULL DEFAULT 0, out_degree INTEGER NOT NULL DEFAULT 0, blast_radius INTEGER NOT NULL DEFAULT 0, hash TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS ref_edges(edge_id INTEGER PRIMARY KEY, source_node INTEGER NOT NULL, target_node INTEGER NOT NULL, edge_type_id INTEGER NOT NULL, weight REAL NOT NULL DEFAULT 1.0, conditional TEXT, call_freq INTEGER, first_seen TEXT NOT NULL, last_seen TEXT, conf REAL NOT NULL DEFAULT 1.0, tier_src TEXT NOT NULL DEFAULT 'scanner')",
+        "CREATE TABLE IF NOT EXISTS ref_node_traits(node_id INTEGER NOT NULL, trait_id INTEGER NOT NULL, value TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1.0, confidence REAL NOT NULL DEFAULT 1.0, tier_src TEXT NOT NULL DEFAULT 'scanner', valid_from_sha TEXT NOT NULL DEFAULT '', stale INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (node_id, trait_id))",
+        "CREATE TABLE IF NOT EXISTS ref_timeline(event_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, event_kind TEXT NOT NULL, trait_name TEXT, old_value TEXT, new_value TEXT, commit_sha TEXT NOT NULL DEFAULT '', version_tag TEXT, timestamp TEXT NOT NULL, inference TEXT, inference_conf REAL, inference_cost INTEGER)",
+        "CREATE TABLE IF NOT EXISTS ref_snapshots(snap_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, version_tag TEXT NOT NULL, timestamp TEXT NOT NULL, lines INTEGER NOT NULL, cyclomatic INTEGER NOT NULL DEFAULT 0, max_nesting INTEGER NOT NULL DEFAULT 0, in_degree INTEGER NOT NULL DEFAULT 0, out_degree INTEGER NOT NULL DEFAULT 0, blast_radius INTEGER NOT NULL DEFAULT 0, tok_traits INTEGER NOT NULL DEFAULT 0, tok_edges INTEGER NOT NULL DEFAULT 0, tok_source INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS ref_lineage(child_node INTEGER NOT NULL, parent_node INTEGER NOT NULL, lineage_kind TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, inferred_by TEXT NOT NULL DEFAULT '', version_tag TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', PRIMARY KEY (child_node, parent_node))",
+        "CREATE TABLE IF NOT EXISTS ref_inference_cache(cache_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, inference_kind TEXT NOT NULL, result_summary TEXT NOT NULL, tokens_spent INTEGER NOT NULL DEFAULT 0, model_used TEXT NOT NULL DEFAULT '', node_hash_at_inference TEXT NOT NULL, current_node_hash TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0, tokens_saved_to_date INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS ref_intent_weights(intent_id INTEGER NOT NULL, trait_id INTEGER NOT NULL, boost_weight REAL NOT NULL DEFAULT 0.0, direction TEXT NOT NULL DEFAULT 'neutral', PRIMARY KEY (intent_id, trait_id))",
+        "CREATE TABLE IF NOT EXISTS ref_alloc_pairs(allocator_node INTEGER NOT NULL, deallocator_node INTEGER, status TEXT NOT NULL DEFAULT 'unmatched', confidence REAL NOT NULL DEFAULT 1.0, custom_allocator_macro TEXT, ownership_note TEXT NOT NULL DEFAULT '', PRIMARY KEY (allocator_node))",
+        "CREATE TABLE IF NOT EXISTS ref_warnings(warning_id INTEGER PRIMARY KEY, node_id INTEGER NOT NULL, severity TEXT NOT NULL, category TEXT NOT NULL, text TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, source TEXT NOT NULL DEFAULT 'scanner')",
+        "CREATE INDEX IF NOT EXISTS idx_ref_nodes_fqn ON ref_nodes(fqn)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_nodes_file ON ref_nodes(file, line_start)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_edges_source ON ref_edges(source_node, edge_type_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_edges_target ON ref_edges(target_node, edge_type_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_traits_node ON ref_node_traits(node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_timeline_node ON ref_timeline(node_id, timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_snapshots_node ON ref_snapshots(node_id, version_tag)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_warnings_node ON ref_warnings(node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ref_cache_node ON ref_inference_cache(node_id, stale)",
     ];
 
     /// <summary>
@@ -302,12 +302,12 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
     [InlineData(19)]
     [InlineData(20)]
     [InlineData(23)]
-    public void CreateFile_GhostDDL_NStatements(int count)
+    public void CreateFile_ReferenceDdl_NStatements(int count)
     {
         using var db = SharcDatabase.Create(_dbPath);
         using var tx = db.BeginTransaction();
-        for (int i = 0; i < count && i < GhostDDLs.Length; i++)
-            tx.Execute(GhostDDLs[i]);
+        for (int i = 0; i < count && i < ReferenceDdls.Length; i++)
+            tx.Execute(ReferenceDdls[i]);
         tx.Commit();
     }
 
@@ -366,37 +366,37 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
     }
 
     /// <summary>
-    /// Real-world regression: full Ghost Graph schema (14 tables + 9 indexes) in a single
+    /// Real-world regression: full Reference Graph schema (14 tables + 9 indexes) in a single
     /// transaction, then insert data into multiple tables, close/reopen, and verify both
-    /// unfiltered and filtered reads work. This mirrors the actual Sharc.Ghost.Scan pipeline.
+    /// unfiltered and filtered reads work. This mirrors the actual scanner pipeline.
     /// The root cause was a B-tree root split on page 1 that copied the 100-byte database
     /// header into the new left page, corrupting it for cursors that read at offset 0.
     /// </summary>
     [Fact]
-    public void CreateFile_FullGhostSchema_InsertAndReopen_FilterWorks()
+    public void CreateFile_FullReferenceSchema_InsertAndReopen_FilterWorks()
     {
-        // Phase 1: Create database with full Ghost schema
+        // Phase 1: Create database with full reference schema
         using (var db = SharcDatabase.Create(_dbPath))
         {
             using (var tx = db.BeginTransaction())
             {
-                foreach (var ddl in GhostDDLs)
+                foreach (var ddl in ReferenceDdls)
                     tx.Execute(ddl);
                 tx.Commit();
             }
 
             // Verify all 14 tables exist
             var schema = db.Schema;
-            Assert.True(schema.Tables.Count >= 14 + 4, // 14 ghost + 4 system tables
+            Assert.True(schema.Tables.Count >= 14 + 4, // 14 reference + 4 system tables
                 $"Expected at least 18 tables, got {schema.Tables.Count}");
 
-            // Phase 2: Insert data into multiple Ghost tables
+            // Phase 2: Insert data into multiple reference tables
             using var writer = SharcWriter.From(db);
 
             // Seed node kinds
             for (int i = 1; i <= 6; i++)
             {
-                writer.Insert("ghost_node_kinds",
+                writer.Insert("ref_node_kinds",
                     ColumnValue.FromInt64(1, i),
                     ColumnValue.Text(2 * 10 + 13, System.Text.Encoding.UTF8.GetBytes($"kind_{i}")),
                     ColumnValue.Text(2 * 10 + 13, System.Text.Encoding.UTF8.GetBytes("scanner")));
@@ -405,7 +405,7 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
             // Seed nodes
             for (int i = 1; i <= 50; i++)
             {
-                writer.Insert("ghost_nodes",
+                writer.Insert("ref_nodes",
                     ColumnValue.FromInt64(1, i),
                     ColumnValue.Text(2 * 10 + 13, System.Text.Encoding.UTF8.GetBytes($"ns::Class{i}::method")),
                     ColumnValue.Text(2 * 10 + 13, System.Text.Encoding.UTF8.GetBytes($"src/file{i % 10}.c")),
@@ -421,7 +421,7 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
             // Seed edges
             for (int i = 1; i <= 80; i++)
             {
-                writer.Insert("ghost_edges",
+                writer.Insert("ref_edges",
                     ColumnValue.FromInt64(1, i),
                     ColumnValue.FromInt64(2, (i % 50) + 1),     // source_node
                     ColumnValue.FromInt64(3, ((i + 7) % 50) + 1), // target_node
@@ -440,26 +440,26 @@ public sealed class CreateDatabaseSchemaTests : IDisposable
         using (var db = SharcDatabase.Open(_dbPath))
         {
             // Unfiltered: count all nodes
-            using var allNodes = db.CreateReader("ghost_nodes");
+            using var allNodes = db.CreateReader("ref_nodes");
             int nodeCount = 0;
             while (allNodes.Read()) nodeCount++;
             Assert.Equal(50, nodeCount);
 
             // Unfiltered: count all edges
-            using var allEdges = db.CreateReader("ghost_edges");
+            using var allEdges = db.CreateReader("ref_edges");
             int edgeCount = 0;
             while (allEdges.Read()) edgeCount++;
             Assert.Equal(80, edgeCount);
 
             // Filtered: find node by id
-            using var filteredNode = db.CreateReader("ghost_nodes",
+            using var filteredNode = db.CreateReader("ref_nodes",
                 FilterStar.Column("node_id").Eq(25L));
             Assert.True(filteredNode.Read());
             Assert.Equal("ns::Class25::method", filteredNode.GetString(1));
             Assert.False(filteredNode.Read());
 
             // Filtered: count node kinds
-            using var kindReader = db.CreateReader("ghost_node_kinds");
+            using var kindReader = db.CreateReader("ref_node_kinds");
             int kindCount = 0;
             while (kindReader.Read()) kindCount++;
             Assert.Equal(6, kindCount);
